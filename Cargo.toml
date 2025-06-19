@@ -1,0 +1,70 @@
+[package]
+name = "picocalc-os-rs"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+reqwest = { version = "0.12.20", features = ["blocking"] }
+
+[features]
+default = ["rp2040"]
+rp2040 = ["embassy-rp/rp2040"]
+rp2350 = ["embassy-rp/_rp235x"]
+trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
+defmt = [
+  "dep:defmt",
+  "panic-probe/print-defmt",
+  "embassy-executor/defmt",
+  "embassy-time/defmt",
+  "embassy-time/defmt-timestamp-uptime",
+  "embassy-rp/defmt",
+  "embassy-sync/defmt",
+  "embedded-graphics/defmt",
+  "embedded-sdmmc/defmt-log",
+  # "bt-hci/defmt",
+  # "cyw43/defmt",
+  # "cyw43-pio/defmt",
+]
+
+[dependencies]
+embassy-executor = { version = "0.7", features = [
+  "arch-cortex-m",
+  "executor-interrupt",
+  "executor-thread",
+  "nightly",
+] }
+embassy-rp = { version = "0.4.0", features = [
+  "critical-section-impl",
+  "time-driver",
+  "intrinsics",
+] }
+embassy-futures = "0.1.0"
+embassy-time = "0.4.0"
+embassy-embedded-hal = "0.3.0"
+embassy-sync = { version = "0.6" }
+trouble-host = { version = "0.1", features = [
+  "derive",
+  "scan",
+], optional = true }
+bt-hci = { version = "0.2", default-features = false, optional = true }
+cyw43 = { version = "0.3.0", features = [
+  "firmware-logs",
+  "bluetooth",
+], optional = true }
+cyw43-pio = { version = "0.3.0", optional = true }
+
+embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+embedded-hal = "0.2.7"
+embedded-hal-async = "1.0.0"
+cortex-m = { version = "0.7.7" }
+cortex-m-rt = "0.7.5"
+panic-probe = "0.3"
+portable-atomic = { version = "1.11", features = ["critical-section"] }
+
+defmt = { version = "0.3", optional = true }
+defmt-rtt = "0.4.2"
+
+embedded-graphics = { version = "0.8.1" }
+embedded-sdmmc = { git = "https://github.com/Be-ing/embedded-sdmmc-rs", branch = "bisync", default-features = false }
+
+static_cell = "2.1.0"
