@@ -1,11 +1,13 @@
-/// handles polling keyboard events and battery levels from mcu over i2c1
-///
+//! handles polling keyboard events and battery levels from mcu over i2c1
+//!
+
+use embassy_futures::join::join;
 use embassy_rp::{
     i2c::{Async, I2c},
     peripherals::I2C1,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Sender};
-use embassy_time::Timer;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Sender, mutex::Mutex};
+use embassy_time::{Duration, Timer};
 
 #[cfg(feature = "defmt")]
 use defmt::info;
@@ -48,9 +50,23 @@ pub async fn peripherals_task(
         }
     }
 
-    loop {
-        read_battery(&mut i2c).await;
+    let i2c: Mutex<NoopRawMutex, I2c<'static, I2C1, Async>> = Mutex::new(i2c);
 
-        read_keyboard_fifo(&mut i2c, &mut keyboard_channel).await;
-    }
+    join(
+        async {
+            loop {
+                Timer::after(Duration::from_secs(10)).await;
+                let mut guard = i2c.lock().await;
+                read_battery(&mut guard).await;
+            }
+        },
+        async {
+            loop {
+                Timer::after(Duration::from_millis(50)).await;
+                let mut guard = i2c.lock().await;
+                read_keyboard_fifo(&mut guard, &mut keyboard_channel).await;
+            }
+        },
+    )
+    .await;
 }
