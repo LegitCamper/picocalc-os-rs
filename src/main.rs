@@ -18,8 +18,8 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::asynchronous::{File, SdCard, ShortFileName, VolumeIdx, VolumeManager};
 use static_cell::StaticCell;
 
-mod keyboard;
-use keyboard::KeyEvent;
+mod peripherals;
+use peripherals::{keyboard::KeyEvent, peripherals_task};
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -36,6 +36,6 @@ async fn main(spawner: Spawner) {
     let config = embassy_rp::i2c::Config::default();
     let bus = embassy_rp::i2c::I2c::new_async(p.I2C1, p.PIN_27, p.PIN_26, Irqs, config);
     spawner
-        .spawn(keyboard::keyboard(bus, keyboard_events.sender()))
+        .spawn(peripherals_task(bus, keyboard_events.sender()))
         .unwrap();
 }

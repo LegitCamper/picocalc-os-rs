@@ -2,30 +2,55 @@ use embassy_rp::{
     i2c::{Async, I2c},
     peripherals::I2C1,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Sender};
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
+    channel::Sender,
+};
 
-const KEYBOARD_ADDR: u8 = 0x1F;
+const REG_ID_KEY: u8 = 0x04;
+const REG_ID_FIF: u8 = 0x09;
 
-pub struct KeyEvent {
-    key: KeyCode,
-    state: KeyState,
-}
+const KEY_CAPSLOCK: u8 = 1 << 5;
+const KEY_NUMLOCK: u8 = 1 << 6;
+const KEY_COUNT_MASK: u8 = 0x1F; // 0x1F == 31
 
-#[embassy_executor::task]
-pub async fn keyboard(
-    mut i2c: I2c<'static, I2C1, Async>,
-    channel: Sender<'static, NoopRawMutex, KeyEvent, 10>,
+pub async fn read_keyboard_fifo(
+    i2c: &mut I2c<'static, I2C1, Async>,
+    channel: &mut Sender<'static, NoopRawMutex, KeyEvent, 10>,
 ) {
-    embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+    let mut key_status = [0_u8; 1];
 
-    let mut res = [0_u8; 2];
-    if i2c.read_async(KEYBOARD_ADDR, &mut res).await.is_ok() {
-        if let Ok(state) = KeyState::try_from(res[0]) {
-            if let Ok(key) = KeyCode::try_from(res[1]) {
-                let _ = channel.try_send(KeyEvent { key, state });
+    if i2c
+        .write_read_async(super::MCU_ADDR, [REG_ID_KEY], &mut key_status)
+        .await
+        .is_ok()
+    {
+        // TODO: use caps & num lock
+        let caps = key_status[0] & KEY_CAPSLOCK == KEY_CAPSLOCK;
+        let num = key_status[0] & KEY_NUMLOCK == KEY_NUMLOCK;
+        let fifo_count = key_status[0] & KEY_COUNT_MASK;
+
+        if fifo_count >= 1 {
+            let mut event = [0_u8; 2];
+
+            if i2c
+                .write_read_async(super::MCU_ADDR, [REG_ID_FIF], &mut event)
+                .await
+                .is_ok()
+            {
+                if let Ok(state) = KeyState::try_from(event[0]) {
+                    if let Ok(key) = KeyCode::try_from(event[1]) {
+                        let _ = channel.try_send(KeyEvent { key, state });
+                    }
+                }
             }
         }
     }
+}
+
+pub struct KeyEvent {
+    pub key: KeyCode,
+    pub state: KeyState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
