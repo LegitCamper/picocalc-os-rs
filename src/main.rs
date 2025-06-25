@@ -39,11 +39,6 @@ async fn main(spawner: Spawner) {
     static KEYBOARD_EVENTS: StaticCell<Channel<NoopRawMutex, KeyEvent, 10>> = StaticCell::new();
     let keyboard_events = KEYBOARD_EVENTS.init(Channel::new());
 
-    loop {
-        info!("im alive");
-        Timer::after_secs(1).await;
-    }
-
     // configure keyboard event handler
     let config = i2c::Config::default();
     let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
@@ -53,9 +48,15 @@ async fn main(spawner: Spawner) {
 
     // configure display handler
     let mut config = spi::Config::default();
-    config.frequency = 10_000_000;
+    config.frequency = 16_000_000;
     let spi1 = spi::Spi::new_blocking(p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, config);
     spawner
         .spawn(display_task(spi1, p.PIN_13, p.PIN_14, p.PIN_15))
         .unwrap();
+
+    let receiver = keyboard_events.receiver();
+    loop {
+        let key = receiver.receive().await;
+        info!("got key: {}", key.key as u8);
+    }
 }
