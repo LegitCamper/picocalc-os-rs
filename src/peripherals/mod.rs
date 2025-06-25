@@ -1,4 +1,4 @@
-//! handles polling keyboard events and battery levels from mcu over i2c1
+//! handles all the peripherals exposed by mcu through i2c (keyboard & battery registers)
 //!
 
 use embassy_futures::join::join;

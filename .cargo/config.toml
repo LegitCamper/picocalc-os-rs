@@ -1,9 +1,10 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip RP2040"
+runner = "probe-rs run --chip RP2350"
 # runner = "elf2uf2-rs -d"
 
 [build]
-target = "thumbv6m-none-eabi" # Cortex-M0 and Cortex-M0+
+# target = "thumbv6m-none-eabi" # rp2040: Cortex-M0 and Cortex-M0+
+target = "thumbv8m.main-none-eabihf" # rp235x: Cortex-M33
 
 [env]
 DEFMT_LOG = "info"

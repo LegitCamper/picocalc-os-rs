@@ -3,13 +3,17 @@ name = "picocalc-os-rs"
 version = "0.1.0"
 edition = "2024"
 
-[build-dependencies]
-reqwest = { version = "0.12.20", features = ["blocking"] }
+[profile.release]
+debug = 2
+
+[profile.dev]
+lto = true
+opt-level = "z"
 
 [features]
-default = ["rp2040"]
+default = ["rp235x", "defmt"]
 rp2040 = ["embassy-rp/rp2040"]
-rp2350 = ["embassy-rp/_rp235x"]
+rp235x = ["embassy-rp/rp235xb"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 defmt = [
   "dep:defmt",
@@ -35,13 +39,14 @@ embassy-executor = { version = "0.7", features = [
 ] }
 embassy-rp = { version = "0.4.0", features = [
   "critical-section-impl",
+  "unstable-pac",
   "time-driver",
-  "intrinsics",
+  "binary-info",
 ] }
-embassy-futures = "0.1.0"
+embassy-futures = "0.1.1"
 embassy-time = "0.4.0"
 embassy-embedded-hal = "0.3.0"
-embassy-sync = { version = "0.6" }
+embassy-sync = { version = "0.7" }
 trouble-host = { version = "0.1", features = [
   "derive",
   "scan",
@@ -66,5 +71,6 @@ defmt-rtt = "0.4.2"
 
 embedded-graphics = { version = "0.8.1" }
 embedded-sdmmc = { git = "https://github.com/Be-ing/embedded-sdmmc-rs", branch = "bisync", default-features = false }
+st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs" }
 
-static_cell = "2.1.0"
+static_cell = "2.1.1"

@@ -7,10 +7,15 @@ use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
 use embassy_executor::Spawner;
-use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::I2C1;
-use embassy_rp::spi::{self, Spi};
-use embassy_rp::{bind_interrupts, i2c};
+use embassy_rp::spi::Spi;
+use embassy_rp::{
+    bind_interrupts,
+    gpio::{Level, Output},
+    i2c,
+    i2c::I2c,
+    spi,
+};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Timer;
@@ -20,6 +25,8 @@ use static_cell::StaticCell;
 
 mod peripherals;
 use peripherals::{keyboard::KeyEvent, peripherals_task};
+mod display;
+use display::display_task;
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -32,10 +39,23 @@ async fn main(spawner: Spawner) {
     static KEYBOARD_EVENTS: StaticCell<Channel<NoopRawMutex, KeyEvent, 10>> = StaticCell::new();
     let keyboard_events = KEYBOARD_EVENTS.init(Channel::new());
 
+    loop {
+        info!("im alive");
+        Timer::after_secs(1).await;
+    }
+
     // configure keyboard event handler
-    let config = embassy_rp::i2c::Config::default();
-    let bus = embassy_rp::i2c::I2c::new_async(p.I2C1, p.PIN_27, p.PIN_26, Irqs, config);
+    let config = i2c::Config::default();
+    let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
     spawner
-        .spawn(peripherals_task(bus, keyboard_events.sender()))
+        .spawn(peripherals_task(i2c1, keyboard_events.sender()))
+        .unwrap();
+
+    // configure display handler
+    let mut config = spi::Config::default();
+    config.frequency = 10_000_000;
+    let spi1 = spi::Spi::new_blocking(p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, config);
+    spawner
+        .spawn(display_task(spi1, p.PIN_13, p.PIN_14, p.PIN_15))
         .unwrap();
 }
