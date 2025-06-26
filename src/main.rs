@@ -40,23 +40,24 @@ async fn main(spawner: Spawner) {
     let keyboard_events = KEYBOARD_EVENTS.init(Channel::new());
 
     // configure keyboard event handler
-    let config = i2c::Config::default();
+    let mut config = i2c::Config::default();
+    config.frequency = 100_000;
     let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
     spawner
         .spawn(peripherals_task(i2c1, keyboard_events.sender()))
         .unwrap();
 
-    // configure display handler
-    let mut config = spi::Config::default();
-    config.frequency = 16_000_000;
-    let spi1 = spi::Spi::new_blocking(p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, config);
-    spawner
-        .spawn(display_task(spi1, p.PIN_13, p.PIN_14, p.PIN_15))
-        .unwrap();
+    // // configure display handler
+    // let mut config = spi::Config::default();
+    // config.frequency = 16_000_000;
+    // let spi1 = spi::Spi::new_blocking(p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, config);
+    // spawner
+    //     .spawn(display_task(spi1, p.PIN_13, p.PIN_14, p.PIN_15))
+    //     .unwrap();
 
     let receiver = keyboard_events.receiver();
     loop {
         let key = receiver.receive().await;
-        info!("got key: {}", key.key as u8);
+        info!("got key: {}", key);
     }
 }

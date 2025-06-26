@@ -1,3 +1,4 @@
+use defmt::{info, warn};
 use embassy_rp::{
     i2c::{Async, I2c},
     peripherals::I2C1,
@@ -7,8 +8,11 @@ use embassy_sync::{
     channel::Sender,
 };
 
+const REG_ID_CFG: u8 = 0x02;
 const REG_ID_KEY: u8 = 0x04;
 const REG_ID_FIF: u8 = 0x09;
+// const REG_ID_C64_MTX: u8 = 0x0c;
+// const REG_ID_C64_JS: u8 = 0x0d;
 
 const KEY_CAPSLOCK: u8 = 1 << 5;
 const KEY_NUMLOCK: u8 = 1 << 6;
@@ -40,7 +44,9 @@ pub async fn read_keyboard_fifo(
             {
                 if let Ok(state) = KeyState::try_from(event[0]) {
                     if let Ok(key) = KeyCode::try_from(event[1]) {
-                        let _ = channel.try_send(KeyEvent { key, state });
+                        channel
+                            .try_send(KeyEvent { key, state })
+                            .expect("Failed to push key");
                     }
                 }
             }
@@ -48,11 +54,27 @@ pub async fn read_keyboard_fifo(
     }
 }
 
+const REG_ID_DEB: u8 = 0x06;
+const REG_ID_FRQ: u8 = 0x07;
+
+pub async fn configure_keyboard(i2c: &mut I2c<'static, I2C1, Async>, debounce: u8, poll_freq: u8) {
+    i2c.write_read_async(super::MCU_ADDR, [REG_ID_DEB], &mut [debounce])
+        .await
+        .unwrap();
+
+    i2c.write_read_async(super::MCU_ADDR, [REG_ID_FRQ], &mut [poll_freq])
+        .await
+        .unwrap();
+}
+
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct KeyEvent {
     pub key: KeyCode,
     pub state: KeyState,
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyState {
     Idle = 0,
@@ -75,6 +97,7 @@ impl TryFrom<u8> for KeyState {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyCode {
     // Joystick
@@ -132,6 +155,104 @@ pub enum KeyCode {
     F8 = 0x88,
     F9 = 0x89,
     F10 = 0x90,
+
+    // Printable ASCII (0x20 - 0x7F)
+    Space = 0x20,
+    Exclamation = 0x21, // !
+    Quote = 0x22,       // "
+    Hash = 0x23,        // #
+    Dollar = 0x24,      // $
+    Percent = 0x25,     // %
+    Ampersand = 0x26,   // &
+    Apostrophe = 0x27,  // '
+    LeftParen = 0x28,   // (
+    RightParen = 0x29,  // )
+    Asterisk = 0x2A,    // *
+    Plus = 0x2B,        // +
+    Comma = 0x2C,       // ,
+    Minus = 0x2D,       // -
+    Period = 0x2E,      // .
+    Slash = 0x2F,       // /
+    Num0 = 0x30,
+    Num1 = 0x31,
+    Num2 = 0x32,
+    Num3 = 0x33,
+    Num4 = 0x34,
+    Num5 = 0x35,
+    Num6 = 0x36,
+    Num7 = 0x37,
+    Num8 = 0x38,
+    Num9 = 0x39,
+    Colon = 0x3A,
+    Semicolon = 0x3B,
+    LessThan = 0x3C,
+    Equal = 0x3D,
+    GreaterThan = 0x3E,
+    Question = 0x3F,
+    At = 0x40,
+    A = 0x41,
+    B = 0x42,
+    C = 0x43,
+    D = 0x44,
+    E = 0x45,
+    F = 0x46,
+    G = 0x47,
+    H = 0x48,
+    I = 0x49,
+    J = 0x4A,
+    K = 0x4B,
+    L = 0x4C,
+    M = 0x4D,
+    N = 0x4E,
+    O = 0x4F,
+    P = 0x50,
+    Q = 0x51,
+    R = 0x52,
+    S = 0x53,
+    T = 0x54,
+    U = 0x55,
+    V = 0x56,
+    W = 0x57,
+    X = 0x58,
+    Y = 0x59,
+    Z = 0x5A,
+    LeftBracket = 0x5B,
+    Backslash = 0x5C,
+    RightBracket = 0x5D,
+    Caret = 0x5E,
+    Underscore = 0x5F,
+    Backtick = 0x60,
+    a = 0x61,
+    b = 0x62,
+    c = 0x63,
+    d = 0x64,
+    e = 0x65,
+    f = 0x66,
+    g = 0x67,
+    h = 0x68,
+    i = 0x69,
+    j = 0x6A,
+    k = 0x6B,
+    l = 0x6C,
+    m = 0x6D,
+    n = 0x6E,
+    o = 0x6F,
+    p = 0x70,
+    q = 0x71,
+    r = 0x72,
+    s = 0x73,
+    t = 0x74,
+    u = 0x75,
+    v = 0x76,
+    w = 0x77,
+    x = 0x78,
+    y = 0x79,
+    z = 0x7A,
+    LeftBrace = 0x7B,
+    Pipe = 0x7C,
+    RightBrace = 0x7D,
+    Tilde = 0x7E,
+    Delete = 0x7F,
 }
 
 impl TryFrom<u8> for KeyCode {
@@ -180,6 +301,8 @@ impl TryFrom<u8> for KeyCode {
             0x88 => Ok(F8),
             0x89 => Ok(F9),
             0x90 => Ok(F10),
+            // ASCII 0x20 to 0x7F
+            0x20..=0x7F => unsafe { Ok(core::mem::transmute(value)) },
             _ => Err(()),
         }
     }
