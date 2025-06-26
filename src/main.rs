@@ -22,6 +22,7 @@ use embassy_time::Timer;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::asynchronous::{File, SdCard, ShortFileName, VolumeIdx, VolumeManager};
 use static_cell::StaticCell;
+use talc::*;
 
 mod peripherals;
 use peripherals::{keyboard::KeyEvent, peripherals_task};
@@ -31,6 +32,16 @@ use display::display_task;
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
 });
+
+static mut ARENA: [u8; 400_000] = [0; 400_000];
+
+#[global_allocator]
+static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> = Talc::new(unsafe {
+    // if we're in a hosted environment, the Rust runtime may allocate before
+    // main() is called, so we need to initialize the arena automatically
+    ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut()))
+})
+.lock();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {

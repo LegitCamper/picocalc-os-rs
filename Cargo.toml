@@ -65,6 +65,8 @@ cortex-m = { version = "0.7.7" }
 cortex-m-rt = "0.7.5"
 panic-probe = "0.3"
 portable-atomic = { version = "1.11", features = ["critical-section"] }
+static_cell = "2.1.1"
+talc = "4.4.3"
 
 defmt = { version = "0.3", optional = true }
 defmt-rtt = "0.4.2"
@@ -73,5 +75,9 @@ embedded-graphics = { version = "0.8.1" }
 embedded-sdmmc = { git = "https://github.com/Be-ing/embedded-sdmmc-rs", branch = "bisync", default-features = false }
 # st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs" }
 st7365p-lcd = { path = "../ST7365P-lcd-rs" }
+mousefood = "0.2.1"
+ratatui = { version = "0.30.0-alpha.4", default-features = false }
+spin = "0.10.0"
 
-static_cell = "2.1.1"
+[patch.crates-io]
+mousefood = { git = "https://github.com/j-g00da/mousefood" }

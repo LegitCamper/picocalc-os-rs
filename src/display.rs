@@ -8,9 +8,11 @@ use embedded_graphics::{
     Drawable, Pixel,
     pixelcolor::{Rgb565, raw::RawU16},
     prelude::{DrawTarget, OriginDimensions, Point, Primitive, RawData, RgbColor, Size},
-    primitives::{PrimitiveStyle, Rectangle},
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
+use mousefood::prelude::*;
+use ratatui::{Frame, Terminal, widgets::Paragraph};
 use st7365p_lcd::{Orientation, ST7365P};
 
 #[embassy_executor::task]
@@ -26,24 +28,39 @@ pub async fn display_task(
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
         true,
-        false,
+        true,
         320,
         320,
     );
+    display.set_offset(0, 0);
     display.init(&mut Delay).unwrap();
-    display.set_orientation(&Orientation::Landscape).unwrap();
-    let mut virtual_display = VirtualDisplay::new(display, 320 / 2, 320 / 2);
+    display.set_orientation(&Orientation::Portrait).unwrap();
+    display.set_address_window(0, 0, 319, 319).unwrap();
 
-    let thin_stroke = PrimitiveStyle::with_stroke(Rgb565::RED, 20);
+    // Rectangle::new(Point::new(0, 0), Size::new(1, 1))
+    //     .draw_styled(&PrimitiveStyle::with_fill(Rgb565::GREEN), &mut display)
+    //     .unwrap();
 
-    Rectangle::new(Point::new(10, 10), Size::new(100, 100))
-        .into_styled(thin_stroke)
-        .draw(&mut virtual_display)
-        .unwrap();
+    // Rectangle::new(Point::new(319, 319), Size::new(1, 1))
+    //     .draw_styled(&PrimitiveStyle::with_fill(Rgb565::GREEN), &mut display)
+    //     .unwrap();
+
+    let mut virtual_display = VirtualDisplay::new(display, 320, 320);
+
+    let backend = EmbeddedBackend::new(&mut virtual_display, EmbeddedBackendConfig::default());
+    let mut terminal = Terminal::new(backend).unwrap();
 
     loop {
-        Timer::after_millis(500).await;
+        terminal.draw(draw).unwrap();
     }
+    // loop {
+    //     Timer::after_millis(100).await
+    // }
+}
+
+fn draw(frame: &mut Frame) {
+    let greeting = Paragraph::new("Hello World!");
+    frame.render_widget(greeting, frame.area());
 }
 
 /// simple abstraction over real display & resolution to reduce frame buffer size
@@ -65,13 +82,13 @@ impl VirtualDisplay {
             Output<'static>,
             Output<'static>,
         >,
-        new_width: u32,
-        new_height: u32,
+        width: u32,
+        height: u32,
     ) -> Self {
         Self {
             display,
-            width: new_width,
-            height: new_height,
+            width: width / 2,
+            height: height / 2,
         }
     }
 }
@@ -85,22 +102,15 @@ impl DrawTarget for VirtualDisplay {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(coord, color) in pixels.into_iter() {
-            // Check bounds on the *virtual* (already reduced) resolution
-            if coord.x >= 0
-                && coord.y >= 0
-                && coord.x < self.width as i32
-                && coord.y < self.height as i32
-            {
-                let px = coord.x as u16 * 2;
-                let py = coord.y as u16 * 2;
-                let raw_color = RawU16::from(color).into_inner();
+            let px = coord.x as u16 * 2;
+            let py = coord.y as u16 * 2;
+            let raw_color = RawU16::from(color).into_inner();
 
-                // Draw the 2x2 block on the underlying hardware
-                self.display.set_pixel(px, py, raw_color)?;
-                self.display.set_pixel(px + 1, py, raw_color)?;
-                self.display.set_pixel(px, py + 1, raw_color)?;
-                self.display.set_pixel(px + 1, py + 1, raw_color)?;
-            }
+            // Draw the 2x2 block on the underlying hardware
+            self.display.set_pixel(px, py, raw_color)?;
+            self.display.set_pixel(px + 1, py, raw_color)?;
+            self.display.set_pixel(px, py + 1, raw_color)?;
+            self.display.set_pixel(px + 1, py + 1, raw_color)?;
         }
         Ok(())
     }
