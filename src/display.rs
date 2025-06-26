@@ -12,8 +12,12 @@ use embedded_graphics::{
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use mousefood::prelude::*;
-use ratatui::{Frame, Terminal, widgets::Paragraph};
-use st7365p_lcd::{Orientation, ST7365P};
+use ratatui::{
+    Frame, Terminal,
+    style::{Color, Style},
+    widgets::Paragraph,
+};
+use st7365p_lcd::ST7365P;
 
 #[embassy_executor::task]
 pub async fn display_task(
@@ -27,7 +31,7 @@ pub async fn display_task(
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
-        true,
+        false,
         true,
         320,
         320,
@@ -50,7 +54,7 @@ pub async fn display_task(
 }
 
 fn draw(frame: &mut Frame) {
-    let greeting = Paragraph::new("Hello World!\nLine2");
+    let greeting = Paragraph::new("Hello World!\nLine2").style(Style::new().red());
     frame.render_widget(greeting, frame.area());
 }
 
