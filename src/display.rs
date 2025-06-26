@@ -32,18 +32,9 @@ pub async fn display_task(
         320,
         320,
     );
-    display.set_offset(0, 0);
     display.init(&mut Delay).unwrap();
-    display.set_orientation(&Orientation::Portrait).unwrap();
     display.set_address_window(0, 0, 319, 319).unwrap();
-
-    // Rectangle::new(Point::new(0, 0), Size::new(1, 1))
-    //     .draw_styled(&PrimitiveStyle::with_fill(Rgb565::GREEN), &mut display)
-    //     .unwrap();
-
-    // Rectangle::new(Point::new(319, 319), Size::new(1, 1))
-    //     .draw_styled(&PrimitiveStyle::with_fill(Rgb565::GREEN), &mut display)
-    //     .unwrap();
+    display.set_custom_orientation(0x40).unwrap(); // inverts X axis (reverts the natural mirroring)
 
     let mut virtual_display = VirtualDisplay::new(display, 320, 320);
 
@@ -53,13 +44,13 @@ pub async fn display_task(
     loop {
         terminal.draw(draw).unwrap();
     }
-    // loop {
-    //     Timer::after_millis(100).await
-    // }
+    loop {
+        Timer::after_millis(100).await
+    }
 }
 
 fn draw(frame: &mut Frame) {
-    let greeting = Paragraph::new("Hello World!");
+    let greeting = Paragraph::new("Hello World!\nLine2");
     frame.render_widget(greeting, frame.area());
 }
 
