@@ -4,12 +4,14 @@ use embassy_rp::{
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Blocking, Spi},
 };
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Instant, Timer};
 use embedded_graphics::{
     Drawable, Pixel,
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::{Rgb565, raw::RawU16},
     prelude::{DrawTarget, OriginDimensions, Point, Primitive, RawData, RgbColor, Size},
-    primitives::{PrimitiveStyle, Rectangle},
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
+    text::{Text, TextStyle},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::{FrameBuffer, Orientation, ST7365P};
@@ -21,15 +23,14 @@ pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
-        true,
         false,
+        true,
         320,
         320,
     );
     display.init(&mut Delay).await.unwrap();
-    display.init(&mut Delay).await.unwrap();
-    display.set_address_window(0, 0, 319, 319).await.unwrap();
-    display.set_custom_orientation(0x40).await.unwrap(); // inverts X axis (reverts the natural mirroring)
+    display.set_custom_orientation(0x40).await.unwrap();
+
     let mut framebuffer: FrameBuffer<
         320,
         320,
@@ -38,16 +39,35 @@ pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_
         Output<'_>,
     > = FrameBuffer::new(display);
 
-    let thin_stroke = PrimitiveStyle::with_stroke(Rgb565::RED, 20);
+    Text::new(
+        "PicoCalc Test\nLine 2\n Line 3 - and 1/2",
+        Point { x: 100, y: 100 },
+        MonoTextStyle::new(&FONT_6X10, Rgb565::BLUE),
+    )
+    .draw(&mut framebuffer)
+    .unwrap();
 
-    Rectangle::new(Point::new(10, 10), Size::new(100, 100))
-        .into_styled(thin_stroke)
-        .draw(&mut framebuffer)
+    Rectangle::new(Point::new(0, 0), Size::new(50, 50))
+        .draw_styled(
+            &PrimitiveStyle::with_stroke(Rgb565::RED, 10),
+            &mut framebuffer,
+        )
+        .unwrap();
+
+    Rectangle::new(Point::new(0, 100), Size::new(50, 50))
+        .draw_styled(
+            &PrimitiveStyle::with_stroke(Rgb565::RED, 10),
+            &mut framebuffer,
+        )
         .unwrap();
 
     loop {
         Timer::after_millis(500).await;
-        info!("drawing");
+        let start = Instant::now();
         framebuffer.draw().await.unwrap();
+        info!(
+            "Took {}ms to write framebuffer to screen",
+            Instant::now().duration_since(start).as_millis()
+        );
     }
 }
