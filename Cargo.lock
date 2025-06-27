@@ -1357,8 +1357,10 @@ dependencies = [
  "embedded-sdmmc",
  "panic-probe",
  "portable-atomic",
+ "spin",
  "st7365p-lcd",
  "static_cell",
+ "talc",
  "trouble-host",
 ]
 
@@ -1728,12 +1730,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
 name = "st7365p-lcd"
 version = "0.10.0"
-source = "git+https://github.com/legitcamper/st7365p-lcd-rs#d751e8d30f1a3f964ffe05e4bb16f82112fbefce"
 dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "nb 1.1.0",
 ]
 
@@ -1790,6 +1801,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "talc"
+version = "4.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3ae828aa394de34c7de08f522d1b86bd1c182c668d27da69caadda00590f26d"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
