@@ -1,26 +1,25 @@
 //! handles all the peripherals exposed by mcu through i2c (keyboard & battery registers)
 //!
 
-use embassy_futures::join::join;
 use embassy_rp::{
     i2c::{Async, I2c},
     peripherals::I2C1,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Sender, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::NoopRawMutex, channel::Sender, lazy_lock::LazyLock, mutex::Mutex,
+};
 use embassy_time::{Duration, Timer};
-
-#[cfg(feature = "defmt")]
-use defmt::info;
 
 pub mod keyboard;
 use keyboard::{KeyCode, KeyEvent, KeyState};
-mod battery;
-pub use battery::BATTERY_PCT;
-use battery::read_battery;
 
 use crate::peripherals::keyboard::{configure_keyboard, read_keyboard_fifo};
 
 const MCU_ADDR: u8 = 0x1F;
+
+type I2CBUS = I2c<'static, I2C1, Async>;
+pub static PERIPHERAL_BUS: LazyLock<Mutex<NoopRawMutex, Option<I2CBUS>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 const REG_ID_VER: u8 = 0x01;
 const REG_ID_RST: u8 = 0x08;
@@ -28,44 +27,80 @@ const REG_ID_INT: u8 = 0x03;
 
 #[embassy_executor::task]
 pub async fn peripherals_task(
-    mut i2c: I2c<'static, I2C1, Async>,
+    i2c: I2CBUS,
     mut keyboard_channel: Sender<'static, NoopRawMutex, KeyEvent, 10>,
 ) {
     Timer::after(embassy_time::Duration::from_millis(100)).await;
 
-    #[cfg(feature = "defmt")]
-    {
-        let mut ver = [0_u8; 1];
-        if let Ok(_) = i2c.write_read_async(MCU_ADDR, [REG_ID_VER], &mut ver).await {
-            info!("stm32 firmware version: v{}", ver[0]);
-        }
-    }
+    PERIPHERAL_BUS.get().lock().await.replace(i2c);
 
-    let i2c: Mutex<NoopRawMutex, I2c<'static, I2C1, Async>> = Mutex::new(i2c);
-    let mut guard = i2c.lock().await;
-
-    configure_keyboard(&mut guard, 200, 100).await;
-    lcd_backlight(&mut guard, 255).await;
-    key_backlight(&mut guard, 0).await;
+    configure_keyboard(200, 100).await;
+    set_lcd_backlight(255).await;
+    set_key_backlight(0).await;
 
     loop {
         Timer::after(Duration::from_millis(200)).await;
-        read_keyboard_fifo(&mut guard, &mut keyboard_channel).await;
+        read_keyboard_fifo(&mut keyboard_channel).await;
     }
 }
 
-const REG_ID_BKL: u8 = 0x05;
+/// return major & minor mcu version
+async fn get_version() -> (u8, u8) {
+    let mut i2c = PERIPHERAL_BUS.get().lock().await;
+    let i2c = i2c.as_mut().unwrap();
 
-pub async fn lcd_backlight(i2c: &mut I2c<'static, I2C1, Async>, brightness: u8) {
-    i2c.write_read_async(MCU_ADDR, [REG_ID_BKL], &mut [brightness])
-        .await
-        .unwrap();
+    let mut ver = [0_u8; 1];
+    let _ = i2c.write_read_async(MCU_ADDR, [REG_ID_VER], &mut ver).await;
+
+    (ver[0] >> 4, ver[0] & 0x0F)
+}
+
+const REG_ID_BKL: u8 = 0x05;
+pub async fn set_lcd_backlight(brightness: u8) {
+    let mut i2c = PERIPHERAL_BUS.get().lock().await;
+    let i2c = i2c.as_mut().unwrap();
+
+    let _ = i2c
+        .write_read_async(MCU_ADDR, [REG_ID_BKL], &mut [brightness])
+        .await;
+}
+pub async fn get_lcd_backlight() -> u8 {
+    let mut i2c = PERIPHERAL_BUS.get().lock().await;
+    let i2c = i2c.as_mut().unwrap();
+
+    let mut buf = [0_u8; 2];
+
+    let _ = i2c.write_read_async(MCU_ADDR, [REG_ID_BKL], &mut buf).await;
+    buf[1]
 }
 
 const REG_ID_BK2: u8 = 0x0A;
+pub async fn set_key_backlight(brightness: u8) {
+    let mut i2c = PERIPHERAL_BUS.get().lock().await;
+    let i2c = i2c.as_mut().unwrap();
 
-pub async fn key_backlight(i2c: &mut I2c<'static, I2C1, Async>, brightness: u8) {
-    i2c.write_read_async(MCU_ADDR, [REG_ID_BK2], &mut [brightness])
-        .await
-        .unwrap();
+    let _ = i2c
+        .write_read_async(MCU_ADDR, [REG_ID_BK2], &mut [brightness])
+        .await;
+}
+pub async fn get_key_backlight() -> u8 {
+    let mut i2c = PERIPHERAL_BUS.get().lock().await;
+    let i2c = i2c.as_mut().unwrap();
+
+    let mut buf = [0_u8; 2];
+
+    let _ = i2c.write_read_async(MCU_ADDR, [REG_ID_BK2], &mut buf).await;
+    buf[1]
+}
+
+const REG_ID_BAT: u8 = 0x0b;
+pub async fn get_battery() -> u8 {
+    let mut i2c = PERIPHERAL_BUS.get().lock().await;
+    let i2c = i2c.as_mut().unwrap();
+
+    let mut buf = [0_u8; 2];
+
+    let _ = i2c.write_read_async(MCU_ADDR, [REG_ID_BAT], &mut buf).await;
+
+    buf[1]
 }

@@ -54,10 +54,4 @@ async fn main(spawner: Spawner) {
     // spawner
     //     .spawn(display_task(spi1, p.PIN_13, p.PIN_14, p.PIN_15))
     //     .unwrap();
-
-    let receiver = keyboard_events.receiver();
-    loop {
-        let key = receiver.receive().await;
-        info!("got key: {}", key);
-    }
 }
