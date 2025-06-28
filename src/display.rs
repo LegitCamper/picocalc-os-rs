@@ -7,11 +7,12 @@ use embassy_rp::{
 use embassy_time::{Delay, Instant, Timer};
 use embedded_graphics::{
     Drawable, Pixel,
+    geometry::Dimensions,
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::{Rgb565, raw::RawU16},
-    prelude::{DrawTarget, OriginDimensions, Point, Primitive, RawData, RgbColor, Size},
+    prelude::{DrawTarget, OriginDimensions, Point, Primitive, RawData, RgbColor, Size, WebColors},
     primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
-    text::{Text, TextStyle},
+    text::{Alignment, Text, TextStyle},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::{FrameBuffer, Orientation, ST7365P};
@@ -19,7 +20,7 @@ use st7365p_lcd::{FrameBuffer, Orientation, ST7365P};
 #[embassy_executor::task]
 pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_14, reset: PIN_15) {
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
-    let mut display = ST7365P::new(
+    let display = ST7365P::new(
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
@@ -28,9 +29,6 @@ pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_
         320,
         320,
     );
-    display.init(&mut Delay).await.unwrap();
-    display.set_custom_orientation(0x40).await.unwrap();
-
     let mut framebuffer: FrameBuffer<
         320,
         320,
@@ -39,35 +37,39 @@ pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_
         Output<'_>,
     > = FrameBuffer::new(display);
 
-    Text::new(
-        "PicoCalc Test\nLine 2\n Line 3 - and 1/2",
-        Point { x: 100, y: 100 },
-        MonoTextStyle::new(&FONT_6X10, Rgb565::BLUE),
+    framebuffer.init(&mut Delay).await.unwrap();
+    framebuffer.display.set_offset(0, 0);
+    framebuffer
+        .display
+        .set_custom_orientation(0x60)
+        .await
+        .unwrap();
+
+    let t_style = MonoTextStyle::new(&FONT_6X10, Rgb565::BLUE);
+
+    Text::with_alignment(
+        "0, 0\n new line",
+        Point::new(0, 0),
+        t_style,
+        Alignment::Right,
+    )
+    .draw(&mut framebuffer)
+    .unwrap();
+    Text::new("319, 319", Point { x: 320, y: 300 }, t_style)
+        .draw(&mut framebuffer)
+        .unwrap();
+
+    Text::with_alignment(
+        "160, 160",
+        framebuffer.bounding_box().center(),
+        t_style,
+        Alignment::Center,
     )
     .draw(&mut framebuffer)
     .unwrap();
 
-    Rectangle::new(Point::new(0, 0), Size::new(50, 50))
-        .draw_styled(
-            &PrimitiveStyle::with_stroke(Rgb565::RED, 10),
-            &mut framebuffer,
-        )
-        .unwrap();
-
-    Rectangle::new(Point::new(0, 100), Size::new(50, 50))
-        .draw_styled(
-            &PrimitiveStyle::with_stroke(Rgb565::RED, 10),
-            &mut framebuffer,
-        )
-        .unwrap();
-
     loop {
-        Timer::after_millis(500).await;
-        let start = Instant::now();
         framebuffer.draw().await.unwrap();
-        info!(
-            "Took {}ms to write framebuffer to screen",
-            Instant::now().duration_since(start).as_millis()
-        );
+        Timer::after_millis(500).await;
     }
 }
