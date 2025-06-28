@@ -1,4 +1,5 @@
 #![feature(impl_trait_in_assoc_type)]
+#![feature(ascii_char)]
 #![no_std]
 #![no_main]
 
