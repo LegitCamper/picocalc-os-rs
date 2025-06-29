@@ -75,12 +75,21 @@ impl TextBuffer {
     pub fn draw<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D) {
         let style = MonoTextStyle::new(&FONT, COLOR);
 
+        let char_width = FONT.character_size.width as i32;
+        let char_height = FONT.character_size.height as i32;
+
+        let matrix_width = SCREEN_COLS as i32 * char_width;
+        let matrix_height = SCREEN_ROWS as i32 * char_height;
+
+        let offset_x = (SCREEN_WIDTH as i32 - matrix_width) / 2;
+        let offset_y = (SCREEN_HEIGHT as i32 - matrix_height) / 2;
+
         for (i, row) in self.grid.iter().enumerate() {
             for (j, col) in row[1..].iter().enumerate() {
                 if let Some(ch) = col {
                     let pos = Point::new(
-                        (j as i32) * FONT.character_size.width as i32,
-                        (i as i32) * FONT.character_size.height as i32,
+                        offset_x + (j as i32) * char_width,
+                        offset_y + (i as i32) * char_height,
                     );
 
                     let _ = Text::with_baseline(
