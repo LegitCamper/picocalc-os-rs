@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 embedded-graphics = "0.8.1"
 embedded-graphics-simulator = "0.7.0"
+embedded-layout = "0.4.2"
 shared = { path = "../shared" }

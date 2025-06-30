@@ -40,6 +40,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "arrform"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7cf566ecc5c9d82b973e81d30babf6583c9b497f86295c952d538c3254ef4e6"
+
+[[package]]
 name = "ascii-canvas"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -803,6 +809,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff09972d4073aa8c299395be75161d582e7629cd663171d62af73c8d50dba3f"
 dependencies = [
  "embedded-io",
+]
+
+[[package]]
+name = "embedded-layout"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a90553247f2b05c59ac7894ea13d830636c2b1203fa03bff400eddbd1fa9f52"
+dependencies = [
+ "embedded-graphics",
+ "embedded-layout-macros",
+]
+
+[[package]]
+name = "embedded-layout-macros"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f6e621fe4c7e05b695274b722dc0a60bacd1c8696b58191baa0154713d52400"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -1871,7 +1898,10 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
+ "arrform",
  "embedded-graphics",
+ "embedded-graphics-core",
+ "embedded-layout",
 ]
 
 [[package]]
@@ -1886,6 +1916,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "embedded-layout",
  "shared",
 ]
 

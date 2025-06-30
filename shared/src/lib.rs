@@ -1,106 +1,74 @@
-#![feature(ascii_char)]
+pub mod screen {
+    use arrform::{ArrForm, arrform};
+    use embedded_graphics::{
+        Drawable,
+        draw_target::DrawTarget,
+        mono_font::{MonoTextStyle, ascii::FONT_10X20},
+        pixelcolor::Rgb565,
+        prelude::{Point, RgbColor, Size},
+        primitives::Rectangle,
+        text::Text,
+    };
+    use embedded_layout::{
+        align::{horizontal, vertical},
+        layout::linear::LinearLayout,
+        prelude::*,
+    };
 
-use embedded_graphics::{
-    mono_font::{
-        MonoFont, MonoTextStyle,
-        ascii::{FONT_6X9, FONT_10X20},
-    },
-    pixelcolor::{BinaryColor, Rgb565},
-    prelude::{Point, WebColors, *},
-    primitives::{Circle, Line, PrimitiveStyle, Rectangle},
-    text::{Alignment, Baseline, Text, TextStyle},
-};
+    pub const SCREEN_WIDTH: usize = 320;
+    pub const SCREEN_HEIGHT: usize = 320;
 
-pub const SCREEN_WIDTH: usize = 320;
-pub const SCREEN_HEIGHT: usize = 320;
-const SCREEN_ROWS: usize = 15;
-const SCREEN_COLS: usize = 31;
-const FONT: MonoFont = FONT_10X20;
-const COLOR: Rgb565 = Rgb565::CSS_LAWN_GREEN;
+    pub const STATUS_BAR_WIDTH: usize = 320;
+    pub const STATUS_BAR_HEIGHT: usize = 40;
 
-pub struct Cursor {
-    x: u16,
-    y: u16,
-}
-
-impl Cursor {
-    fn new(x: u16, y: u16) -> Self {
-        Self { x, y }
-    }
-}
-
-pub struct TextBuffer {
-    grid: [[Option<char>; SCREEN_COLS]; SCREEN_ROWS],
-    cursor: Cursor,
-}
-
-impl TextBuffer {
-    pub fn new() -> Self {
-        Self {
-            grid: [[None; SCREEN_COLS]; SCREEN_ROWS],
-            cursor: Cursor { x: 0, y: 0 },
-        }
+    pub struct UI {
+        pub status_bar: StatusBar,
     }
 
-    /// writes char at cursor
-    pub fn write_char(&mut self, ch: char) {
-        for (i, row) in self.grid.iter_mut().enumerate() {
-            for (j, col) in row.iter_mut().enumerate() {
-                if i as u16 == self.cursor.x && j as u16 == self.cursor.y {
-                    *col = Some(ch)
-                }
+    impl UI {
+        pub fn new() -> Self {
+            Self {
+                status_bar: StatusBar {
+                    battery: 100,
+                    backlight: 100,
+                    volume: 100,
+                },
             }
         }
-    }
 
-    /// fills text buffer with char
-    pub fn fill(&mut self, ch: char) {
-        for i in 0..SCREEN_ROWS {
-            for j in 0..SCREEN_COLS {
-                self.cursor = Cursor::new(i as u16, j as u16);
-                self.write_char(ch);
-            }
+        pub fn draw_status_bar<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D) {
+            let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+
+            let status_bar = Rectangle::new(
+                Point::new(0, 0),
+                Size::new(STATUS_BAR_WIDTH as u32, STATUS_BAR_HEIGHT as u32),
+            );
+            let _ = LinearLayout::horizontal(
+                Chain::new(Text::new(
+                    arrform!(20, "Bat: {}", self.status_bar.battery).as_str(),
+                    Point::zero(),
+                    text_style,
+                ))
+                .append(Text::new(
+                    arrform!(20, "Lght: {}", self.status_bar.backlight).as_str(),
+                    Point::zero(),
+                    text_style,
+                ))
+                .append(Text::new(
+                    arrform!(20, "Vol: {}", self.status_bar.volume).as_str(),
+                    Point::zero(),
+                    text_style,
+                )),
+            )
+            .arrange()
+            .align_to(&status_bar, horizontal::Center, vertical::Center)
+            .draw(target);
         }
     }
 
-    pub fn scroll_up(&mut self) {
-        let (top, bottom) = self.grid.split_at_mut(SCREEN_ROWS - 1);
-        for (dest, src) in top.iter_mut().zip(&bottom[1..]) {
-            dest.copy_from_slice(src);
-        }
-
-        self.grid[SCREEN_ROWS - 1].fill(None);
-    }
-
-    pub fn draw<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D) {
-        let style = MonoTextStyle::new(&FONT, COLOR);
-
-        let char_width = FONT.character_size.width as i32;
-        let char_height = FONT.character_size.height as i32;
-
-        let matrix_width = SCREEN_COLS as i32 * char_width;
-        let matrix_height = SCREEN_ROWS as i32 * char_height;
-
-        let offset_x = (SCREEN_WIDTH as i32 - matrix_width) / 2;
-        let offset_y = (SCREEN_HEIGHT as i32 - matrix_height) / 2;
-
-        for (i, row) in self.grid.iter().enumerate() {
-            for (j, col) in row[1..].iter().enumerate() {
-                if let Some(ch) = col {
-                    let pos = Point::new(
-                        offset_x + (j as i32) * char_width,
-                        offset_y + (i as i32) * char_height,
-                    );
-
-                    let _ = Text::with_baseline(
-                        ch.as_ascii().unwrap().as_str(),
-                        pos,
-                        style,
-                        Baseline::Top,
-                    )
-                    .draw(target);
-                }
-            }
-        }
+    pub struct StatusBar {
+        pub battery: u8,
+        pub backlight: u8,
+        pub volume: u8,
     }
 }
