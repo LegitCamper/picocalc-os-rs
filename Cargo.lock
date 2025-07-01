@@ -28,6 +28,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "arrform"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7cf566ecc5c9d82b973e81d30babf6583c9b497f86295c952d538c3254ef4e6"
+
+[[package]]
 name = "ascii-canvas"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -760,6 +766,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-layout"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a90553247f2b05c59ac7894ea13d830636c2b1203fa03bff400eddbd1fa9f52"
+dependencies = [
+ "embedded-graphics",
+ "embedded-layout-macros",
+]
+
+[[package]]
+name = "embedded-layout-macros"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f6e621fe4c7e05b695274b722dc0a60bacd1c8696b58191baa0154713d52400"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "embedded-sdmmc"
 version = "0.8.0"
 source = "git+https://github.com/Be-ing/embedded-sdmmc-rs?branch=bisync#835b2e4f9d3482b6287f674d7ecf6ae5d0618c18"
@@ -1336,6 +1363,7 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 name = "picocalc-os-rs"
 version = "0.1.0"
 dependencies = [
+ "arrform",
  "bitflags 2.9.1",
  "bt-hci",
  "cortex-m",
@@ -1352,9 +1380,12 @@ dependencies = [
  "embassy-time",
  "embedded-graphics",
  "embedded-hal 0.2.7",
+ "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
+ "embedded-layout",
  "embedded-sdmmc",
+ "heapless",
  "panic-probe",
  "portable-atomic",
  "st7365p-lcd",
