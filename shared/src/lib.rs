@@ -3,7 +3,10 @@ pub mod screen {
     use embedded_graphics::{
         Drawable,
         draw_target::DrawTarget,
-        mono_font::{MonoTextStyle, ascii::FONT_10X20},
+        mono_font::{
+            MonoTextStyle,
+            ascii::{FONT_6X10, FONT_9X15, FONT_10X20},
+        },
         pixelcolor::Rgb565,
         prelude::{Point, RgbColor, Size},
         primitives::Rectangle,
@@ -37,7 +40,7 @@ pub mod screen {
         }
 
         pub fn draw_status_bar<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D) {
-            let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+            let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
 
             let status_bar = Rectangle::new(
                 Point::new(0, 0),
