@@ -1006,9 +1006,9 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "indexmap"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
+checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -1730,10 +1730,11 @@ dependencies = [
 [[package]]
 name = "st7365p-lcd"
 version = "0.10.0"
-source = "git+https://github.com/legitcamper/st7365p-lcd-rs#d751e8d30f1a3f964ffe05e4bb16f82112fbefce"
+source = "git+https://github.com/legitcamper/st7365p-lcd-rs?branch=async#9f8da568ff695a00afb6b8b8cf9573fad408a66f"
 dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "nb 1.1.0",
 ]
 

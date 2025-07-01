@@ -1,27 +1,42 @@
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
-    spi::{Blocking, Spi},
+    spi::{Async, Spi},
 };
 use embassy_time::{Delay, Timer};
-use embedded_graphics::{
-    Drawable, Pixel,
-    pixelcolor::{Rgb565, raw::RawU16},
-    prelude::{DrawTarget, OriginDimensions, Point, Primitive, RawData, RgbColor, Size},
-    primitives::{PrimitiveStyle, Rectangle},
-};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use st7365p_lcd::{Orientation, ST7365P};
+use st7365p_lcd::{FrameBuffer, Orientation, ST7365P};
+
+use arrform::{ArrForm, arrform};
+use embedded_graphics::{
+    Drawable,
+    draw_target::DrawTarget,
+    mono_font::{
+        MonoTextStyle,
+        ascii::{FONT_6X10, FONT_9X15, FONT_10X20},
+    },
+    object_chain::Chain,
+    pixelcolor::Rgb565,
+    prelude::{Point, RgbColor, Size},
+    primitives::Rectangle,
+    text::Text,
+};
+use embedded_layout::{
+    align::{horizontal, vertical},
+    layout::linear::LinearLayout,
+    prelude::*,
+};
+
+pub const SCREEN_WIDTH: usize = 320;
+pub const SCREEN_HEIGHT: usize = 320;
+
+pub const STATUS_BAR_WIDTH: usize = 320;
+pub const STATUS_BAR_HEIGHT: usize = 40;
 
 #[embassy_executor::task]
-pub async fn display_task(
-    spi: Spi<'static, SPI1, Blocking>,
-    cs: PIN_13,
-    data: PIN_14,
-    reset: PIN_15,
-) {
+pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_14, reset: PIN_15) {
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
-    let mut display = ST7365P::new(
+    let display = ST7365P::new(
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
@@ -30,84 +45,70 @@ pub async fn display_task(
         320,
         320,
     );
-    display.init(&mut Delay).unwrap();
-    display.set_orientation(&Orientation::Landscape).unwrap();
-    let mut virtual_display = VirtualDisplay::new(display, 320 / 2, 320 / 2);
-
-    let thin_stroke = PrimitiveStyle::with_stroke(Rgb565::RED, 20);
-
-    Rectangle::new(Point::new(10, 10), Size::new(100, 100))
-        .into_styled(thin_stroke)
-        .draw(&mut virtual_display)
+    display.init(&mut Delay).await.unwrap();
+    display
+        .set_orientation(&Orientation::Landscape)
+        .await
         .unwrap();
 
+    let mut framebuffer = FrameBuffer::new(display);
+
+    let mut ui = UI::new();
+    ui.draw_status_bar(&mut framebuffer);
+
     loop {
+        framebuffer.draw().await.unwrap();
         Timer::after_millis(500).await;
     }
 }
 
-/// simple abstraction over real display & resolution to reduce frame buffer size
-/// by cutting the resolution by 1/4
-struct VirtualDisplay {
-    display: ST7365P<
-        ExclusiveDevice<Spi<'static, SPI1, Blocking>, Output<'static>, Delay>,
-        Output<'static>,
-        Output<'static>,
-    >,
-    width: u32,
-    height: u32,
+pub struct UI {
+    pub status_bar: StatusBar,
 }
 
-impl VirtualDisplay {
-    pub fn new(
-        display: ST7365P<
-            ExclusiveDevice<Spi<'static, SPI1, Blocking>, Output<'static>, Delay>,
-            Output<'static>,
-            Output<'static>,
-        >,
-        new_width: u32,
-        new_height: u32,
-    ) -> Self {
+impl UI {
+    pub fn new() -> Self {
         Self {
-            display,
-            width: new_width,
-            height: new_height,
+            status_bar: StatusBar {
+                battery: 100,
+                backlight: 100,
+                volume: 100,
+            },
         }
+    }
+
+    pub fn draw_status_bar<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D) {
+        let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
+
+        let status_bar = Rectangle::new(
+            Point::new(0, 0),
+            Size::new(STATUS_BAR_WIDTH as u32, STATUS_BAR_HEIGHT as u32),
+        );
+        let _ = LinearLayout::horizontal(
+            Chain::new(Text::new(
+                arrform!(20, "Bat: {}", self.status_bar.battery).as_str(),
+                Point::zero(),
+                text_style,
+            ))
+            .append(Text::new(
+                arrform!(20, "Lght: {}", self.status_bar.backlight).as_str(),
+                Point::zero(),
+                text_style,
+            ))
+            .append(Text::new(
+                arrform!(20, "Vol: {}", self.status_bar.volume).as_str(),
+                Point::zero(),
+                text_style,
+            )),
+        )
+        .arrange()
+        .align_to(&status_bar, horizontal::Center, vertical::Center)
+        .draw(target);
     }
 }
 
-impl DrawTarget for VirtualDisplay {
-    type Color = Rgb565;
-    type Error = ();
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        for Pixel(coord, color) in pixels.into_iter() {
-            // Check bounds on the *virtual* (already reduced) resolution
-            if coord.x >= 0
-                && coord.y >= 0
-                && coord.x < self.width as i32
-                && coord.y < self.height as i32
-            {
-                let px = coord.x as u16 * 2;
-                let py = coord.y as u16 * 2;
-                let raw_color = RawU16::from(color).into_inner();
-
-                // Draw the 2x2 block on the underlying hardware
-                self.display.set_pixel(px, py, raw_color)?;
-                self.display.set_pixel(px + 1, py, raw_color)?;
-                self.display.set_pixel(px, py + 1, raw_color)?;
-                self.display.set_pixel(px + 1, py + 1, raw_color)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl OriginDimensions for VirtualDisplay {
-    fn size(&self) -> Size {
-        Size::new(self.width, self.height)
-    }
+pub struct StatusBar {
+    pub battery: u8,
+    pub backlight: u8,
+    pub volume: u8,
 }
