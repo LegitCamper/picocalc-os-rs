@@ -25,8 +25,8 @@ pub async fn display_task(
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
-        true,
         false,
+        true,
         320,
         320,
     );

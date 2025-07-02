@@ -71,7 +71,7 @@ defmt-rtt = "0.4.2"
 
 embedded-graphics = { version = "0.8.1" }
 embedded-sdmmc = { git = "https://github.com/Be-ing/embedded-sdmmc-rs", branch = "bisync", default-features = false }
-# st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs" }
-st7365p-lcd = { path = "../ST7365P-lcd-rs" }
+st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs" }
+# st7365p-lcd = { path = "../ST7365P-lcd-rs" }
 
 static_cell = "2.1.1"
