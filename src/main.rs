@@ -25,7 +25,7 @@ use embedded_sdmmc::asynchronous::{File, SdCard, ShortFileName, VolumeIdx, Volum
 use static_cell::StaticCell;
 
 mod peripherals;
-use peripherals::{keyboard::KeyEvent, peripherals_task};
+use peripherals::{conf_peripherals, keyboard::KeyEvent};
 mod display;
 use display::display_task;
 
@@ -37,16 +37,11 @@ embassy_rp::bind_interrupts!(struct Irqs {
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    static KEYBOARD_EVENTS: StaticCell<Channel<NoopRawMutex, KeyEvent, 10>> = StaticCell::new();
-    let keyboard_events = KEYBOARD_EVENTS.init(Channel::new());
-
-    // // configure keyboard event handler
-    // let mut config = i2c::Config::default();
-    // config.frequency = 100_000;
-    // let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
-    // spawner
-    //     .spawn(peripherals_task(i2c1, keyboard_events.sender()))
-    //     .unwrap();
+    // configure keyboard event handler
+    let mut config = i2c::Config::default();
+    config.frequency = 100_000;
+    let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
+    conf_peripherals(i2c1).await;
 
     // configure display handler
     let mut config = spi::Config::default();
