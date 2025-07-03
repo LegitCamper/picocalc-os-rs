@@ -4,12 +4,20 @@
 
 #[cfg(feature = "defmt")]
 use defmt::*;
+use embedded_graphics::{
+    pixelcolor::Rgb565,
+    prelude::{Point, RgbColor, Size},
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
+};
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::display::{SCREEN_HEIGHT, SCREEN_WIDTH, UI, init_display};
-use crate::peripherals::{keyboard::KeyEvent, peripherals_task};
+use crate::display::{FRAMEBUFFER, SCREEN_HEIGHT, SCREEN_WIDTH, UI};
+use crate::peripherals::{
+    conf_peripherals,
+    keyboard::{KeyEvent, read_keyboard_fifo},
+};
 use embassy_executor::Spawner;
-use embassy_rp::peripherals::{I2C1, SPI1};
+use embassy_rp::peripherals::{I2C1, PIN_13, PIN_14, PIN_15, SPI1};
 use embassy_rp::spi::Spi;
 use embassy_rp::{
     bind_interrupts,
@@ -30,37 +38,74 @@ use static_cell::StaticCell;
 mod display;
 mod peripherals;
 
-embassy_rp::bind_interrupts!(struct Irqs {
-    I2C1_IRQ => i2c::InterruptHandler<I2C1>;
-});
+embassy_rp::bind_interrupts!(
+    struct Irqs {
+        I2C1_IRQ => i2c::InterruptHandler<I2C1>;
+    }
+);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    static KEYBOARD_EVENTS: StaticCell<Channel<NoopRawMutex, KeyEvent, 10>> = StaticCell::new();
-    let keyboard_events = KEYBOARD_EVENTS.init(Channel::new());
+    let mut i2c1_config = i2c::Config::default();
+    i2c1_config.frequency = 100_000;
+    let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, i2c1_config);
+    conf_peripherals(i2c1).await;
 
-    // configure keyboard event handler
-    let mut config = i2c::Config::default();
-    config.frequency = 100_000;
-    let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
+    let mut spi1_config = spi::Config::default();
+    spi1_config.frequency = 16_000_000;
+    let spi1 = Spi::new(
+        p.SPI1,
+        p.PIN_10,
+        p.PIN_11,
+        p.PIN_12,
+        p.DMA_CH0,
+        p.DMA_CH1,
+        spi1_config,
+    );
+
     spawner
-        .spawn(peripherals_task(i2c1, keyboard_events.sender()))
+        .spawn(main_task(spi1, p.PIN_13, p.PIN_14, p.PIN_15))
+        .unwrap();
+}
+
+#[embassy_executor::task]
+async fn main_task(
+    spi1: Spi<'static, SPI1, spi::Async>,
+    spi1_cs: PIN_13,
+    spi1_data: PIN_14,
+    spi1_reset: PIN_15,
+) {
+    let spi_device = ExclusiveDevice::new(spi1, Output::new(spi1_cs, Level::Low), Delay).unwrap();
+    let display = ST7365P::new(
+        spi_device,
+        Output::new(spi1_data, Level::Low),
+        Some(Output::new(spi1_reset, Level::High)),
+        false,
+        true,
+        SCREEN_WIDTH as u32,
+        SCREEN_HEIGHT as u32,
+    );
+    let mut framebuffer: FRAMEBUFFER = FrameBuffer::new(display);
+    framebuffer.init(&mut Delay).await.unwrap();
+    framebuffer
+        .display
+        .set_custom_orientation(0x60)
+        .await
         .unwrap();
 
-    let mut config = spi::Config::default();
-    config.frequency = 16_000_000;
-    let spi1 = Spi::new(
-        p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, p.DMA_CH0, p.DMA_CH1, config,
-    );
-    let mut framebuffer = init_display(spi1, p.PIN_13, p.PIN_14, p.PIN_15).await;
+    // let mut ui: UI<50, 25> = UI::new();
 
-    let mut ui: UI<50, 25> = UI::new();
-    ui.draw(&mut framebuffer);
+    // read_keyboard_fifo().await;
+    Rectangle::new(Point::new(0, 0), Size::new(319, 319))
+        .draw_styled(&PrimitiveStyle::with_fill(Rgb565::RED), &mut framebuffer)
+        .unwrap();
+    // ui.draw(&mut framebuffer);
+    framebuffer.draw().await.unwrap();
 
     loop {
-        framebuffer.draw().await.unwrap();
+        info!("Done");
         Timer::after_millis(500).await;
     }
 }

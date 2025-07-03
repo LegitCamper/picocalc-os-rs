@@ -25,11 +25,7 @@ const REG_ID_VER: u8 = 0x01;
 const REG_ID_RST: u8 = 0x08;
 const REG_ID_INT: u8 = 0x03;
 
-#[embassy_executor::task]
-pub async fn peripherals_task(
-    i2c: I2CBUS,
-    mut keyboard_channel: Sender<'static, NoopRawMutex, KeyEvent, 10>,
-) {
+pub async fn conf_peripherals(i2c: I2CBUS) {
     Timer::after(embassy_time::Duration::from_millis(100)).await;
 
     PERIPHERAL_BUS.get().lock().await.replace(i2c);
@@ -37,11 +33,6 @@ pub async fn peripherals_task(
     configure_keyboard(200, 100).await;
     set_lcd_backlight(255).await;
     set_key_backlight(0).await;
-
-    loop {
-        Timer::after(Duration::from_millis(200)).await;
-        read_keyboard_fifo(&mut keyboard_channel).await;
-    }
 }
 
 /// return major & minor mcu version

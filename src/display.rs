@@ -1,4 +1,6 @@
 use arrform::{ArrForm, arrform};
+use core::fmt::Debug;
+use defmt::info;
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
@@ -14,12 +16,12 @@ use embedded_graphics::{
     },
     pixelcolor::Rgb565,
     prelude::{Point, RgbColor, Size},
-    primitives::Rectangle,
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
     text::Text,
 };
 use embedded_hal_1::digital::OutputPin;
 use embedded_hal_async::spi::SpiDevice;
-use embedded_hal_bus::spi::ExclusiveDevice;
+use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use embedded_layout::{
     align::{horizontal, vertical},
     layout::linear::LinearLayout,
@@ -35,36 +37,13 @@ pub const SCREEN_HEIGHT: usize = 320;
 pub const STATUS_BAR_WIDTH: usize = 320;
 pub const STATUS_BAR_HEIGHT: usize = 40;
 
-pub async fn init_display(
-    spi: Spi<'static, SPI1, Async>,
-    cs: PIN_13,
-    data: PIN_14,
-    reset: PIN_15,
-) -> FrameBuffer<
+pub type FRAMEBUFFER = FrameBuffer<
     SCREEN_WIDTH,
     SCREEN_HEIGHT,
     ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
     Output<'static>,
     Output<'static>,
-> {
-    let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
-    let mut display = ST7365P::new(
-        spi_device,
-        Output::new(data, Level::Low),
-        Some(Output::new(reset, Level::High)),
-        true,
-        false,
-        320,
-        320,
-    );
-    display.init(&mut Delay).await.unwrap();
-    display
-        .set_orientation(&Orientation::Landscape)
-        .await
-        .unwrap();
-
-    FrameBuffer::new(display)
-}
+>;
 
 pub struct UI<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> {
     pub status_bar: StatusBar,
@@ -83,7 +62,10 @@ impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, M
         }
     }
 
-    pub fn draw<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D) {
+    pub fn draw<D: DrawTarget<Color = Rgb565>>(&mut self, target: &mut D)
+    where
+        <D as DrawTarget>::Error: Debug,
+    {
         self.draw_status_bar(target);
         self.draw_selection(target);
     }
@@ -114,11 +96,13 @@ impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, M
                     Point::zero(),
                     text_style,
                 ))
+                .append(Text::new(" ", Point::zero(), text_style))
                 .append(Text::new(
                     arrform!(20, "Lght: {}", self.status_bar.backlight).as_str(),
                     Point::zero(),
                     text_style,
                 ))
+                .append(Text::new(" ", Point::zero(), text_style))
                 .append(Text::new(
                     arrform!(20, "Vol: {}", self.status_bar.volume).as_str(),
                     Point::zero(),
