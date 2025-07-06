@@ -6,14 +6,13 @@ use embassy_rp::{
     peripherals::I2C1,
 };
 use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex, channel::Sender, lazy_lock::LazyLock, mutex::Mutex,
+    blocking_mutex::raw::NoopRawMutex, lazy_lock::LazyLock, mutex::Mutex,
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 
 pub mod keyboard;
-use keyboard::{KeyCode, KeyEvent, KeyState};
 
-use crate::peripherals::keyboard::{configure_keyboard, read_keyboard_fifo};
+use crate::peripherals::keyboard::configure_keyboard;
 
 const MCU_ADDR: u8 = 0x1F;
 

@@ -1,4 +1,3 @@
-use defmt::info;
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
@@ -7,26 +6,19 @@ use embassy_rp::{
 use embassy_time::{Delay, Timer};
 use embedded_graphics::{
     Drawable,
-    mono_font::{
-        MonoFont, MonoTextStyle,
-        ascii::{FONT_6X9, FONT_10X20},
-    },
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::Rgb565,
-    prelude::{Point, RgbColor, WebColors},
-    text::{Baseline, Text, TextStyle},
+    prelude::{Point, RgbColor},
+    text::Text,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::{FrameBuffer, ST7365P};
-
-type SPI = Spi<'static, SPI1, Async>;
-
-type FRAMEBUFFER = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT>;
 
 const SCREEN_WIDTH: usize = 320;
 const SCREEN_HEIGHT: usize = 320;
 
 #[embassy_executor::task]
-pub async fn display_task(spi: SPI, cs: PIN_13, data: PIN_14, reset: PIN_15) {
+pub async fn display_task(spi: Spi<'static, SPI1, Async>, cs: PIN_13, data: PIN_14, reset: PIN_15) {
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
     let mut display = ST7365P::new(
         spi_device,
@@ -38,7 +30,7 @@ pub async fn display_task(spi: SPI, cs: PIN_13, data: PIN_14, reset: PIN_15) {
     display.init(&mut Delay).await.unwrap();
     display.set_custom_orientation(0x60).await.unwrap();
 
-    let mut framebuffer: FRAMEBUFFER = FrameBuffer::new();
+    let mut framebuffer: FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT> = FrameBuffer::new();
 
     Text::with_alignment(
         "Hello!",

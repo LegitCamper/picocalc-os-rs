@@ -3,29 +3,18 @@
 #![no_std]
 #![no_main]
 
-#[cfg(feature = "defmt")]
-use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::I2C1;
-use embassy_rp::spi::Spi;
 use embassy_rp::{
-    bind_interrupts,
-    gpio::{Level, Output},
     i2c,
     i2c::I2c,
     spi,
 };
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_time::Timer;
-use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::asynchronous::{File, SdCard, ShortFileName, VolumeIdx, VolumeManager};
-use static_cell::StaticCell;
 
 mod peripherals;
-use peripherals::{conf_peripherals, keyboard::KeyEvent};
+use peripherals::conf_peripherals;
 mod display;
 use display::display_task;
 

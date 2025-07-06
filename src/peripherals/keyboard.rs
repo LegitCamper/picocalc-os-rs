@@ -1,12 +1,3 @@
-use defmt::{info, warn};
-use embassy_rp::{
-    i2c::{Async, I2c},
-    peripherals::I2C1,
-};
-use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
-    channel::Sender,
-};
 
 use crate::peripherals::PERIPHERAL_BUS;
 
