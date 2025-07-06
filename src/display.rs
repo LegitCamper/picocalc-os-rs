@@ -20,42 +20,25 @@ use st7365p_lcd::{FrameBuffer, ST7365P};
 
 type SPI = Spi<'static, SPI1, Async>;
 
-type FRAMEBUFFER = FrameBuffer<
-    SCREEN_WIDTH,
-    SCREEN_HEIGHT,
-    ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
-    Output<'static>,
-    Output<'static>,
->;
+type FRAMEBUFFER = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT>;
 
 const SCREEN_WIDTH: usize = 320;
 const SCREEN_HEIGHT: usize = 320;
-const SCREEN_ROWS: usize = 15;
-const SCREEN_COLS: usize = 31;
-const FONT: MonoFont = FONT_10X20;
-const COLOR: Rgb565 = Rgb565::CSS_LAWN_GREEN;
 
 #[embassy_executor::task]
 pub async fn display_task(spi: SPI, cs: PIN_13, data: PIN_14, reset: PIN_15) {
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
-    let display = ST7365P::new(
+    let mut display = ST7365P::new(
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
         false,
         true,
-        SCREEN_WIDTH as u32,
-        SCREEN_HEIGHT as u32,
     );
-    let mut framebuffer: FRAMEBUFFER = FrameBuffer::new(display);
+    display.init(&mut Delay).await.unwrap();
+    display.set_custom_orientation(0x60).await.unwrap();
 
-    framebuffer.init(&mut Delay).await.unwrap();
-    framebuffer.display.set_offset(0, 0);
-    framebuffer
-        .display
-        .set_custom_orientation(0x60)
-        .await
-        .unwrap();
+    let mut framebuffer: FRAMEBUFFER = FrameBuffer::new();
 
     Text::with_alignment(
         "Hello!",
@@ -67,7 +50,7 @@ pub async fn display_task(spi: SPI, cs: PIN_13, data: PIN_14, reset: PIN_15) {
     .unwrap();
 
     loop {
-        framebuffer.draw().await.unwrap();
+        framebuffer.draw(&mut display).await.unwrap();
         Timer::after_millis(500).await;
     }
 }

@@ -1741,6 +1741,7 @@ dependencies = [
 [[package]]
 name = "st7365p-lcd"
 version = "0.10.0"
+source = "git+https://github.com/legitcamper/st7365p-lcd-rs?branch=async#f826038c0c8e4150be8581d30a8c6fe480947f66"
 dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
