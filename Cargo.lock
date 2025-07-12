@@ -1006,9 +1006,9 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "indexmap"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
+checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -1355,6 +1355,7 @@ dependencies = [
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-sdmmc",
+ "heapless",
  "panic-probe",
  "portable-atomic",
  "spin",
@@ -1606,9 +1607,9 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "rgb"
-version = "0.8.50"
+version = "0.8.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57397d16646700483b67d2dd6511d79318f9d057fdbd21a4066aeac8b41d310a"
+checksum = "a457e416a0f90d246a4c3288bd7a25b2304ca727f253f95be383dd17af56be8f"
 dependencies = [
  "bytemuck",
 ]
@@ -1740,8 +1741,8 @@ dependencies = [
 
 [[package]]
 name = "st7365p-lcd"
-version = "0.10.0"
-source = "git+https://github.com/legitcamper/st7365p-lcd-rs?branch=async#f826038c0c8e4150be8581d30a8c6fe480947f66"
+version = "0.11.0"
+source = "git+https://github.com/legitcamper/st7365p-lcd-rs?branch=async#c0928418608cbd88096c7e2535063f6afb49a122"
 dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",

@@ -5,9 +5,7 @@ use embassy_rp::{
     i2c::{Async, I2c},
     peripherals::I2C1,
 };
-use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex, lazy_lock::LazyLock, mutex::Mutex,
-};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, lazy_lock::LazyLock, mutex::Mutex};
 use embassy_time::Timer;
 
 pub mod keyboard;
@@ -30,7 +28,7 @@ pub async fn conf_peripherals(i2c: I2CBUS) {
     PERIPHERAL_BUS.get().lock().await.replace(i2c);
 
     configure_keyboard(200, 100).await;
-    set_lcd_backlight(255).await;
+    // set_lcd_backlight(255).await;
     set_key_backlight(0).await;
 }
 
