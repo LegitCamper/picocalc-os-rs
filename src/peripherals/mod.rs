@@ -10,7 +10,7 @@ use embassy_time::Timer;
 
 pub mod keyboard;
 
-use crate::peripherals::keyboard::configure_keyboard;
+use crate::peripherals::keyboard::{configure_keyboard, read_keyboard_fifo};
 
 const MCU_ADDR: u8 = 0x1F;
 
@@ -28,6 +28,10 @@ pub async fn conf_peripherals(i2c: I2CBUS) {
     PERIPHERAL_BUS.get().lock().await.replace(i2c);
 
     configure_keyboard(200, 100).await;
+
+    // empty keys
+    while read_keyboard_fifo().await.is_some() {}
+
     // set_lcd_backlight(255).await;
     set_key_backlight(0).await;
 }

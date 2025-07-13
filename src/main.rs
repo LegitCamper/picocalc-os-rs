@@ -3,10 +3,16 @@
 #![no_std]
 #![no_main]
 
-use crate::peripherals::keyboard::{KeyCode, read_keyboard_fifo};
+use core::sync::atomic::Ordering;
+
+use crate::{
+    display::DISPLAY_SIGNAL,
+    peripherals::keyboard::{KeyCode, KeyState, read_keyboard_fifo},
+};
 
 use {defmt_rtt as _, panic_probe as _};
 
+use defmt::info;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_rp::peripherals::I2C1;
@@ -31,11 +37,11 @@ static STRING: Mutex<ThreadModeRawMutex, String<25>> = Mutex::new(String::new())
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    STRING.lock().await.push_str("T: ").unwrap();
+    STRING.lock().await.push_str("Press Del").unwrap();
 
     // configure keyboard event handler
     let mut config = i2c::Config::default();
-    config.frequency = 100_000;
+    config.frequency = 400_000;
     let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
     conf_peripherals(i2c1).await;
 
@@ -48,12 +54,26 @@ async fn main(_spawner: Spawner) {
     join(
         async {
             loop {
-                Timer::after_millis(100).await;
-                if let Some(key) = read_keyboard_fifo().await {
-                    if let KeyCode::Char(c) = key.key {
-                        STRING.lock().await.push(c).unwrap();
+                Timer::after_millis(20).await;
+                if let Some(key) = read_keyboard_fifo().await
+                    && key.state == KeyState::Pressed
+                {
+                    let mut string = STRING.lock().await;
+                    match key.key {
+                        KeyCode::Backspace => {
+                            string.pop().unwrap();
+                        }
+                        KeyCode::Del => {
+                            string.clear();
+                        }
+                        KeyCode::Char(c) => {
+                            string.push(c).unwrap();
+                        }
+                        _ => (),
                     }
+                    DISPLAY_SIGNAL.signal(());
                 }
+                Timer::after_millis(10).await;
             }
         },
         display_handler(spi1, p.PIN_13, p.PIN_14, p.PIN_15),
