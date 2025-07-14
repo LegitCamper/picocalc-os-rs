@@ -42,9 +42,13 @@ pub async fn display_handler(
         true,
         Delay,
     );
-    let mut framebuffer: FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT> = FrameBuffer::new();
+    let mut framebuffer: FrameBuffer<
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        { SCREEN_WIDTH * SCREEN_HEIGHT },
+    > = FrameBuffer::new();
     display.init().await.unwrap();
-    display.set_custom_orientation(0x60).await.unwrap();
+    display.set_custom_orientation(0x40).await.unwrap();
     framebuffer.draw(&mut display).await.unwrap();
     display.set_on().await.unwrap();
 
