@@ -73,7 +73,6 @@ async fn main(_spawner: Spawner) {
                     }
                     DISPLAY_SIGNAL.signal(());
                 }
-                Timer::after_millis(10).await;
             }
         },
         display_handler(spi1, p.PIN_13, p.PIN_14, p.PIN_15),

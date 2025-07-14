@@ -23,7 +23,6 @@ use st7365p_lcd::{FrameBuffer, ST7365P};
 
 const SCREEN_WIDTH: usize = 320;
 const SCREEN_HEIGHT: usize = 320;
-const REFRESH_INTERVAL_MS: u64 = 20;
 
 pub static DISPLAY_SIGNAL: Signal<ThreadModeRawMutex, ()> = Signal::new();
 
@@ -51,6 +50,8 @@ pub async fn display_handler(
     display.set_custom_orientation(0x40).await.unwrap();
     framebuffer.draw(&mut display).await.unwrap();
     display.set_on().await.unwrap();
+
+    DISPLAY_SIGNAL.signal(());
 
     loop {
         DISPLAY_SIGNAL.wait().await;
