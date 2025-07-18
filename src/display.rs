@@ -7,19 +7,21 @@ use embassy_rp::{
     spi::{Async, Spi},
 };
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Instant, Timer};
 use embedded_graphics::{
     Drawable,
     draw_target::DrawTarget,
     mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::Rgb565,
-    prelude::{Point, RgbColor, Size},
+    prelude::{Dimensions, Point, RgbColor, Size},
     primitives::Rectangle,
     text::{Alignment, Text},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use portable_atomic::AtomicBool;
 use st7365p_lcd::{FrameBuffer, ST7365P};
+
+use crate::LAST_TEXT_RECT;
 
 const SCREEN_WIDTH: usize = 320;
 const SCREEN_HEIGHT: usize = 320;
@@ -56,26 +58,30 @@ pub async fn display_handler(
     loop {
         DISPLAY_SIGNAL.wait().await;
 
-        framebuffer
-            .fill_solid(
-                &Rectangle::new(
-                    Point::new(0, 0),
-                    Size::new(SCREEN_HEIGHT as u32 - 1, SCREEN_WIDTH as u32 - 1),
-                ),
-                Rgb565::BLACK,
-            )
-            .unwrap();
-        let text = crate::STRING.lock().await.clone();
+        let text_string = crate::STRING.lock().await.clone();
 
-        Text::with_alignment(
-            &text,
+        let text = Text::with_alignment(
+            &text_string,
             Point::new(160, 160),
             MonoTextStyle::new(&FONT_10X20, Rgb565::RED),
             Alignment::Center,
-        )
-        .draw(&mut framebuffer)
-        .unwrap();
+        );
 
-        framebuffer.draw(&mut display).await.unwrap();
+        {
+            let rect = LAST_TEXT_RECT.lock().await;
+            if let Some(rect) = *rect.borrow() {
+                framebuffer.fill_solid(&rect, Rgb565::BLACK).unwrap();
+            }
+            *rect.borrow_mut() = Some(text.bounding_box());
+        }
+
+        text.draw(&mut framebuffer).unwrap();
+
+        let start = Instant::now();
+        framebuffer
+            .partial_draw_batched(&mut display)
+            .await
+            .unwrap();
+        info!("Elapsed {}ms", start.elapsed().as_millis());
     }
 }

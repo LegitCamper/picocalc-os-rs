@@ -3,8 +3,6 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::Ordering;
-
 use crate::{
     display::DISPLAY_SIGNAL,
     peripherals::keyboard::{KeyCode, KeyState, read_keyboard_fifo},
@@ -12,7 +10,7 @@ use crate::{
 
 use {defmt_rtt as _, panic_probe as _};
 
-use defmt::info;
+use core::cell::RefCell;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_rp::peripherals::I2C1;
@@ -20,6 +18,7 @@ use embassy_rp::{i2c, i2c::I2c, spi};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Timer;
+use embedded_graphics::primitives::Rectangle;
 use heapless::String;
 
 mod peripherals;
@@ -32,6 +31,8 @@ embassy_rp::bind_interrupts!(struct Irqs {
 });
 
 static STRING: Mutex<ThreadModeRawMutex, String<25>> = Mutex::new(String::new());
+static LAST_TEXT_RECT: Mutex<ThreadModeRawMutex, RefCell<Option<Rectangle>>> =
+    Mutex::new(RefCell::new(None));
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
