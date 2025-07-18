@@ -1,21 +1,35 @@
+use core::sync::atomic::Ordering;
+
+use defmt::info;
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
-    spi::{Blocking, Spi},
+    spi::{Async, Spi},
 };
-use embassy_time::{Delay, Timer};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
+use embassy_time::{Delay, Instant, Timer};
 use embedded_graphics::{
-    Drawable, Pixel,
-    pixelcolor::{Rgb565, raw::RawU16},
-    prelude::{DrawTarget, OriginDimensions, Point, Primitive, RawData, RgbColor, Size},
-    primitives::{PrimitiveStyle, Rectangle},
+    Drawable,
+    draw_target::DrawTarget,
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
+    pixelcolor::Rgb565,
+    prelude::{Dimensions, Point, RgbColor, Size},
+    primitives::Rectangle,
+    text::{Alignment, Text},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
-use st7365p_lcd::{Orientation, ST7365P};
+use portable_atomic::AtomicBool;
+use st7365p_lcd::{FrameBuffer, ST7365P};
 
-#[embassy_executor::task]
-pub async fn display_task(
-    spi: Spi<'static, SPI1, Blocking>,
+use crate::LAST_TEXT_RECT;
+
+const SCREEN_WIDTH: usize = 320;
+const SCREEN_HEIGHT: usize = 320;
+
+pub static DISPLAY_SIGNAL: Signal<ThreadModeRawMutex, ()> = Signal::new();
+
+pub async fn display_handler(
+    spi: Spi<'static, SPI1, Async>,
     cs: PIN_13,
     data: PIN_14,
     reset: PIN_15,
@@ -25,89 +39,49 @@ pub async fn display_task(
         spi_device,
         Output::new(data, Level::Low),
         Some(Output::new(reset, Level::High)),
-        true,
         false,
-        320,
-        320,
+        true,
+        Delay,
     );
-    display.init(&mut Delay).unwrap();
-    display.set_orientation(&Orientation::Landscape).unwrap();
-    let mut virtual_display = VirtualDisplay::new(display, 320 / 2, 320 / 2);
+    let mut framebuffer: FrameBuffer<
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        { SCREEN_WIDTH * SCREEN_HEIGHT },
+    > = FrameBuffer::new();
+    display.init().await.unwrap();
+    display.set_custom_orientation(0x40).await.unwrap();
+    framebuffer.draw(&mut display).await.unwrap();
+    display.set_on().await.unwrap();
 
-    let thin_stroke = PrimitiveStyle::with_stroke(Rgb565::RED, 20);
-
-    Rectangle::new(Point::new(10, 10), Size::new(100, 100))
-        .into_styled(thin_stroke)
-        .draw(&mut virtual_display)
-        .unwrap();
+    DISPLAY_SIGNAL.signal(());
 
     loop {
-        Timer::after_millis(500).await;
-    }
-}
+        DISPLAY_SIGNAL.wait().await;
 
-/// simple abstraction over real display & resolution to reduce frame buffer size
-/// by cutting the resolution by 1/4
-struct VirtualDisplay {
-    display: ST7365P<
-        ExclusiveDevice<Spi<'static, SPI1, Blocking>, Output<'static>, Delay>,
-        Output<'static>,
-        Output<'static>,
-    >,
-    width: u32,
-    height: u32,
-}
+        let text_string = crate::STRING.lock().await.clone();
 
-impl VirtualDisplay {
-    pub fn new(
-        display: ST7365P<
-            ExclusiveDevice<Spi<'static, SPI1, Blocking>, Output<'static>, Delay>,
-            Output<'static>,
-            Output<'static>,
-        >,
-        new_width: u32,
-        new_height: u32,
-    ) -> Self {
-        Self {
-            display,
-            width: new_width,
-            height: new_height,
-        }
-    }
-}
+        let text = Text::with_alignment(
+            &text_string,
+            Point::new(160, 160),
+            MonoTextStyle::new(&FONT_10X20, Rgb565::RED),
+            Alignment::Center,
+        );
 
-impl DrawTarget for VirtualDisplay {
-    type Color = Rgb565;
-    type Error = ();
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        for Pixel(coord, color) in pixels.into_iter() {
-            // Check bounds on the *virtual* (already reduced) resolution
-            if coord.x >= 0
-                && coord.y >= 0
-                && coord.x < self.width as i32
-                && coord.y < self.height as i32
-            {
-                let px = coord.x as u16 * 2;
-                let py = coord.y as u16 * 2;
-                let raw_color = RawU16::from(color).into_inner();
-
-                // Draw the 2x2 block on the underlying hardware
-                self.display.set_pixel(px, py, raw_color)?;
-                self.display.set_pixel(px + 1, py, raw_color)?;
-                self.display.set_pixel(px, py + 1, raw_color)?;
-                self.display.set_pixel(px + 1, py + 1, raw_color)?;
+        {
+            let rect = LAST_TEXT_RECT.lock().await;
+            if let Some(rect) = *rect.borrow() {
+                framebuffer.fill_solid(&rect, Rgb565::BLACK).unwrap();
             }
+            *rect.borrow_mut() = Some(text.bounding_box());
         }
-        Ok(())
-    }
-}
 
-impl OriginDimensions for VirtualDisplay {
-    fn size(&self) -> Size {
-        Size::new(self.width, self.height)
+        text.draw(&mut framebuffer).unwrap();
+
+        let start = Instant::now();
+        framebuffer
+            .partial_draw_batched(&mut display)
+            .await
+            .unwrap();
+        info!("Elapsed {}ms", start.elapsed().as_millis());
     }
 }

@@ -1,12 +1,3 @@
-use defmt::{info, warn};
-use embassy_rp::{
-    i2c::{Async, I2c},
-    peripherals::I2C1,
-};
-use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
-    channel::Sender,
-};
 
 use crate::peripherals::PERIPHERAL_BUS;
 
@@ -17,7 +8,7 @@ const KEY_CAPSLOCK: u8 = 1 << 5;
 const KEY_NUMLOCK: u8 = 1 << 6;
 const KEY_COUNT_MASK: u8 = 0x1F; // 0x1F == 31
 
-pub async fn read_keyboard_fifo(channel: &mut Sender<'static, NoopRawMutex, KeyEvent, 10>) {
+pub async fn read_keyboard_fifo() -> Option<KeyEvent> {
     let mut i2c = PERIPHERAL_BUS.get().lock().await;
     let i2c = i2c.as_mut().unwrap();
 
@@ -40,16 +31,15 @@ pub async fn read_keyboard_fifo(channel: &mut Sender<'static, NoopRawMutex, KeyE
                 .await
                 .is_ok()
             {
-                channel
-                    .try_send(KeyEvent {
-                        state: KeyState::from(event[0]),
-                        key: KeyCode::from(event[1]),
-                        mods: Modifiers::NONE,
-                    })
-                    .expect("Failed to push key");
+                return Some(KeyEvent {
+                    state: KeyState::from(event[0]),
+                    key: KeyCode::from(event[1]),
+                    mods: Modifiers::NONE,
+                });
             }
         }
     }
+    None
 }
 
 const REG_ID_DEB: u8 = 0x06;
