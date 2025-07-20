@@ -13,6 +13,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "abi"
+version = "0.1.0"
+dependencies = [
+ "shared",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -191,6 +198,10 @@ name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
+
+[[package]]
+name = "calculator"
+version = "0.1.0"
 
 [[package]]
 name = "cfg-if"
@@ -1159,9 +1170,9 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libredox"
-version = "0.1.4"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1580801010e535496706ba011c15f8532df6b42297d2e471fec38ceadd8c0638"
+checksum = "4488594b9328dee448adb906d8b126d9b7deb7cf5c22161ee591610bb1be83c0"
 dependencies = [
  "bitflags 2.9.1",
  "libc",
@@ -1356,6 +1367,7 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 name = "picocalc-os-rs"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "bitflags 2.9.1",
  "bt-hci",
  "cortex-m",
@@ -1378,6 +1390,7 @@ dependencies = [
  "heapless",
  "panic-probe",
  "portable-atomic",
+ "shared",
  "spin",
  "st7365p-lcd",
  "static_cell",
@@ -1724,6 +1737,14 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest",
  "keccak",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.9.1",
+ "defmt 1.0.1",
 ]
 
 [[package]]

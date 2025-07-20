@@ -1,7 +1,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(ascii_char)]
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 
 use crate::{
     display::DISPLAY_SIGNAL,
@@ -79,4 +79,17 @@ async fn main(_spawner: Spawner) {
         display_handler(spi1, p.PIN_13, p.PIN_14, p.PIN_15),
     )
     .await;
+}
+
+use abi::Syscall;
+
+#[no_mangle]
+pub extern "C" fn syscall_dispatch(call: *const Syscall) -> usize {
+    let call = unsafe { &*call };
+    match call {
+        Syscall::DrawPixel { x, y, color } => {
+            draw_pixel(*x, *y, *color);
+            0
+        }
+    }
 }
