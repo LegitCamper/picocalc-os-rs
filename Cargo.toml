@@ -45,8 +45,9 @@ embassy-rp = { version = "0.4.0", features = [
 ] }
 embassy-futures = "0.1.1"
 embassy-time = "0.4.0"
-embassy-embedded-hal = "0.3.0"
-embassy-sync = { version = "0.7" }
+embassy-embedded-hal = "0.3.1"
+embassy-sync = "0.7"
+embassy-usb = "0.4.0"
 trouble-host = { version = "0.1", features = [
   "derive",
   "scan",
@@ -78,3 +79,4 @@ bitflags = "2.9.1"
 talc = "4.4.3"
 spin = "0.10.0"
 heapless = "0.8.0"
+num_enum = { version = "0.7.4", default-features = false }
