@@ -37,6 +37,7 @@ use display::display_handler;
 mod scsi;
 mod storage;
 mod usb;
+mod utils;
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -65,23 +66,29 @@ async fn main(_spawner: Spawner) {
     let sdcard = {
         let mut config = spi::Config::default();
         config.frequency = 400_000;
-        let spi = Spi::new(
+        let mut spi = Spi::new(
             p.SPI0,
-            p.PIN_18,
-            p.PIN_19,
-            p.PIN_16,
+            p.PIN_18, // clk
+            p.PIN_19, // mosi
+            p.PIN_16, // miso
             p.DMA_CH2,
             p.DMA_CH3,
             config.clone(),
         );
-        let cs = Output::new(p.PIN_5, Level::High);
+        let cs = Output::new(p.PIN_17, Level::High);
+        let det = Input::new(p.PIN_22, Pull::None);
 
         let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
+        Timer::after_millis(500).await;
         let sdcard = SdmmcSdCard::new(device, Delay);
+        while sdcard.num_bytes().await.is_err() {
+            Timer::after_millis(250).await;
+            defmt::error!("Sd init failed, trying again");
+        }
 
         config.frequency = 32_000_000;
         sdcard.spi(|dev| dev.bus_mut().set_config(&config));
-        SdCard::new(sdcard, Input::new(p.PIN_22, Pull::None))
+        SdCard::new(sdcard, det)
     };
 
     usb_handler(usb, sdcard).await;

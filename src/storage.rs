@@ -1,10 +1,11 @@
+use embassy_futures::block_on;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI0;
 use embassy_rp::spi::{Async, Spi};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc;
 use embedded_sdmmc::asynchronous::{
-    Directory, SdCard as SdmmcSdCard, Volume, VolumeIdx, VolumeManager,
+    BlockCount, BlockDevice, Directory, SdCard as SdmmcSdCard, Volume, VolumeIdx, VolumeManager,
 };
 use embedded_sdmmc::blocking::{TimeSource, Timestamp};
 
@@ -25,15 +26,18 @@ impl TimeSource for DummyTimeSource {
     }
 }
 
-pub struct SdCard<'a> {
+pub struct SdCard {
     det: Input<'static>,
     volume_mgr: VolMgr,
-    volume: Option<Vol<'a>>,
-    root: Option<Dir<'a>>,
 }
 
-impl<'a> SdCard<'a> {
+impl SdCard {
     pub fn new(sdcard: SD, det: Input<'static>) -> Self {
+        block_on(sdcard.get_card_type()).unwrap();
+        defmt::info!(
+            "Card size is {} bytes",
+            block_on(sdcard.num_bytes()).unwrap()
+        );
         let volume_mgr = VolumeManager::<_, _, MAX_DIRS, MAX_FILES, MAX_VOLUMES>::new_with_limits(
             sdcard,
             DummyTimeSource {},
@@ -42,25 +46,45 @@ impl<'a> SdCard<'a> {
         Self {
             det: det,
             volume_mgr,
-            volume: None,
-            root: None,
         }
     }
 
     /// Returns true if an SD card is inserted.
     /// The DET pin is active-low via mechanical switch in the socket.
-    fn attached(&self) -> bool {
+    pub fn is_attached(&self) -> bool {
         self.det.is_low()
     }
 
-    async fn get_root(&'a mut self) {
-        let vol = self.volume.as_mut().unwrap();
-        let root = vol.open_root_dir().unwrap();
-        self.root = Some(root);
+    pub async fn open_volume(&mut self) -> Result<Vol<'_>, ()> {
+        if self.is_attached() {
+            return Ok(self
+                .volume_mgr
+                .open_volume(VolumeIdx(0))
+                .await
+                .map_err(|_| ())?);
+        }
+        Err(())
     }
 
-    async fn get_volume(&'a mut self) {
-        let vol = self.volume_mgr.open_volume(VolumeIdx(0)).await.unwrap();
-        self.volume = Some(vol);
+    pub fn size(&self) -> u64 {
+        let mut result = 0;
+
+        self.volume_mgr.device(|sd| {
+            result = block_on(sd.num_bytes()).unwrap_or(0);
+            DummyTimeSource {}
+        });
+
+        result
+    }
+
+    pub fn blocks(&self) -> u32 {
+        let mut result = 0;
+
+        self.volume_mgr.device(|sd| {
+            result = block_on(sd.num_blocks()).unwrap_or(BlockCount(0)).0;
+            DummyTimeSource {}
+        });
+
+        result
     }
 }

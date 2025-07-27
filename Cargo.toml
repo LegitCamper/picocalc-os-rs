@@ -12,7 +12,7 @@ opt-level = "z"
 
 [features]
 default = ["rp235x", "defmt"]
-rp2040 = ["embassy-rp/rp2040"]
+# rp2040 = ["embassy-rp/rp2040"]
 rp235x = ["embassy-rp/rp235xb"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 defmt = [
@@ -44,7 +44,7 @@ embassy-rp = { version = "0.4.0", features = [
   "binary-info",
 ] }
 embassy-futures = "0.1.1"
-embassy-time = "0.4.0"
+embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
 embassy-embedded-hal = "0.3.1"
 embassy-sync = "0.7"
 embassy-usb = "0.4.0"

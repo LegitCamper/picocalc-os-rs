@@ -9,7 +9,7 @@ use embassy_rp::{
 use embassy_time::Delay;
 use embassy_usb::{Builder, Config};
 
-pub async fn usb_handler(driver: Driver<'static, USB>, mut sdcard: SdCard<'_>) {
+pub async fn usb_handler(driver: Driver<'static, USB>, sdcard: SdCard) {
     let mut config = Config::new(0xc0de, 0xcafe);
     config.manufacturer = Some("LegitCamper");
     config.product = Some("PicoCalc");
