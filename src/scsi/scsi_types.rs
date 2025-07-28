@@ -1,5 +1,13 @@
 use num_enum::TryFromPrimitive;
 
+#[derive(Debug, Clone, Copy)]
+pub enum ScsiError {
+    IllegalRequest { asc: u8, ascq: u8 },
+    NotReady { asc: u8, ascq: u8 },
+    MediumError { asc: u8, ascq: u8 },
+    // Add others as needed
+}
+
 /// THE CODE BELOW ORIGINATES FROM: https://github.com/apohrebniak/usbd-storage/blob/master/usbd-storage/src/subclass/scsi.rs
 
 /// SCSI device subclass code

@@ -27,7 +27,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Timer};
 use embedded_graphics::primitives::Rectangle;
 use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::asynchronous::SdCard as SdmmcSdCard;
+use embedded_sdmmc::SdCard as SdmmcSdCard;
 use heapless::String;
 
 mod peripherals;
@@ -66,25 +66,18 @@ async fn main(_spawner: Spawner) {
     let sdcard = {
         let mut config = spi::Config::default();
         config.frequency = 400_000;
-        let mut spi = Spi::new(
+        let spi = Spi::new_blocking(
             p.SPI0,
             p.PIN_18, // clk
             p.PIN_19, // mosi
             p.PIN_16, // miso
-            p.DMA_CH2,
-            p.DMA_CH3,
             config.clone(),
         );
         let cs = Output::new(p.PIN_17, Level::High);
         let det = Input::new(p.PIN_22, Pull::None);
 
         let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
-        Timer::after_millis(500).await;
         let sdcard = SdmmcSdCard::new(device, Delay);
-        while sdcard.num_bytes().await.is_err() {
-            Timer::after_millis(250).await;
-            defmt::error!("Sd init failed, trying again");
-        }
 
         config.frequency = 32_000_000;
         sdcard.spi(|dev| dev.bus_mut().set_config(&config));

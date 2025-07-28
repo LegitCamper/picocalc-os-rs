@@ -2,6 +2,7 @@ use crate::format;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
 use embassy_usb::types::StringIndex;
 use embassy_usb::{Builder, Config};
+use embedded_sdmmc::{Block, BlockIdx};
 use heapless::Vec;
 
 mod scsi_types;
@@ -13,13 +14,14 @@ pub struct MassStorageClass<'d, D: Driver<'d>> {
     sdcard: SdCard,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
+    last_sense: Option<ScsiError>,
 }
 
 impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
     pub fn new(builder: &mut Builder<'d, D>, sdcard: SdCard) -> Self {
-        let mut function = builder.function(0x08, 0x06, 0x50); // Mass Storage class
+        let mut function = builder.function(0x08, SUBCLASS_SCSI, 0x50); // Mass Storage class
         let mut interface = function.interface();
-        let mut alt = interface.alt_setting(0x08, 0x06, 0x50, None);
+        let mut alt = interface.alt_setting(0x08, SUBCLASS_SCSI, 0x50, None);
 
         let bulk_out = alt.endpoint_bulk_out(64);
         let bulk_in = alt.endpoint_bulk_in(64);
@@ -28,6 +30,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
             bulk_out,
             bulk_in,
             sdcard,
+            last_sense: None,
         }
     }
 
@@ -50,6 +53,9 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
     }
 
     async fn handle_command(&mut self, cbw: &[u8]) -> Result<(), ()> {
+        let mut response: Vec<u8, 64> = Vec::new();
+        let mut block = [Block::new(); 1];
+
         match parse_cb(cbw) {
             ScsiCommand::Unknown => {
                 #[cfg(feature = "defmt")]
@@ -61,26 +67,17 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                 page_code,
                 alloc_len,
             } => {
-                #[cfg(feature = "defmt")]
-                defmt::info!(
-                    "SCSI INQUIRY: evpd={}, page_code=0x{:02x}, alloc_len={}",
-                    evpd,
-                    page_code,
-                    alloc_len
-                );
-
-                let mut response: Vec<u8, 64> = Vec::new();
                 if !evpd {
-                    response.push(0x00).unwrap(); // Direct-access block device
-                    response.push(0x80).unwrap(); // Removable
-                    response.push(0x05).unwrap(); // SPC-3 compliance
-                    response.push(0x02).unwrap(); // Response data format
-                    response.push(0).unwrap(); // Additional length
+                    response.push(0x00).map_err(|_| ())?; // Direct-access block device
+                    response.push(0x80).map_err(|_| ())?; // Removable
+                    response.push(0x05).map_err(|_| ())?; // SPC-3 compliance
+                    response.push(0x02).map_err(|_| ())?; // Response data format
+                    response.push(0).map_err(|_| ())?; // Additional length
 
                     // Vendor ID (8 bytes)
-                    response.extend_from_slice(b"RUSTUSB ").unwrap();
+                    response.extend_from_slice(b"LEGTCMPR")?;
                     // Product ID (16 bytes)
-                    response.extend_from_slice(b"Mass Storage    ").unwrap();
+                    response.extend_from_slice(b"Pico Calc Sdcard")?;
 
                     // Product Revision (4 bytes): encode volume size in GB
                     let size_bytes = self.sdcard.size();
@@ -88,36 +85,42 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                     let rev_str = format!(4, "{}", size_gb);
 
                     let rev_bytes = rev_str.as_bytes();
-                    response
-                        .extend_from_slice(&[
-                            *rev_bytes.get(0).unwrap_or(&b'0'),
-                            *rev_bytes.get(1).unwrap_or(&b'0'),
-                            *rev_bytes.get(2).unwrap_or(&b'0'),
-                            *rev_bytes.get(3).unwrap_or(&b'0'),
-                        ])
-                        .unwrap();
+                    response.extend_from_slice(&[
+                        *rev_bytes.get(0).unwrap_or(&b'0'),
+                        *rev_bytes.get(1).unwrap_or(&b'0'),
+                        *rev_bytes.get(2).unwrap_or(&b'0'),
+                        *rev_bytes.get(3).unwrap_or(&b'0'),
+                    ])?;
 
-                    // Now fix up the Additional Length
                     let addl_len = response.len() - 5;
                     response[4] = addl_len as u8;
                 } else {
                     match page_code {
                         0x00 => {
                             response
-                                .extend_from_slice(&[0x00, 0x00, 0x00, 0x03, 0x00, 0x80, 0x83])
-                                .unwrap();
+                                .extend_from_slice(&[
+                                    0x00, // Peripheral Qualifier + Peripheral Device Type (0x00 = Direct-access block device)
+                                    0x00, // Page Code (same as requested: 0x00)
+                                    0x00, 0x03, // Page Length: 3 bytes follow
+                                    0x00, // Supported VPD Page: 0x00 (this one — the "Supported VPD Pages" page itself)
+                                    0x80, // Supported VPD Page: 0x80 (Unit Serial Number)
+                                    0x83, // Supported VPD Page: 0x83 (Device Identification)
+                                ])
+                                .map_err(|_| ())?
                         }
                         0x80 => {
-                            let serial = b"RUST1234";
-                            let mut data: Vec<u8, 64> = Vec::new();
-                            data.extend_from_slice(&[0x00, 0x80, 0x00, serial.len() as u8])
-                                .unwrap();
-                            data.extend_from_slice(serial).unwrap();
+                            let serial = b"Pico Calc";
+                            response.extend_from_slice(&[
+                                0x00, // Peripheral Qualifier & Device Type
+                                0x80, // Page Code = 0x80 (Unit Serial Number)
+                                0x00, // Reserved
+                                serial.len() as u8,
+                            ])?;
+                            response.extend_from_slice(serial)?;
                         }
                         0x83 => {
-                            let id = b"RUSTVOL1";
-                            let mut data: Vec<u8, 64> = Vec::new();
-                            data.extend_from_slice(&[
+                            let id = b"SdCard";
+                            response.extend_from_slice(&[
                                 0x00,
                                 0x83, // Page code
                                 0x00,
@@ -126,9 +129,8 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                                 0x01,                 // Identifier type
                                 0x00,                 // Reserved
                                 id.len() as u8,
-                            ])
-                            .unwrap();
-                            data.extend_from_slice(id).unwrap();
+                            ])?;
+                            response.extend_from_slice(id)?;
                         }
                         _ => (),
                     }
@@ -144,38 +146,87 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                     Err(())
                 }
             }
-            ScsiCommand::RequestSense { desc, alloc_len } => todo!(),
+            ScsiCommand::RequestSense { desc, alloc_len } => Ok(()),
             ScsiCommand::ModeSense6 {
                 dbd,
                 page_control,
                 page_code,
                 subpage_code,
                 alloc_len,
-            } => todo!(),
+            } => Ok(()),
             ScsiCommand::ModeSense10 {
                 dbd,
                 page_control,
                 page_code,
                 subpage_code,
                 alloc_len,
-            } => todo!(),
+            } => Ok(()),
             ScsiCommand::ReadCapacity10 => {
-                const block_size: u64 = 512;
+                let block_size = SdCard::BLOCK_SIZE as u64;
                 let total_blocks = self.sdcard.size() / block_size;
-                defmt::info!("total size: {}", self.sdcard.size());
 
                 let last_lba = total_blocks - 1;
 
-                let mut resp = [0u8; 8];
-                resp[0..4].copy_from_slice(&(last_lba as u32).to_be_bytes());
-                resp[4..8].copy_from_slice(&(block_size as u32).to_be_bytes());
+                response.extend_from_slice(&(last_lba as u32).to_be_bytes())?;
+                response.extend_from_slice(&(block_size as u32).to_be_bytes())?;
 
-                self.bulk_in.write(&resp).await.map_err(|_| ())
+                self.bulk_in.write(&response).await.map_err(|_| ())
             }
-            ScsiCommand::ReadCapacity16 { alloc_len } => todo!(),
-            ScsiCommand::Read { lba, len } => todo!(),
-            ScsiCommand::Write { lba, len } => todo!(),
-            ScsiCommand::ReadFormatCapacities { alloc_len } => todo!(),
+            ScsiCommand::ReadCapacity16 { alloc_len } => {
+                let block_size = SdCard::BLOCK_SIZE as u64;
+                let total_blocks = self.sdcard.size() / block_size;
+
+                let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
+
+                response.extend_from_slice(&last_lba.to_be_bytes()); // 8 bytes last LBA
+                response.extend_from_slice(&(block_size as u32).to_be_bytes()); // 4 bytes block length
+                response.extend_from_slice(&[0u8; 20]); // 20 reserved bytes zeroed
+
+                let len = alloc_len.min(response.len() as u32) as usize;
+                self.bulk_in.write(&response[..len]).await.map_err(|_| ())
+            }
+            ScsiCommand::Read { lba, len } => {
+                for i in 0..len {
+                    let block_idx = BlockIdx(lba as u32 + i as u32);
+                    self.sdcard.read_blocks(&mut block, block_idx);
+                    self.bulk_in
+                        .write(&block[0].contents)
+                        .await
+                        .map_err(|_| ())?;
+                }
+                Ok(())
+            }
+            ScsiCommand::Write { lba, len } => {
+                for i in 0..len {
+                    let block_idx = BlockIdx(lba as u32 + i as u32);
+                    self.bulk_out
+                        .read(&mut block[0].contents)
+                        .await
+                        .map_err(|_| ())?;
+                    self.sdcard.write_blocks(&mut block, block_idx);
+                }
+                Ok(())
+            }
+            ScsiCommand::ReadFormatCapacities { alloc_len } => {
+                let block_size = SdCard::BLOCK_SIZE as u32;
+                let num_blocks = (self.sdcard.size() / block_size as u64) as u32;
+
+                let mut response = [0u8; 12];
+
+                // Capacity List Length (8 bytes follows)
+                response[3] = 8;
+
+                // Descriptor
+                response[4..8].copy_from_slice(&num_blocks.to_be_bytes());
+                response[8] = 0x02; // formatted media
+                response[9..12].copy_from_slice(&block_size.to_be_bytes()[1..4]); // only 3 bytes
+
+                let response_len = alloc_len.min(response.len() as u16) as usize;
+                self.bulk_in
+                    .write(&response[..response_len])
+                    .await
+                    .map_err(|_| ())
+            }
         }
     }
 
@@ -213,18 +264,18 @@ impl CommandBlockWrapper {
         if buf.len() < 31 {
             return None;
         }
-        let dCBWSignature = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let dCBWSignature = u32::from_le_bytes(buf[0..4].try_into().ok()?);
         if dCBWSignature != 0x43425355 {
             return None; // invalid signature
         }
         Some(Self {
             dCBWSignature,
-            dCBWTag: u32::from_le_bytes(buf[4..8].try_into().unwrap()),
-            dCBWDataTransferLength: u32::from_le_bytes(buf[8..12].try_into().unwrap()),
+            dCBWTag: u32::from_le_bytes(buf[4..8].try_into().ok()?),
+            dCBWDataTransferLength: u32::from_le_bytes(buf[8..12].try_into().ok()?),
             bmCBWFlags: buf[12],
             bCBWLUN: buf[13],
             bCBWCBLength: buf[14],
-            CBWCB: buf[15..31].try_into().unwrap(),
+            CBWCB: buf[15..31].try_into().ok()?,
         })
     }
 }
