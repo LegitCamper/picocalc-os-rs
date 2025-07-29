@@ -268,8 +268,8 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                     .map_err(|_| ())
             }
             ScsiCommand::PreventAllowMediumRemoval { prevent: _prevent } => Ok(()),
-            ScsiCommand::StartStopUnit { stop, load_eject } => {
-                if stop && load_eject {
+            ScsiCommand::StartStopUnit { start, load_eject } => {
+                if !start && load_eject {
                     self.state = State::Ejected;
                     self.last_sense = Some(ScsiError::NotReady);
                 }

@@ -91,7 +91,7 @@ pub enum ScsiCommand {
     },
 
     StartStopUnit {
-        stop: bool,
+        start: bool,
         load_eject: bool,
     },
 }
@@ -156,8 +156,8 @@ pub fn parse_cb(cb: &[u8]) -> ScsiCommand {
             prevent: (cb[1] & 0b00000001) != 0,
         },
         START_STOP_UNIT => ScsiCommand::StartStopUnit {
-            stop: (cb[1] & 0b00000001) != 0,
-            load_eject: (cb[1] & 0b00000010) == 0,
+            start: (cb[4] & 0b00000001) != 0,
+            load_eject: (cb[4] & 0b00000010) != 0,
         },
         _ => ScsiCommand::Unknown,
     }
