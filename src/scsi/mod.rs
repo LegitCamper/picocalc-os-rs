@@ -10,6 +10,8 @@ use scsi_types::*;
 
 use crate::storage::SdCard;
 
+const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
+
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     sdcard: SdCard,
     bulk_out: D::EndpointOut,
@@ -23,8 +25,8 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
         let mut interface = function.interface();
         let mut alt = interface.alt_setting(0x08, SUBCLASS_SCSI, 0x50, None);
 
-        let bulk_out = alt.endpoint_bulk_out(64);
-        let bulk_in = alt.endpoint_bulk_in(64);
+        let bulk_out = alt.endpoint_bulk_out(BULK_ENDPOINT_PACKET_SIZE as u16);
+        let bulk_in = alt.endpoint_bulk_in(BULK_ENDPOINT_PACKET_SIZE as u16);
 
         Self {
             bulk_out,
@@ -53,7 +55,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
     }
 
     async fn handle_command(&mut self, cbw: &[u8]) -> Result<(), ()> {
-        let mut response: Vec<u8, 64> = Vec::new();
+        let mut response: Vec<u8, BULK_ENDPOINT_PACKET_SIZE> = Vec::new();
         let mut block = [Block::new(); 1];
 
         match parse_cb(cbw) {
@@ -211,22 +213,22 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
             ScsiCommand::Read { lba, len } => {
                 for i in 0..len {
                     let block_idx = BlockIdx(lba as u32 + i as u32);
-                    defmt::info!("Reading LBA {} (block idx: {:?})", lba, block_idx);
                     self.sdcard.read_blocks(&mut block, block_idx);
-                    self.bulk_in
-                        .write(&block[0].contents)
-                        .await
-                        .map_err(|_| ())?;
+                    for chunk in block[0].contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
+                        self.bulk_in.write(chunk).await.map_err(|_| ())?;
+                    }
                 }
                 Ok(())
             }
             ScsiCommand::Write { lba, len } => {
                 for i in 0..len {
                     let block_idx = BlockIdx(lba as u32 + i as u32);
-                    self.bulk_out
-                        .read(&mut block[0].contents)
-                        .await
-                        .map_err(|_| ())?;
+                    for chunk in block[0]
+                        .contents
+                        .chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
+                    {
+                        slf.bulk_out.read(chunk).await.map_err(|_| ())?;
+                    }
                     self.sdcard.write_blocks(&mut block, block_idx);
                 }
                 Ok(())
