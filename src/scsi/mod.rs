@@ -44,7 +44,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                         if self.handle_command(&cbw.CBWCB).await.is_ok() {
                             self.send_csw_success(cbw.dCBWTag).await
                         } else {
-                            self.send_csw_success(cbw.dCBWTag).await
+                            self.send_csw_fail(cbw.dCBWTag).await
                         }
                     }
                 }
@@ -59,7 +59,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
         match parse_cb(cbw) {
             ScsiCommand::Unknown => {
                 #[cfg(feature = "defmt")]
-                defmt::info!("Got unexpected scsi command: {}", cbw);
+                defmt::warn!("Got unexpected scsi command: {}", cbw);
                 Err(())
             }
             ScsiCommand::Inquiry {
@@ -72,28 +72,27 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                     response.push(0x80).map_err(|_| ())?; // Removable
                     response.push(0x05).map_err(|_| ())?; // SPC-3 compliance
                     response.push(0x02).map_err(|_| ())?; // Response data format
-                    response.push(0).map_err(|_| ())?; // Additional length
+                    response.push(0x00).map_err(|_| ())?; // Additional length - edited later
+                    response.push(0x00).map_err(|_| ())?; // FLAGS
+                    response.push(0x00).map_err(|_| ())?; // FLAGS
+                    response.push(0).map_err(|_| ())?; // FLAGS
+                    assert!(response.len() == 8);
 
-                    // Vendor ID (8 bytes)
-                    response.extend_from_slice(b"LEGTCMPR")?;
-                    // Product ID (16 bytes)
-                    response.extend_from_slice(b"Pico Calc Sdcard")?;
+                    let vendor = b"LEGTCMPR";
+                    assert!(vendor.len() == 8);
+                    response.extend_from_slice(vendor)?;
 
-                    // Product Revision (4 bytes): encode volume size in GB
-                    let size_bytes = self.sdcard.size();
-                    let size_gb = ((size_bytes + 500_000_000) / 1_000_000_000) as u32;
-                    let rev_str = format!(4, "{}", size_gb);
+                    let product = b"Pico Calc Sdcard";
+                    assert!(product.len() == 16);
+                    response.extend_from_slice(product)?;
 
-                    let rev_bytes = rev_str.as_bytes();
-                    response.extend_from_slice(&[
-                        *rev_bytes.get(0).unwrap_or(&b'0'),
-                        *rev_bytes.get(1).unwrap_or(&b'0'),
-                        *rev_bytes.get(2).unwrap_or(&b'0'),
-                        *rev_bytes.get(3).unwrap_or(&b'0'),
-                    ])?;
+                    let version = b"1.00";
+                    assert!(version.len() == 4);
+                    response.extend_from_slice(version)?; // 4-byte firmware version
 
                     let addl_len = response.len() - 5;
                     response[4] = addl_len as u8;
+                    assert!(response.len() == 36);
                 } else {
                     match page_code {
                         0x00 => {
@@ -153,19 +152,43 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                 page_code,
                 subpage_code,
                 alloc_len,
-            } => Ok(()),
+            } => {
+                // DBD=0, no block descriptors; total length = 4
+                let response = [
+                    0x03, // Mode data length (excluding this byte): 3
+                    0x00, // Medium type
+                    0x00, // Device-specific parameter
+                    0x00, // Block descriptor length = 0 (DBD = 1)
+                ];
+
+                let len = alloc_len.min(response.len() as u8) as usize;
+
+                self.bulk_in.write(&response[..len]).await.map_err(|_| ())
+            }
             ScsiCommand::ModeSense10 {
                 dbd,
                 page_control,
                 page_code,
                 subpage_code,
                 alloc_len,
-            } => Ok(()),
+            } => {
+                let response = [
+                    0x00, 0x06, // Mode data length = 6
+                    0x00, // Medium type
+                    0x00, // Device-specific parameter
+                    0x00, 0x00, // Reserved
+                    0x00, 0x00, // Block descriptor length = 0
+                ];
+
+                let len = alloc_len.min(response.len() as u16) as usize;
+
+                self.bulk_in.write(&response[..len]).await.map_err(|_| ())
+            }
             ScsiCommand::ReadCapacity10 => {
                 let block_size = SdCard::BLOCK_SIZE as u64;
                 let total_blocks = self.sdcard.size() / block_size;
 
-                let last_lba = total_blocks - 1;
+                let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
                 response.extend_from_slice(&(last_lba as u32).to_be_bytes())?;
                 response.extend_from_slice(&(block_size as u32).to_be_bytes())?;
@@ -178,9 +201,9 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
 
                 let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
-                response.extend_from_slice(&last_lba.to_be_bytes()); // 8 bytes last LBA
-                response.extend_from_slice(&(block_size as u32).to_be_bytes()); // 4 bytes block length
-                response.extend_from_slice(&[0u8; 20]); // 20 reserved bytes zeroed
+                response.extend_from_slice(&last_lba.to_be_bytes())?; // 8 bytes last LBA
+                response.extend_from_slice(&(block_size as u32).to_be_bytes())?; // 4 bytes block length
+                response.extend_from_slice(&[0u8; 20])?; // 20 reserved bytes zeroed
 
                 let len = alloc_len.min(response.len() as u32) as usize;
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
@@ -188,6 +211,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
             ScsiCommand::Read { lba, len } => {
                 for i in 0..len {
                     let block_idx = BlockIdx(lba as u32 + i as u32);
+                    defmt::info!("Reading LBA {} (block idx: {:?})", lba, block_idx);
                     self.sdcard.read_blocks(&mut block, block_idx);
                     self.bulk_in
                         .write(&block[0].contents)
@@ -218,7 +242,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
 
                 // Descriptor
                 response[4..8].copy_from_slice(&num_blocks.to_be_bytes());
-                response[8] = 0x02; // formatted media
+                response[8] = 0x03; // formatted media
                 response[9..12].copy_from_slice(&block_size.to_be_bytes()[1..4]); // only 3 bytes
 
                 let response_len = alloc_len.min(response.len() as u16) as usize;
@@ -227,6 +251,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                     .await
                     .map_err(|_| ())
             }
+            ScsiCommand::PreventAllowMediumRemoval { prevent: _prevent } => Ok(()),
         }
     }
 
@@ -235,6 +260,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
     }
 
     pub async fn send_csw_fail(&mut self, tag: u32) {
+        defmt::error!("Command Failed");
         self.send_csw(tag, 0x01, 0).await; // 0x01 = Command Failed
     }
 

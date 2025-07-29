@@ -32,6 +32,8 @@ const WRITE_10: u8 = 0x2A;
 /* MMC */
 const READ_FORMAT_CAPACITIES: u8 = 0x23;
 
+const PREVENT_ALLOW_MEDIUM_REMOVAL: u8 = 0x1E;
+
 /// SCSI command
 ///
 /// Refer to specifications (SPC,SAM,SBC,MMC,etc.)
@@ -84,6 +86,10 @@ pub enum ScsiCommand {
     /* MMC */
     ReadFormatCapacities {
         alloc_len: u16,
+    },
+
+    PreventAllowMediumRemoval {
+        prevent: bool,
     },
 }
 
@@ -142,6 +148,9 @@ pub fn parse_cb(cb: &[u8]) -> ScsiCommand {
         },
         READ_FORMAT_CAPACITIES => ScsiCommand::ReadFormatCapacities {
             alloc_len: u16::from_be_bytes([cb[7], cb[8]]),
+        },
+        PREVENT_ALLOW_MEDIUM_REMOVAL => ScsiCommand::PreventAllowMediumRemoval {
+            prevent: (cb[1] & 0b00000001) != 0,
         },
         _ => ScsiCommand::Unknown,
     }
