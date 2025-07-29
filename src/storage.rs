@@ -1,12 +1,11 @@
-use embassy_futures::block_on;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI0;
 use embassy_rp::spi::{Blocking, Spi};
+use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::{self, Block, BlockIdx};
 use embedded_sdmmc::{
-    BlockCount, BlockDevice, Directory, SdCard as SdmmcSdCard, TimeSource, Timestamp, Volume,
-    VolumeIdx, VolumeManager,
+    Block, BlockCount, BlockDevice, BlockIdx, Directory, SdCard as SdmmcSdCard, TimeSource,
+    Timestamp, Volume, VolumeIdx, VolumeManager, sdcard::Error,
 };
 
 pub const MAX_DIRS: usize = 4;
@@ -14,7 +13,7 @@ pub const MAX_FILES: usize = 5;
 pub const MAX_VOLUMES: usize = 1;
 
 type Device = ExclusiveDevice<Spi<'static, SPI0, Blocking>, Output<'static>, embassy_time::Delay>;
-type SD = SdmmcSdCard<Device, embassy_time::Delay>;
+type SD = SdmmcSdCard<Device, Delay>;
 type VolMgr = VolumeManager<SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Vol<'a> = Volume<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Dir<'a> = Directory<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
@@ -83,17 +82,21 @@ impl SdCard {
         result
     }
 
-    pub fn read_blocks(&self, blocks: &mut [Block], start_block_idx: BlockIdx) {
+    pub fn read_blocks(&self, blocks: &mut [Block], start_block_idx: BlockIdx) -> Result<(), ()> {
+        let mut res: Result<(), Error> = Ok(());
         self.volume_mgr.device(|sd| {
-            sd.read(blocks, start_block_idx);
+            res = sd.read(blocks, start_block_idx);
             DummyTimeSource {}
         });
+        res.map_err(|_| ())
     }
 
-    pub fn write_blocks(&self, blocks: &mut [Block], start_block_idx: BlockIdx) {
+    pub fn write_blocks(&self, blocks: &mut [Block], start_block_idx: BlockIdx) -> Result<(), ()> {
+        let mut res: Result<(), Error> = Ok(());
         self.volume_mgr.device(|sd| {
-            sd.write(blocks, start_block_idx);
+            let res = sd.write(blocks, start_block_idx);
             DummyTimeSource {}
         });
+        res.map_err(|_| ())
     }
 }

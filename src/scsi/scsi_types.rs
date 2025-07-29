@@ -2,10 +2,7 @@ use num_enum::TryFromPrimitive;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ScsiError {
-    IllegalRequest { asc: u8, ascq: u8 },
-    NotReady { asc: u8, ascq: u8 },
-    MediumError { asc: u8, ascq: u8 },
-    // Add others as needed
+    NotReady,
 }
 
 /// THE CODE BELOW ORIGINATES FROM: https://github.com/apohrebniak/usbd-storage/blob/master/usbd-storage/src/subclass/scsi.rs
@@ -33,6 +30,7 @@ const WRITE_10: u8 = 0x2A;
 const READ_FORMAT_CAPACITIES: u8 = 0x23;
 
 const PREVENT_ALLOW_MEDIUM_REMOVAL: u8 = 0x1E;
+const START_STOP_UNIT: u8 = 0x1B;
 
 /// SCSI command
 ///
@@ -90,6 +88,11 @@ pub enum ScsiCommand {
 
     PreventAllowMediumRemoval {
         prevent: bool,
+    },
+
+    StartStopUnit {
+        stop: bool,
+        load_eject: bool,
     },
 }
 
@@ -151,6 +154,10 @@ pub fn parse_cb(cb: &[u8]) -> ScsiCommand {
         },
         PREVENT_ALLOW_MEDIUM_REMOVAL => ScsiCommand::PreventAllowMediumRemoval {
             prevent: (cb[1] & 0b00000001) != 0,
+        },
+        START_STOP_UNIT => ScsiCommand::StartStopUnit {
+            stop: (cb[1] & 0b00000001) != 0,
+            load_eject: (cb[1] & 0b00000010) == 0,
         },
         _ => ScsiCommand::Unknown,
     }
