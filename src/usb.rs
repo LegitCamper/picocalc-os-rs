@@ -1,12 +1,6 @@
 use crate::{scsi::MassStorageClass, storage::SdCard};
-use embassy_futures::join::{self, join};
-use embassy_rp::{
-    gpio::Output,
-    peripherals::{SPI0, USB},
-    spi::{Async, Spi},
-    usb::Driver,
-};
-use embassy_time::Delay;
+use embassy_futures::select::select;
+use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_usb::{Builder, Config};
 
 pub async fn usb_handler(driver: Driver<'static, USB>, sdcard: SdCard) {
@@ -33,5 +27,10 @@ pub async fn usb_handler(driver: Driver<'static, USB>, sdcard: SdCard) {
     let mut scsi = MassStorageClass::new(&mut builder, sdcard);
     let mut usb = builder.build();
 
-    join(usb.run(), scsi.poll()).await;
+    loop {
+        select(usb.run(), scsi.poll()).await;
+
+        defmt::warn!("rebuilding usb");
+        usb.disable().await;
+    }
 }

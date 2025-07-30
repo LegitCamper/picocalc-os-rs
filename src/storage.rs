@@ -34,8 +34,6 @@ impl SdCard {
     pub const BLOCK_SIZE: u16 = 512;
 
     pub fn new(sdcard: SD, det: Input<'static>) -> Self {
-        sdcard.get_card_type().unwrap();
-        defmt::info!("Card size is {} bytes", sdcard.num_bytes().unwrap());
         let volume_mgr = VolumeManager::<_, _, MAX_DIRS, MAX_FILES, MAX_VOLUMES>::new_with_limits(
             sdcard,
             DummyTimeSource {},

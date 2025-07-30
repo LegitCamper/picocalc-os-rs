@@ -12,18 +12,10 @@ use crate::storage::SdCard;
 
 const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 
-#[derive(PartialEq, Eq)]
-enum State {
-    Ready,
-    Ejected,
-}
-
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     sdcard: SdCard,
-    state: State,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
-    last_sense: Option<ScsiError>,
 }
 
 impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
@@ -39,8 +31,6 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
             bulk_out,
             bulk_in,
             sdcard,
-            state: State::Ready,
-            last_sense: None,
         }
     }
 
@@ -50,12 +40,6 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
             if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
                 if n == 31 {
                     if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
-                        if self.state == State::Ejected {
-                            self.last_sense = Some(ScsiError::NotReady);
-                            self.send_csw_fail(cbw.dCBWTag).await;
-                            continue;
-                        }
-
                         // TODO: validate cbw
                         if self.handle_command(&cbw.CBWCB).await.is_ok() {
                             self.send_csw_success(cbw.dCBWTag).await
@@ -268,13 +252,7 @@ impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
                     .map_err(|_| ())
             }
             ScsiCommand::PreventAllowMediumRemoval { prevent: _prevent } => Ok(()),
-            ScsiCommand::StartStopUnit { start, load_eject } => {
-                if !start && load_eject {
-                    self.state = State::Ejected;
-                    self.last_sense = Some(ScsiError::NotReady);
-                }
-                Ok(())
-            }
+            ScsiCommand::StartStopUnit { start, load_eject } => Ok(()),
         }
     }
 
