@@ -21,8 +21,6 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use portable_atomic::AtomicBool;
 use st7365p_lcd::{FrameBuffer, ST7365P};
 
-use crate::LAST_TEXT_RECT;
-
 const SCREEN_WIDTH: usize = 320;
 const SCREEN_HEIGHT: usize = 320;
 
@@ -58,24 +56,7 @@ pub async fn display_handler(
     loop {
         DISPLAY_SIGNAL.wait().await;
 
-        let text_string = crate::STRING.lock().await.clone();
-
-        let text = Text::with_alignment(
-            &text_string,
-            Point::new(160, 160),
-            MonoTextStyle::new(&FONT_10X20, Rgb565::RED),
-            Alignment::Center,
-        );
-
-        {
-            let rect = LAST_TEXT_RECT.lock().await;
-            if let Some(rect) = *rect.borrow() {
-                framebuffer.fill_solid(&rect, Rgb565::BLACK).unwrap();
-            }
-            *rect.borrow_mut() = Some(text.bounding_box());
-        }
-
-        text.draw(&mut framebuffer).unwrap();
+        // text.draw(&mut framebuffer).unwrap();
 
         let start = Instant::now();
         framebuffer

@@ -43,9 +43,10 @@ embassy-rp = { version = "0.4.0", features = [
   "time-driver",
   "binary-info",
 ] }
+embassy-usb = "0.4.0"
 embassy-futures = "0.1.1"
-embassy-time = "0.4.0"
-embassy-embedded-hal = "0.3.0"
+embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
+embassy-embedded-hal = "0.3.1"
 embassy-sync = { version = "0.7" }
 trouble-host = { version = "0.1", features = [
   "derive",
@@ -70,7 +71,7 @@ defmt = { version = "0.3", optional = true }
 defmt-rtt = "0.4.2"
 
 embedded-graphics = { version = "0.8.1" }
-embedded-sdmmc = { git = "https://github.com/Be-ing/embedded-sdmmc-rs", branch = "bisync", default-features = false }
+embedded-sdmmc = { version = "0.9", default-features = false }
 st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs", branch = "async" }
 
 shared = { path = "../shared" }
@@ -81,3 +82,4 @@ bitflags = "2.9.1"
 talc = "4.4.3"
 spin = "0.10.0"
 heapless = "0.8.0"
+num_enum = { version = "0.7.4", default-features = false }
