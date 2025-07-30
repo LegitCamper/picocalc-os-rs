@@ -3,9 +3,19 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+mod display;
+mod peripherals;
+mod scsi;
+mod storage;
+mod usb;
+mod utils;
+
 use crate::{
-    display::DISPLAY_SIGNAL,
-    peripherals::keyboard::{KeyCode, KeyState, read_keyboard_fifo},
+    display::{FRAMEBUFFER, display_handler, init_display},
+    peripherals::{
+        conf_peripherals,
+        keyboard::{KeyCode, KeyState, read_keyboard_fifo},
+    },
     storage::SdCard,
     usb::usb_handler,
 };
@@ -14,7 +24,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use core::cell::RefCell;
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
+use embassy_futures::join::{join, join3};
 use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     peripherals::{I2C1, USB},
@@ -25,19 +35,17 @@ use embassy_rp::{i2c, i2c::I2c, spi};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Timer};
-use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::{
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
+    pixelcolor::{BinaryColor, Rgb565},
+    prelude::{Point, RgbColor},
+    primitives::Rectangle,
+    text::{Text, TextStyle},
+};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
 use heapless::String;
-
-mod peripherals;
-use peripherals::conf_peripherals;
-mod display;
-use display::display_handler;
-mod scsi;
-mod storage;
-mod usb;
-mod utils;
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -54,25 +62,30 @@ async fn main(_spawner: Spawner) {
     let i2c1 = I2c::new_async(p.I2C1, p.PIN_7, p.PIN_6, Irqs, config);
     conf_peripherals(i2c1).await;
 
-    // SPI1 bus display
-    let mut config = spi::Config::default();
-    config.frequency = 16_000_000;
-    let spi1 = spi::Spi::new(
-        p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, p.DMA_CH0, p.DMA_CH1, config,
-    );
+    Timer::after_millis(250).await;
 
-    let usb = embassy_rp_usb::Driver::new(p.USB, Irqs);
+    let display_fut = {
+        let mut config = spi::Config::default();
+        config.frequency = 16_000_000;
+        let spi = Spi::new(
+            p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, p.DMA_CH0, p.DMA_CH1, config,
+        );
+        let cs = p.PIN_13;
+        let data = p.PIN_14;
+        let reset = p.PIN_15;
+
+        let display = init_display(spi, cs, data, reset).await;
+        display_handler(display)
+    };
+    defmt::info!("ready");
 
     let sdcard = {
         let mut config = spi::Config::default();
         config.frequency = 400_000;
-        let spi = Spi::new_blocking(
-            p.SPI0,
-            p.PIN_18, // clk
-            p.PIN_19, // mosi
-            p.PIN_16, // miso
-            config.clone(),
-        );
+        let clk = p.PIN_18;
+        let mosi = p.PIN_19;
+        let miso = p.PIN_16;
+        let spi = Spi::new_blocking(p.SPI0, clk, mosi, miso, config.clone());
         let cs = Output::new(p.PIN_17, Level::High);
         let det = Input::new(p.PIN_22, Pull::None);
 
@@ -84,18 +97,16 @@ async fn main(_spawner: Spawner) {
         SdCard::new(sdcard, det)
     };
 
-    usb_handler(usb, sdcard).await;
-}
+    let usb = embassy_rp_usb::Driver::new(p.USB, Irqs);
+    let usb_fut = usb_handler(usb, sdcard);
 
-use abi::Syscall;
+    Text::new(
+        "Framebuffer works",
+        Point::new(100, 100),
+        MonoTextStyle::new(&FONT_6X10, Rgb565::GREEN),
+    )
+    .draw(*FRAMEBUFFER.lock().await.get_mut().as_mut().unwrap())
+    .unwrap();
 
-#[no_mangle]
-pub extern "C" fn syscall_dispatch(call: *const Syscall) -> usize {
-    let call = unsafe { &*call };
-    match call {
-        Syscall::DrawPixels { x, y, color } => {
-            draw_pixel(*x, *y, *color);
-            0
-        }
-    }
+    display_fut.await;
 }
