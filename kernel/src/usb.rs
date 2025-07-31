@@ -1,5 +1,5 @@
-use crate::{scsi::MassStorageClass, storage::SdCard};
-use embassy_futures::select::select;
+use crate::{USB_ENABLED, scsi::MassStorageClass, storage::SdCard};
+use embassy_futures::{join::join, select::select3};
 use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_usb::{Builder, Config};
 
@@ -28,9 +28,19 @@ pub async fn usb_handler(driver: Driver<'static, USB>, sdcard: SdCard) {
     let mut usb = builder.build();
 
     loop {
-        select(usb.run(), scsi.poll()).await;
-
-        defmt::warn!("rebuilding usb");
-        usb.disable().await;
+        if USB_ENABLED.wait().await {
+            select3(
+                async {
+                    loop {
+                        // stop usb task until usb is enabled again
+                        USB_ENABLED.wait().await;
+                        return; // breaks out of select
+                    }
+                },
+                usb.run(),
+                scsi.poll(),
+            )
+            .await;
+        }
     }
 }

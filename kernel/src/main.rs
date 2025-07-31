@@ -24,7 +24,7 @@ use crate::{
 use {defmt_rtt as _, panic_probe as _};
 
 use embassy_executor::Spawner;
-use embassy_futures::join::join3;
+use embassy_futures::join::{join, join3};
 use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     peripherals::{I2C1, USB},
@@ -32,6 +32,7 @@ use embassy_rp::{
     usb as embassy_rp_usb,
 };
 use embassy_rp::{i2c, i2c::I2c, spi};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
@@ -40,6 +41,9 @@ embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
     USBCTRL_IRQ => embassy_rp_usb::InterruptHandler<USB>;
 });
+
+// Controls the usb running to prevents sdcard writes via scsi and by the kernel
+static USB_ENABLED: Signal<ThreadModeRawMutex, bool> = Signal::new();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -86,7 +90,8 @@ async fn main(_spawner: Spawner) {
     };
 
     let usb = embassy_rp_usb::Driver::new(p.USB, Irqs);
+    USB_ENABLED.signal(true);
     let usb_fut = usb_handler(usb, sdcard);
 
-    join3(async { loop {} }, usb_fut, display_fut).await;
+    join(usb_fut, display_fut).await;
 }
