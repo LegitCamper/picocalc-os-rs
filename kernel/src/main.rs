@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+mod abi;
 mod display;
 mod peripherals;
 mod scsi;
@@ -11,7 +12,7 @@ mod usb;
 mod utils;
 
 use crate::{
-    display::{FRAMEBUFFER, display_handler, init_display},
+    display::{display_handler, init_display},
     peripherals::{
         conf_peripherals,
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
@@ -22,9 +23,8 @@ use crate::{
 
 use {defmt_rtt as _, panic_probe as _};
 
-use core::cell::RefCell;
 use embassy_executor::Spawner;
-use embassy_futures::join::{join, join3};
+use embassy_futures::join::join3;
 use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     peripherals::{I2C1, USB},
@@ -32,20 +32,9 @@ use embassy_rp::{
     usb as embassy_rp_usb,
 };
 use embassy_rp::{i2c, i2c::I2c, spi};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Timer};
-use embedded_graphics::{
-    Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_6X10},
-    pixelcolor::{BinaryColor, Rgb565},
-    prelude::{Point, RgbColor},
-    primitives::Rectangle,
-    text::{Text, TextStyle},
-};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
-use heapless::String;
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -77,7 +66,6 @@ async fn main(_spawner: Spawner) {
         let display = init_display(spi, cs, data, reset).await;
         display_handler(display)
     };
-    defmt::info!("ready");
 
     let sdcard = {
         let mut config = spi::Config::default();
@@ -100,13 +88,5 @@ async fn main(_spawner: Spawner) {
     let usb = embassy_rp_usb::Driver::new(p.USB, Irqs);
     let usb_fut = usb_handler(usb, sdcard);
 
-    Text::new(
-        "Framebuffer works",
-        Point::new(100, 100),
-        MonoTextStyle::new(&FONT_6X10, Rgb565::GREEN),
-    )
-    .draw(*FRAMEBUFFER.lock().await.get_mut().as_mut().unwrap())
-    .unwrap();
-
-    display_fut.await;
+    join3(async { loop {} }, usb_fut, display_fut).await;
 }

@@ -5,5 +5,5 @@ use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
 #[repr(C)]
 pub enum Syscall {
-    DrawPixels { x: u32, y: u32, color: u32 },
+    DrawPixel { x: u32, y: u32, color: u16 },
 }

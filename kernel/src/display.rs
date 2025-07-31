@@ -1,24 +1,12 @@
-use core::{cell::RefCell, sync::atomic::Ordering};
-
-use defmt::info;
+use core::cell::RefCell;
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Spi},
 };
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex, signal::Signal};
-use embassy_time::{Delay, Instant, Timer};
-use embedded_graphics::{
-    Drawable,
-    draw_target::DrawTarget,
-    mono_font::{MonoTextStyle, ascii::FONT_10X20},
-    pixelcolor::Rgb565,
-    prelude::{Dimensions, Point, RgbColor, Size},
-    primitives::Rectangle,
-    text::{Alignment, Text},
-};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
+use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use portable_atomic::AtomicBool;
 use st7365p_lcd::{FrameBuffer, ST7365P};
 use static_cell::StaticCell;
 
@@ -44,7 +32,6 @@ pub async fn init_display(
     reset: PIN_15,
 ) -> DISPLAY {
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
-    defmt::info!("spi made");
     let mut display = ST7365P::new(
         spi_device,
         Output::new(data, Level::Low),
@@ -68,7 +55,6 @@ pub async fn init_display(
 
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
-        defmt::info!("drawing");
         FRAMEBUFFER
             .lock()
             .await
