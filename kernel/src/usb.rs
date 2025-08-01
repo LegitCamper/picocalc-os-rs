@@ -13,8 +13,8 @@ use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_usb::{Builder, Config};
 use portable_atomic::AtomicBool;
 
-static RESTART_USB: Signal<ThreadModeRawMutex, ()> = Signal::new();
-static ENABLE_SCSI: AtomicBool = AtomicBool::new(false);
+pub static RESTART_USB: Signal<ThreadModeRawMutex, ()> = Signal::new();
+pub static ENABLE_SCSI: AtomicBool = AtomicBool::new(false);
 
 pub async fn usb_handler(driver: Driver<'static, USB>) {
     let mut config = Config::new(0xc0de, 0xcafe);
@@ -38,11 +38,8 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
     );
 
     let lock = SDCARD.get().lock().await;
-    let mut sdcard = lock.as_ref().unwrap();
+    let sdcard = lock.as_ref().unwrap();
 
-    if sdcard.is_attached() {
-        ENABLE_SCSI.store(true, Ordering::Relaxed);
-    }
     let mut scsi = MassStorageClass::new(&mut builder, &sdcard);
     let mut usb = builder.build();
 
