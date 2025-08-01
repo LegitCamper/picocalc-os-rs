@@ -42,9 +42,6 @@ embassy_rp::bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => embassy_rp_usb::InterruptHandler<USB>;
 });
 
-// Controls the usb running to prevents sdcard writes via scsi and by the kernel
-static USB_ENABLED: Signal<ThreadModeRawMutex, bool> = Signal::new();
-
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
@@ -90,7 +87,6 @@ async fn main(_spawner: Spawner) {
     };
 
     let usb = embassy_rp_usb::Driver::new(p.USB, Irqs);
-    USB_ENABLED.signal(true);
     let usb_fut = usb_handler(usb, sdcard);
 
     join(usb_fut, display_fut).await;
