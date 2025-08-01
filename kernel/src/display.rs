@@ -17,8 +17,8 @@ type DISPLAY = ST7365P<
     Delay,
 >;
 
-const SCREEN_WIDTH: usize = 320;
-const SCREEN_HEIGHT: usize = 320;
+pub const SCREEN_WIDTH: usize = 320;
+pub const SCREEN_HEIGHT: usize = 320;
 
 type FB = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, { SCREEN_WIDTH * SCREEN_HEIGHT }>;
 static FRAMEBUFFER_CELL: StaticCell<FB> = StaticCell::new();

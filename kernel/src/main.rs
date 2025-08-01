@@ -8,6 +8,7 @@ mod display;
 mod peripherals;
 mod scsi;
 mod storage;
+mod ui;
 mod usb;
 mod utils;
 
@@ -17,7 +18,7 @@ use crate::{
         conf_peripherals,
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
     },
-    storage::SdCard,
+    storage::{SDCARD, SdCard},
     usb::usb_handler,
 };
 
@@ -68,7 +69,7 @@ async fn main(_spawner: Spawner) {
         display_handler(display)
     };
 
-    let sdcard = {
+    {
         let mut config = spi::Config::default();
         config.frequency = 400_000;
         let clk = p.PIN_18;
@@ -83,11 +84,11 @@ async fn main(_spawner: Spawner) {
 
         config.frequency = 32_000_000;
         sdcard.spi(|dev| dev.bus_mut().set_config(&config));
-        SdCard::new(sdcard, det)
+        SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
     };
 
     let usb = embassy_rp_usb::Driver::new(p.USB, Irqs);
-    let usb_fut = usb_handler(usb, sdcard);
+    let usb_fut = usb_handler(usb);
 
     join(usb_fut, display_fut).await;
 }

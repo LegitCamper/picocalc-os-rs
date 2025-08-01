@@ -205,6 +205,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 [[package]]
 name = "calculator"
 version = "0.1.0"
+dependencies = [
+ "abi",
+]
 
 [[package]]
 name = "cfg-if"
@@ -420,6 +423,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6178a82cf56c836a3ba61a7935cdb1c49bfaa6fa4327cd5bf554a503087de26b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "diff"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -470,6 +484,26 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
+name = "elf"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
+
+[[package]]
+name = "elf_loader"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30a0da8db95cff71e500b3d7015c2441a4eb628e0df788b23d1b8d1243314342"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "delegate",
+ "elf",
+ "portable-atomic",
+ "portable-atomic-util",
+]
 
 [[package]]
 name = "embassy-embedded-hal"
@@ -810,6 +844,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff09972d4073aa8c299395be75161d582e7629cd663171d62af73c8d50dba3f"
 dependencies = [
  "embedded-io",
+]
+
+[[package]]
+name = "embedded-layout"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a90553247f2b05c59ac7894ea13d830636c2b1203fa03bff400eddbd1fa9f52"
+dependencies = [
+ "embedded-graphics",
+ "embedded-layout-macros",
+]
+
+[[package]]
+name = "embedded-layout-macros"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f6e621fe4c7e05b695274b722dc0a60bacd1c8696b58191baa0154713d52400"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -1407,6 +1462,7 @@ dependencies = [
  "cyw43-pio",
  "defmt 0.3.100",
  "defmt-rtt",
+ "elf_loader",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
@@ -1418,6 +1474,7 @@ dependencies = [
  "embedded-hal 0.2.7",
  "embedded-hal-async",
  "embedded-hal-bus",
+ "embedded-layout",
  "embedded-sdmmc",
  "heapless",
  "num_enum 0.7.4",
@@ -1538,6 +1595,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
 dependencies = [
  "critical-section",
+]
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
+dependencies = [
+ "portable-atomic",
 ]
 
 [[package]]

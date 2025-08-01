@@ -70,12 +70,10 @@ portable-atomic = { version = "1.11", features = ["critical-section"] }
 defmt = { version = "0.3", optional = true }
 defmt-rtt = "0.4.2"
 
-embedded-graphics = { version = "0.8.1" }
 embedded-sdmmc = { version = "0.9", default-features = false }
 st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs", rev = "87abf450404865dcb535292e9e1a6a2457fd4599" } # async branch
-
-shared = { path = "../shared" }
-abi = { path = "../abi" }
+embedded-graphics = { version = "0.8.1" }
+embedded-layout = "0.4.2"
 
 static_cell = "2.1.1"
 bitflags = "2.9.1"
@@ -83,3 +81,8 @@ talc = "4.4.3"
 spin = "0.10.0"
 heapless = "0.8.0"
 num_enum = { version = "0.7.4", default-features = false }
+elf_loader = {version ="0.12.0", default-features = false, features = ["portable-atomic"]}
+
+shared = { path = "../shared" }
+abi = { path = "../abi" }
+

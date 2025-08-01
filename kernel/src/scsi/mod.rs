@@ -12,14 +12,14 @@ use crate::storage::SdCard;
 
 const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 
-pub struct MassStorageClass<'d, D: Driver<'d>> {
-    sdcard: SdCard,
+pub struct MassStorageClass<'d, 's, D: Driver<'d>> {
+    sdcard: &'s SdCard,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
 }
 
-impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
-    pub fn new(builder: &mut Builder<'d, D>, sdcard: SdCard) -> Self {
+impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
+    pub fn new(builder: &mut Builder<'d, D>, sdcard: &'s SdCard) -> Self {
         let mut function = builder.function(0x08, SUBCLASS_SCSI, 0x50); // Mass Storage class
         let mut interface = function.interface();
         let mut alt = interface.alt_setting(0x08, SUBCLASS_SCSI, 0x50, None);

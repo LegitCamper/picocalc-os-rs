@@ -10,12 +10,11 @@ use embedded_graphics::{
 use crate::display::FRAMEBUFFER;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_dispatch(call: *const Syscall) -> usize {
+pub extern "C" fn call_abi(call: *const Syscall) {
     let call = unsafe { &*call };
     match call {
         Syscall::DrawPixel { x, y, color } => {
             draw_pixel(*x, *y, *color);
-            0
         }
     }
 }

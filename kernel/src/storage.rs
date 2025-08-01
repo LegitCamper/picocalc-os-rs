@@ -1,6 +1,9 @@
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI0;
 use embassy_rp::spi::{Blocking, Spi};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::lazy_lock::LazyLock;
+use embassy_sync::mutex::Mutex;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::{
@@ -17,6 +20,9 @@ type SD = SdmmcSdCard<Device, Delay>;
 type VolMgr = VolumeManager<SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Vol<'a> = Volume<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Dir<'a> = Directory<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
+
+pub static SDCARD: LazyLock<Mutex<NoopRawMutex, Option<SdCard>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 pub struct DummyTimeSource {}
 impl TimeSource for DummyTimeSource {
