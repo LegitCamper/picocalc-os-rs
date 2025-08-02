@@ -23,7 +23,11 @@ use crate::{
 };
 
 use defmt::unwrap;
-use elf_loader::{Loader, object::ElfBinary};
+use elf_loader::{
+    Loader, load_exec,
+    mmap::MmapImpl,
+    object::{ElfBinary, ElfObject},
+};
 use static_cell::StaticCell;
 use talc::*;
 
@@ -106,14 +110,12 @@ async fn main(_spawner: Spawner) {
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
-    // let loader = Loader::new();
+    let binary_data: &[u8] = include_bytes!("../../example.bin");
+    let bin = load_exec!("example", binary_data).unwrap();
+    let entry = bin.entry();
 
-    // let binary_data: &[u8] = &[0; 10]; //include_bytes!("example.bin");
-    // let bin = loader.load_exec(binary_data, None).unwrap();
-    // let entry = bin.entry();
-
-    // let entry_fn: extern "C" fn() = unsafe { core::mem::transmute(entry) };
-    // entry_fn(); // jump into user code
+    let entry_fn: extern "C" fn() = unsafe { core::mem::transmute(entry) };
+    entry_fn(); // jump into user code
 }
 
 struct Display {
