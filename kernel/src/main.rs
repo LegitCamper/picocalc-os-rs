@@ -5,6 +5,7 @@
 
 mod abi;
 mod display;
+mod elf;
 mod peripherals;
 mod scsi;
 mod storage;
@@ -14,6 +15,7 @@ mod utils;
 
 use crate::{
     display::{display_handler, init_display},
+    elf::load_elf,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
@@ -22,24 +24,10 @@ use crate::{
     usb::{ENABLE_SCSI, usb_handler},
 };
 
-use defmt::unwrap;
-use elf_loader::{
-    Loader, load_exec,
-    mmap::MmapImpl,
-    object::{ElfBinary, ElfObject},
-};
-use static_cell::StaticCell;
-use talc::*;
-
-static mut ARENA: [u8; 10000] = [0; 10000];
-
-#[global_allocator]
-static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
-    Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
-        .lock();
-
 use {defmt_rtt as _, panic_probe as _};
 
+use bumpalo::Bump;
+use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::join::join;
 use embassy_rp::{
@@ -56,15 +44,24 @@ use embassy_rp::{
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
+use static_cell::StaticCell;
+use talc::*;
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
     USBCTRL_IRQ => embassy_rp_usb::InterruptHandler<USB>;
 });
 
-static mut CORE1_STACK: Stack<4096> = Stack::new();
+static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+
+static mut ARENA: [u8; 50_000] = [0; 50_000];
+
+#[global_allocator]
+static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
+    Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
+        .lock();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -110,12 +107,14 @@ async fn main(_spawner: Spawner) {
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
-    let binary_data: &[u8] = include_bytes!("../../example.bin");
-    let bin = load_exec!("example", binary_data).unwrap();
-    let entry = bin.entry();
+    let mut bump = Bump::with_capacity(25_000);
 
-    let entry_fn: extern "C" fn() = unsafe { core::mem::transmute(entry) };
-    entry_fn(); // jump into user code
+    let binary_data: &[u8] =
+        include_bytes!("../../target/thumbv8m.main-none-eabihf/debug/calculator");
+    let entry = load_elf(binary_data, &mut bump).unwrap();
+
+    entry();
+    bump.reset(); // clear heap arena
 }
 
 struct Display {

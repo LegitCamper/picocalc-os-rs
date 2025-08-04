@@ -1,4 +1,5 @@
 use abi::Syscall;
+use defmt::info;
 use embassy_futures::block_on;
 use embedded_graphics::{
     Drawable,
@@ -9,8 +10,9 @@ use embedded_graphics::{
 
 use crate::display::FRAMEBUFFER;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn call_abi(call: *const Syscall) {
+#[allow(unused)]
+pub fn call_abi(call: *const Syscall) {
+    info!("called abi");
     let call = unsafe { &*call };
     match call {
         Syscall::DrawPixel { x, y, color } => {
@@ -20,6 +22,7 @@ pub extern "C" fn call_abi(call: *const Syscall) {
 }
 
 fn draw_pixel(x: u32, y: u32, color: u16) {
+    info!("draw pixel abi called");
     let framebuffer = block_on(FRAMEBUFFER.lock());
     Rectangle::new(Point::new(x as i32, y as i32), Size::new(1, 1))
         .draw_styled(

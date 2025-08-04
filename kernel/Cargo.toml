@@ -41,7 +41,6 @@ embassy-rp = { version = "0.4.0", features = [
   "critical-section-impl",
   "unstable-pac",
   "time-driver",
-  "binary-info",
 ] }
 embassy-usb = "0.4.0"
 embassy-futures = "0.1.1"
@@ -77,11 +76,12 @@ embedded-layout = "0.4.2"
 
 static_cell = "2.1.1"
 bitflags = "2.9.1"
-talc = "4.4.3"
-spin = "0.10.0"
 heapless = "0.8.0"
 num_enum = { version = "0.7.4", default-features = false }
-elf_loader = {version ="0.12.0", default-features = false, features = ["portable-atomic"]}
+goblin = { version = "0.10.0", default-features = false, features = ["elf32", "elf64", "alloc", "endian_fd"] }
+bumpalo = "3.19.0"
+talc = "4.4.3"
+spin = "0.10.0"
 
 shared = { path = "../shared" }
 abi = { path = "../abi" }
