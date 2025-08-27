@@ -3,6 +3,7 @@ use defmt::info;
 use embassy_futures::block_on;
 use embedded_graphics::{
     Drawable,
+    draw_target::DrawTarget,
     pixelcolor::Rgb565,
     prelude::{Point, RgbColor, Size},
     primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
@@ -15,19 +16,17 @@ pub extern "C" fn call_abi(call: *const Syscall) {
     info!("called abi");
     let call = unsafe { &*call };
     match call {
-        Syscall::DrawPixel { x, y, color } => {
-            draw_pixel(*x, *y, *color);
+        Syscall::DrawIter { pixels, len } => {
+            // SAFETY: we're trusting the user program here
+            let slice = unsafe { core::slice::from_raw_parts(*pixels, *len) };
+
+            let framebuffer = block_on(FRAMEBUFFER.lock());
+            framebuffer
+                .borrow_mut()
+                .as_mut()
+                .unwrap()
+                .draw_iter(slice.iter().copied())
+                .unwrap();
         }
     }
-}
-
-fn draw_pixel(x: u32, y: u32, color: u16) {
-    info!("draw pixel abi called");
-    let framebuffer = block_on(FRAMEBUFFER.lock());
-    Rectangle::new(Point::new(x as i32, y as i32), Size::new(1, 1))
-        .draw_styled(
-            &PrimitiveStyle::with_fill(Rgb565::RED),
-            *framebuffer.borrow_mut().as_mut().unwrap(),
-        )
-        .unwrap();
 }

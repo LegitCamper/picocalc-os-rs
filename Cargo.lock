@@ -16,6 +16,7 @@ dependencies = [
 name = "abi"
 version = "0.1.0"
 dependencies = [
+ "embedded-graphics",
  "shared",
 ]
 

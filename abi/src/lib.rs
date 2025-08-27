@@ -1,11 +1,16 @@
 #![no_std]
 
-use core::ffi::c_void;
+pub use embedded_graphics::{
+    Pixel,
+    geometry::Point,
+    pixelcolor::{Rgb565, RgbColor},
+};
 use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
 // Instead of extern, declare a static pointer in a dedicated section
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".user_reloc")]
+#[allow(non_upper_case_globals)]
 pub static mut call_abi_ptr: usize = 0;
 
 // Helper to call it
@@ -16,5 +21,8 @@ pub unsafe fn call_abi(call: *const Syscall) {
 
 #[repr(C)]
 pub enum Syscall {
-    DrawPixel { x: u32, y: u32, color: u16 },
+    DrawIter {
+        pixels: *const Pixel<Rgb565>,
+        len: usize,
+    },
 }
