@@ -87,4 +87,4 @@ talc = "4.4.3"
 spin = "0.10.0"
 
 shared = { path = "../shared" }
-abi = { path = "../abi" }
+abi_sys = { path = "../abi_sys" }

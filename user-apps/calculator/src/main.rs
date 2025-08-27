@@ -1,8 +1,16 @@
 #![no_std]
 #![no_main]
 
-use abi::{Pixel, Point, Rgb565, RgbColor, Syscall, call_abi};
+use abi::display::Display;
 use core::panic::PanicInfo;
+use embedded_graphics::{
+    Drawable,
+    geometry::{Dimensions, Point},
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
+    pixelcolor::Rgb565,
+    prelude::RgbColor,
+    text::{Alignment, Text},
+};
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -11,23 +19,18 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() {
-    // Local pixel buffer
-    let mut pixels = [Pixel(Point { x: 50, y: 50 }, Rgb565::RED); 300];
-    for (i, p) in pixels.iter_mut().enumerate() {
-        *p = Pixel(
-            Point {
-                x: i as i32,
-                y: i as i32,
-            },
-            Rgb565::RED,
-        )
-    }
+    let mut display = Display;
 
-    // Construct syscall with raw pointer + length
-    let call = Syscall::DrawIter {
-        pixels: pixels.as_ptr(), // raw pointer
-        len: pixels.len(),       // number of elements
-    };
+    let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::RED);
 
-    unsafe { call_abi(&call) };
+    // Draw centered text.
+    let text = "embedded-graphics";
+    Text::with_alignment(
+        text,
+        display.bounding_box().center() + Point::new(0, 15),
+        character_style,
+        Alignment::Center,
+    )
+    .draw(&mut display)
+    .unwrap();
 }

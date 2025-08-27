@@ -1,4 +1,4 @@
-use abi::Syscall;
+use abi_sys::Syscall;
 use defmt::info;
 use embassy_futures::block_on;
 use embedded_graphics::{

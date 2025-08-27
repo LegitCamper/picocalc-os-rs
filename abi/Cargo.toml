@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 embedded-graphics = "0.8.1"
 shared = { path = "../shared" }
+abi_sys = { path = "../abi_sys" }

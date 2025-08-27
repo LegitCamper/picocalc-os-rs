@@ -16,6 +16,15 @@ dependencies = [
 name = "abi"
 version = "0.1.0"
 dependencies = [
+ "abi_sys",
+ "embedded-graphics",
+ "shared",
+]
+
+[[package]]
+name = "abi_sys"
+version = "0.1.0"
+dependencies = [
  "embedded-graphics",
  "shared",
 ]
@@ -208,6 +217,7 @@ name = "calculator"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "embedded-graphics",
 ]
 
 [[package]]
@@ -1163,7 +1173,7 @@ dependencies = [
 name = "kernel"
 version = "0.1.0"
 dependencies = [
- "abi",
+ "abi_sys",
  "bitflags 2.9.1",
  "bt-hci",
  "cortex-m",
