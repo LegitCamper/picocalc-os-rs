@@ -40,6 +40,7 @@ use embassy_rp::{
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
@@ -61,6 +62,8 @@ static mut ARENA: [u8; 10000] = [0; 10000];
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
+
+static DRIVERS_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -106,6 +109,8 @@ async fn main(_spawner: Spawner) {
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
+    DRIVERS_READY.wait().await;
+
     defmt::info!("Loading binary");
     let binary_data: &[u8] =
         include_bytes!("../../target/thumbv8m.main-none-eabihf/release/calculator");
@@ -153,21 +158,22 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
 
     Timer::after_millis(250).await;
 
-    let display_fut = {
-        let mut config = spi::Config::default();
-        config.frequency = 16_000_000;
-        let spi = Spi::new(
-            display.spi,
-            display.clk,
-            display.mosi,
-            display.miso,
-            display.dma1,
-            display.dma2,
-            config,
-        );
-        let display = init_display(spi, display.cs, display.data, display.reset).await;
-        display_handler(display)
-    };
+    let mut config = spi::Config::default();
+    config.frequency = 16_000_000;
+    let spi = Spi::new(
+        display.spi,
+        display.clk,
+        display.mosi,
+        display.miso,
+        display.dma1,
+        display.dma2,
+        config,
+    );
+    let display = init_display(spi, display.cs, display.data, display.reset).await;
+
+    DRIVERS_READY.signal(());
+
+    let display_fut = display_handler(display);
 
     {
         let mut config = spi::Config::default();
