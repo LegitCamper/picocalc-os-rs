@@ -1,85 +1,70 @@
 #![allow(static_mut_refs)]
-use abi::Syscall;
-use bumpalo::Bump;
 use core::{alloc::Layout, ffi::c_void, ptr::NonNull, slice::from_raw_parts_mut};
-use goblin::{
-    elf::{Elf, header::ET_DYN, program_header::PT_LOAD, sym},
-    elf32,
-};
+use goblin::elf::{Elf, header::ET_DYN, program_header::PT_LOAD, sym};
 
-use crate::abi::call_abi;
+// userland ram region defined in memory.x
+unsafe extern "C" {
+    static __userapp_start__: u8;
+    static __userapp_end__: u8;
+}
 
-pub fn load_elf(elf_bytes: &[u8], bump: &mut Bump) -> Result<extern "C" fn() -> !, ()> {
-    let elf = Elf::parse(elf_bytes).map_err(|_| ())?;
+type EntryFn = extern "C" fn();
 
-    if elf.is_64
-        || elf.is_lib
-        || elf.is_object_file()
-        || !elf.little_endian
-        || elf.header.e_type != ET_DYN
-        || elf.interpreter.is_some()
-    {
-        return Err(());
+pub unsafe fn load_binary(bytes: &[u8]) -> Result<EntryFn, &str> {
+    let elf = Elf::parse(&bytes).expect("Failed to parse ELF");
+
+    if elf.is_64 || elf.is_lib || !elf.little_endian {
+        return Err("Unsupported ELF type");
     }
 
-    // Find base address (lowest virtual address of PT_LOAD segments)
-    let base_vaddr = elf
-        .program_headers
-        .iter()
-        .filter(|ph| ph.p_type == PT_LOAD)
-        .map(|ph| ph.p_vaddr)
-        .min()
-        .ok_or(())?;
-
-    // Determine total memory needed for all PT_LOAD segments
-    let total_size = elf
-        .program_headers
-        .iter()
-        .filter(|ph| ph.p_type == PT_LOAD)
-        .map(|ph| {
-            let start = ph.p_vaddr;
-            let end = ph.p_vaddr + ph.p_memsz;
-            end - base_vaddr
-        })
-        .max()
-        .unwrap_or(0) as usize;
-
-    // Allocate one big block from the bump heap
-    let layout = Layout::from_size_align(total_size, 0x1000).map_err(|_| ())?;
-    let base_ptr = bump.alloc_layout(layout).as_ptr();
-
     for ph in &elf.program_headers {
-        if ph.p_type != PT_LOAD {
-            continue;
-        }
+        if ph.p_type == PT_LOAD {
+            let vaddr = ph.p_vaddr as usize;
+            let memsz = ph.p_memsz as usize;
+            let filesz = ph.p_filesz as usize;
+            let offset = ph.p_offset as usize;
 
-        let file_offset = ph.p_offset as usize;
-        let file_size = ph.p_filesz as usize;
-        let mem_size = ph.p_memsz as usize;
-        let virt_offset = (ph.p_vaddr - base_vaddr) as usize;
+            let seg_start = vaddr;
+            let seg_end = vaddr + memsz;
 
-        let src = &elf_bytes[file_offset..file_offset + file_size];
-        let dst = unsafe { base_ptr.add(virt_offset) };
+            // Bounds check: make sure segment fits inside payload region
+            let user_start = unsafe { &__userapp_start__ as *const u8 as usize };
+            let user_end = unsafe { &__userapp_end__ as *const u8 as usize };
+            if seg_start < user_start || seg_end > user_end {
+                panic!(
+                    "Segment out of bounds: {:x}..{:x} not within {:x}..{:x}",
+                    seg_start, seg_end, user_start, user_end
+                );
+            }
 
-        unsafe {
-            core::ptr::copy_nonoverlapping(src.as_ptr(), dst, file_size);
-            if mem_size > file_size {
-                core::ptr::write_bytes(dst.add(file_size), 0, mem_size - file_size);
+            unsafe {
+                let dst = seg_start as *mut u8;
+                let src = bytes.as_ptr().add(offset);
+
+                // Copy initialized part
+                core::ptr::copy_nonoverlapping(src, dst, filesz);
+
+                // Zero BSS region (memsz - filesz)
+                if memsz > filesz {
+                    core::ptr::write_bytes(dst.add(filesz), 0, memsz - filesz);
+                }
             }
         }
     }
 
-    // Patch `call_abi` symbol
-    for sym in elf.syms.iter() {
-        let name = elf.strtab.get_at(sym.st_name).ok_or(())?;
-        if name == "call_abi" && sym.st_bind() == sym::STB_GLOBAL {
-            let offset = (sym.st_value - base_vaddr) as usize;
-            let ptr = unsafe { base_ptr.add(offset) as *mut usize };
-            unsafe { *ptr = call_abi as usize };
-        }
+    let call_abi_sym = elf
+        .syms
+        .iter()
+        .find(|s| elf.strtab.get_at(s.st_name).unwrap() == "call_abi_ptr")
+        .expect("call_abi_ptr not found");
+
+    // Virtual address inside user RAM
+    let addr = call_abi_sym.st_value as *mut usize;
+
+    // Patch it
+    unsafe {
+        core::ptr::write(addr, crate::abi::call_abi as usize);
     }
 
-    // Compute relocated entry point
-    let relocated_entry = unsafe { base_ptr.add((elf.entry - base_vaddr) as usize) };
-    Ok(unsafe { core::mem::transmute(relocated_entry) })
+    Ok(unsafe { core::mem::transmute(elf.entry as u32) })
 }

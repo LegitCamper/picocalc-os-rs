@@ -10,17 +10,15 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    loop {
-        for i in 0..300 {
-            for o in 0..300 {
-                let call = Syscall::DrawPixel {
-                    x: i,
-                    y: o,
-                    color: 0,
-                };
-                unsafe { call_abi(&call) };
-            }
+pub extern "C" fn _start() {
+    for i in 0..300 {
+        for o in 0..300 {
+            let call = Syscall::DrawPixel {
+                x: i,
+                y: o,
+                color: 0,
+            };
+            unsafe { call_abi(&call) };
         }
     }
 }

@@ -11,7 +11,7 @@ use embedded_graphics::{
 use crate::display::FRAMEBUFFER;
 
 #[allow(unused)]
-pub fn call_abi(call: *const Syscall) {
+pub extern "C" fn call_abi(call: *const Syscall) {
     info!("called abi");
     let call = unsafe { &*call };
     match call {

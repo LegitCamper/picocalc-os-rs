@@ -15,7 +15,7 @@ mod utils;
 
 use crate::{
     display::{display_handler, init_display},
-    elf::load_elf,
+    elf::load_binary,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
@@ -26,7 +26,6 @@ use crate::{
 
 use {defmt_rtt as _, panic_probe as _};
 
-use bumpalo::Bump;
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::join::join;
@@ -56,7 +55,7 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
-static mut ARENA: [u8; 50_000] = [0; 50_000];
+static mut ARENA: [u8; 10000] = [0; 10000];
 
 #[global_allocator]
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
@@ -107,14 +106,14 @@ async fn main(_spawner: Spawner) {
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
-    let mut bump = Bump::with_capacity(25_000);
-
+    defmt::info!("Loading binary");
     let binary_data: &[u8] =
-        include_bytes!("../../target/thumbv8m.main-none-eabihf/debug/calculator");
-    let entry = load_elf(binary_data, &mut bump).unwrap();
+        include_bytes!("../../target/thumbv8m.main-none-eabihf/release/calculator");
+
+    defmt::info!("Running binary");
+    let entry = unsafe { load_binary(binary_data).unwrap() };
 
     entry();
-    bump.reset(); // clear heap arena
 }
 
 struct Display {
