@@ -3,6 +3,16 @@
 use abi_sys::{Syscall, call_abi};
 use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
+pub fn print(msg: &str) {
+    let syscall = Syscall::Print {
+        msg: msg.as_ptr(),
+        len: msg.len(),
+    };
+    unsafe {
+        call_abi(&syscall);
+    }
+}
+
 pub mod display {
     use crate::{Syscall, call_abi};
     use embedded_graphics::{

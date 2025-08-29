@@ -25,4 +25,8 @@ pub enum Syscall {
         pixels: *const Pixel<Rgb565>,
         len: usize,
     },
+    Print {
+        msg: *const u8,
+        len: usize,
+    },
 }

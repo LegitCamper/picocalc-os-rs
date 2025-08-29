@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use abi::display::Display;
+use abi::{display::Display, print};
 use core::panic::PanicInfo;
 use embedded_graphics::{
     Drawable,
@@ -19,6 +19,7 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() {
+    print("Starting Calculator app");
     let mut display = Display;
 
     let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::RED);

@@ -28,5 +28,15 @@ pub extern "C" fn call_abi(call: *const Syscall) {
                 .draw_iter(slice.iter().copied())
                 .unwrap();
         }
+        Syscall::Print { msg, len } => {
+            // SAFETY: we're trusting the user program here
+            let slice = unsafe { core::slice::from_raw_parts(*msg, *len) };
+
+            if let Ok(str) = str::from_utf8(slice) {
+                defmt::info!("{:?}", str);
+            } else {
+                defmt::error!("Failed to parse user print str")
+            }
+        }
     }
 }
