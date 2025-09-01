@@ -1,5 +1,9 @@
 #![no_std]
 
+extern crate alloc;
+use alloc::boxed::Box;
+
+use core::pin::Pin;
 pub use embedded_graphics::{
     Pixel,
     geometry::Point,
@@ -7,26 +11,50 @@ pub use embedded_graphics::{
 };
 use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
-// Instead of extern, declare a static pointer in a dedicated section
-#[unsafe(no_mangle)]
-#[unsafe(link_section = ".user_reloc")]
-#[allow(non_upper_case_globals)]
-pub static mut call_abi_ptr: usize = 0;
+pub type EntryFn = fn() -> Pin<Box<dyn Future<Output = ()>>>;
 
-// Helper to call it
-pub unsafe fn call_abi(call: *const Syscall) {
-    let f: extern "C" fn(*const Syscall) = unsafe { core::mem::transmute(call_abi_ptr) };
-    f(call);
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".userapp")]
+pub static mut CALL_ABI_TABLE: [usize; CallAbiTable::COUNT] = [0; CallAbiTable::COUNT];
+
+#[repr(usize)]
+#[derive(Clone, Copy)]
+pub enum CallAbiTable {
+    Print = 0,
+    DrawIter = 1,
+    GetKey = 2,
 }
 
-#[repr(C)]
-pub enum Syscall {
-    DrawIter {
-        pixels: *const Pixel<Rgb565>,
-        len: usize,
-    },
-    Print {
-        msg: *const u8,
-        len: usize,
-    },
+impl CallAbiTable {
+    pub const COUNT: usize = 3;
+}
+
+pub type PrintAbi = extern "Rust" fn(msg: &str);
+
+pub fn print(msg: &str) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
+        let f: PrintAbi = core::mem::transmute(ptr);
+        f(msg);
+    }
+}
+
+pub type DrawIterAbi = extern "Rust" fn(pixels: &[Pixel<Rgb565>]);
+
+pub fn draw_iter(pixels: &[Pixel<Rgb565>]) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::DrawIter as usize];
+        let f: DrawIterAbi = core::mem::transmute(ptr);
+        f(pixels);
+    }
+}
+
+pub type GetKeyAbi = extern "Rust" fn() -> Option<KeyEvent>;
+
+pub fn get_key() -> Option<KeyEvent> {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::GetKey as usize];
+        let f: GetKeyAbi = core::mem::transmute(ptr);
+        f()
+    }
 }

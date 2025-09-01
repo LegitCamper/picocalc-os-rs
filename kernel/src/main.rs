@@ -1,7 +1,11 @@
 #![feature(impl_trait_in_assoc_type)]
+#![feature(type_alias_impl_trait)]
 #![feature(ascii_char)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
+#![allow(static_mut_refs)]
+
+extern crate alloc;
 
 mod abi;
 mod display;
@@ -23,12 +27,13 @@ use crate::{
     storage::{SDCARD, SdCard},
     usb::{ENABLE_SCSI, usb_handler},
 };
+use alloc::vec::Vec;
 
 use {defmt_rtt as _, panic_probe as _};
 
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::join::join;
+use embassy_futures::join::{join, join3};
 use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     i2c::{self, I2c},
@@ -40,10 +45,15 @@ use embassy_rp::{
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use embassy_sync::{
+    blocking_mutex::{Mutex, raw::CriticalSectionRawMutex},
+    signal::Signal,
+};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
+use heapless::spsc::Queue;
+use shared::keyboard::KeyEvent;
 use static_cell::StaticCell;
 use talc::*;
 
@@ -118,7 +128,7 @@ async fn userland_task() {
     defmt::info!("Running binary");
     let entry = unsafe { load_binary(binary_data).unwrap() };
 
-    entry();
+    entry().await;
 }
 
 struct Display {
@@ -194,5 +204,21 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
     let usb_fut = usb_handler(usb);
 
     ENABLE_SCSI.store(true, core::sync::atomic::Ordering::Relaxed);
-    join(usb_fut, display_fut).await;
+    join3(usb_fut, display_fut, async {
+        loop {
+            Timer::after_millis(100).await;
+            get_keys().await
+        }
+    })
+    .await;
+}
+
+static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
+
+async fn get_keys() {
+    if let Some(event) = read_keyboard_fifo().await {
+        unsafe {
+            let _ = KEY_CACHE.enqueue(event);
+        }
+    }
 }

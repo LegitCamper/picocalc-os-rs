@@ -1,20 +1,20 @@
 #![no_std]
 
-use abi_sys::{Syscall, call_abi};
-use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
+use abi_sys::draw_iter;
+pub use abi_sys::{get_key, print};
+pub use embassy_time;
+pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
+use talc::*;
 
-pub fn print(msg: &str) {
-    let syscall = Syscall::Print {
-        msg: msg.as_ptr(),
-        len: msg.len(),
-    };
-    unsafe {
-        call_abi(&syscall);
-    }
-}
+static mut ARENA: [u8; 10000] = [0; 10000];
+
+#[global_allocator]
+static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
+    Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
+        .lock();
 
 pub mod display {
-    use crate::{Syscall, call_abi};
+    use crate::draw_iter;
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
@@ -29,18 +29,6 @@ pub mod display {
     pub type Pixel565 = Pixel<Rgb565>;
 
     pub struct Display;
-
-    impl Display {
-        fn syscall_draw(&self, pixels: &[Pixel565]) {
-            let syscall = Syscall::DrawIter {
-                pixels: pixels.as_ptr(),
-                len: pixels.len(),
-            };
-            unsafe {
-                call_abi(&syscall);
-            }
-        }
-    }
 
     impl Dimensions for Display {
         fn bounding_box(&self) -> Rectangle {
@@ -71,13 +59,13 @@ pub mod display {
                 count += 1;
 
                 if count == BUF_SIZE {
-                    self.syscall_draw(&buf[..count]);
+                    draw_iter(&buf[..count]);
                     count = 0;
                 }
             }
 
             if count > 0 {
-                self.syscall_draw(&buf[..count]);
+                draw_iter(&buf[..count]);
             }
 
             Ok(())

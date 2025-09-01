@@ -1,5 +1,15 @@
 #![allow(static_mut_refs)]
-use core::{alloc::Layout, ffi::c_void, ptr::NonNull, slice::from_raw_parts_mut};
+use crate::abi;
+use abi_sys::{CallAbiTable, EntryFn};
+use alloc::boxed::Box;
+use core::{
+    alloc::Layout,
+    ffi::c_void,
+    pin::Pin,
+    ptr::NonNull,
+    slice::from_raw_parts_mut,
+    task::{Context, Poll},
+};
 use goblin::elf::{Elf, header::ET_DYN, program_header::PT_LOAD, sym};
 
 // userland ram region defined in memory.x
@@ -7,8 +17,6 @@ unsafe extern "C" {
     static __userapp_start__: u8;
     static __userapp_end__: u8;
 }
-
-type EntryFn = extern "C" fn();
 
 pub unsafe fn load_binary(bytes: &[u8]) -> Result<EntryFn, &str> {
     let elf = Elf::parse(&bytes).expect("Failed to parse ELF");
@@ -55,16 +63,22 @@ pub unsafe fn load_binary(bytes: &[u8]) -> Result<EntryFn, &str> {
     let call_abi_sym = elf
         .syms
         .iter()
-        .find(|s| elf.strtab.get_at(s.st_name).unwrap() == "call_abi_ptr")
-        .expect("call_abi_ptr not found");
+        .find(|s| elf.strtab.get_at(s.st_name).unwrap() == "CALL_ABI_TABLE")
+        .expect("syscall table not found");
 
-    // Virtual address inside user RAM
-    let addr = call_abi_sym.st_value as *mut usize;
+    let table_base = call_abi_sym.st_value as *mut usize;
 
-    // Patch it
-    unsafe {
-        core::ptr::write(addr, crate::abi::call_abi as usize);
+    let entries: &[(CallAbiTable, usize)] = &[
+        (CallAbiTable::Print, abi::print as usize),
+        (CallAbiTable::DrawIter, abi::draw_iter as usize),
+        (CallAbiTable::GetKey, abi::get_key as usize),
+    ];
+    assert!(entries.len() == CallAbiTable::COUNT);
+
+    for &(abi_idx, func_ptr) in entries {
+        unsafe {
+            table_base.add(abi_idx as usize).write(func_ptr);
+        }
     }
-
     Ok(unsafe { core::mem::transmute(elf.entry as u32) })
 }

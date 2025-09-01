@@ -1,4 +1,7 @@
-use abi_sys::Syscall;
+use core::pin::Pin;
+
+use abi_sys::{DrawIterAbi, GetKeyAbi, Pixel, PrintAbi};
+use alloc::boxed::Box;
 use defmt::info;
 use embassy_futures::block_on;
 use embedded_graphics::{
@@ -8,35 +11,30 @@ use embedded_graphics::{
     prelude::{Point, RgbColor, Size},
     primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
 };
+use shared::keyboard::KeyEvent;
 
-use crate::display::FRAMEBUFFER;
+use crate::{KEY_CACHE, display::FRAMEBUFFER};
 
-#[allow(unused)]
-pub extern "C" fn call_abi(call: *const Syscall) {
-    info!("called abi");
-    let call = unsafe { &*call };
-    match call {
-        Syscall::DrawIter { pixels, len } => {
-            // SAFETY: we're trusting the user program here
-            let slice = unsafe { core::slice::from_raw_parts(*pixels, *len) };
+// ensure the abi and the kernel fn signatures are the same
+const _: PrintAbi = print;
+const _: DrawIterAbi = draw_iter;
+const _: GetKeyAbi = get_key;
 
-            let framebuffer = block_on(FRAMEBUFFER.lock());
-            framebuffer
-                .borrow_mut()
-                .as_mut()
-                .unwrap()
-                .draw_iter(slice.iter().copied())
-                .unwrap();
-        }
-        Syscall::Print { msg, len } => {
-            // SAFETY: we're trusting the user program here
-            let slice = unsafe { core::slice::from_raw_parts(*msg, *len) };
+pub extern "Rust" fn print(msg: &str) {
+    defmt::info!("{:?}", msg);
+}
 
-            if let Ok(str) = str::from_utf8(slice) {
-                defmt::info!("{:?}", str);
-            } else {
-                defmt::error!("Failed to parse user print str")
-            }
-        }
-    }
+pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
+    let framebuffer = block_on(FRAMEBUFFER.lock());
+    framebuffer
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .draw_iter(pixels.iter().copied())
+        .unwrap();
+}
+
+pub extern "Rust" fn get_key() -> Option<KeyEvent> {
+    defmt::info!("get key called");
+    unsafe { KEY_CACHE.dequeue() }
 }

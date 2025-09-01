@@ -1,8 +1,10 @@
 #![no_std]
 #![no_main]
 
-use abi::{display::Display, print};
-use core::panic::PanicInfo;
+extern crate alloc;
+use abi::{KeyCode, display::Display, embassy_time, get_key, print};
+use alloc::{boxed::Box, string::String, vec};
+use core::{panic::PanicInfo, pin::Pin};
 use embedded_graphics::{
     Drawable,
     geometry::{Dimensions, Point},
@@ -17,21 +19,40 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() {
-    print("Starting Calculator app");
+pub async fn main() {
+    print("Starting Async Calculator app");
     let mut display = Display;
 
     let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::RED);
 
-    // Draw centered text.
-    let text = "embedded-graphics";
-    Text::with_alignment(
-        text,
-        display.bounding_box().center() + Point::new(0, 15),
-        character_style,
-        Alignment::Center,
-    )
-    .draw(&mut display)
-    .unwrap();
+    let mut text = vec!['H', 'E', 'L', 'L', 'O'];
+
+    loop {
+        Text::with_alignment(
+            &text.iter().cloned().collect::<String>(),
+            display.bounding_box().center() + Point::new(0, 15),
+            character_style,
+            Alignment::Center,
+        )
+        .draw(&mut display)
+        .unwrap();
+
+        if let Some(event) = get_key() {
+            print("User got event");
+            match event.key {
+                KeyCode::Char(ch) => {
+                    text.push(ch);
+                }
+                KeyCode::Backspace => {
+                    text.pop();
+                }
+                _ => (),
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "Rust" fn _start() -> Pin<Box<dyn Future<Output = ()>>> {
+    Box::pin(async { main().await })
 }

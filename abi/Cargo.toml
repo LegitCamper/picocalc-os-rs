@@ -7,3 +7,6 @@ edition = "2024"
 embedded-graphics = "0.8.1"
 shared = { path = "../shared" }
 abi_sys = { path = "../abi_sys" }
+talc = "4.4.3"
+spin = "0.10.0"
+embassy-time = "0.5.0"
