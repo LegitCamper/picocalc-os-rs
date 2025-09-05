@@ -72,6 +72,7 @@ defmt-rtt = "0.4.2"
 embedded-sdmmc = { version = "0.9", default-features = false }
 st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs", rev = "87abf450404865dcb535292e9e1a6a2457fd4599" } # async branch
 embedded-graphics = { version = "0.8.1" }
+embedded-text = "0.7.2"
 embedded-layout = "0.4.2"
 
 static_cell = "2.1.1"

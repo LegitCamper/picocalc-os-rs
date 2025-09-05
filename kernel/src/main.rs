@@ -17,6 +17,8 @@ mod ui;
 mod usb;
 mod utils;
 
+use core::sync::atomic::Ordering;
+
 use crate::{
     display::{display_handler, init_display},
     elf::load_binary,
@@ -25,8 +27,8 @@ use crate::{
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
     },
     storage::{SDCARD, SdCard},
-    ui::ui_handler,
-    usb::{ENABLE_SCSI, usb_handler},
+    ui::{SELECTIONS, ui_handler},
+    usb::usb_handler,
 };
 use alloc::vec::Vec;
 
@@ -34,7 +36,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::join::{join, join3, join4};
+use embassy_futures::join::{join, join3, join4, join5};
 use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     i2c::{self, I2c},
@@ -188,6 +190,25 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
 
     let ui_fut = ui_handler();
 
+    let binary_search_fut = async {
+        loop {
+            {
+                let mut guard = SDCARD.get().lock().await;
+
+                if let Some(sd) = guard.as_mut() {
+                    let files = sd.list_files_by_extension(".bin").unwrap();
+                    let mut select = SELECTIONS.lock().await;
+
+                    if select.selections != files {
+                        select.selections = files;
+                        select.reset();
+                    }
+                }
+            }
+            Timer::after_secs(5).await;
+        }
+    };
+
     {
         let mut config = spi::Config::default();
         config.frequency = 400_000;
@@ -213,8 +234,7 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
         }
     };
 
-    ENABLE_SCSI.store(true, core::sync::atomic::Ordering::Relaxed);
-    join4(usb_fut, display_fut, key_abi_fut, ui_fut).await;
+    join4(display_fut, ui_fut, binary_search_fut, key_abi_fut).await;
 }
 
 static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();

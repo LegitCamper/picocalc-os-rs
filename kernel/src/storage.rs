@@ -1,3 +1,5 @@
+use alloc::{string::String, vec::Vec};
+use core::str::FromStr;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI0;
 use embassy_rp::spi::{Blocking, Spi};
@@ -6,6 +8,7 @@ use embassy_sync::lazy_lock::LazyLock;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
+use embedded_sdmmc::LfnBuffer;
 use embedded_sdmmc::{
     Block, BlockCount, BlockDevice, BlockIdx, Directory, SdCard as SdmmcSdCard, TimeSource,
     Timestamp, Volume, VolumeIdx, VolumeManager, sdcard::Error,
@@ -57,13 +60,6 @@ impl SdCard {
         self.det.is_low()
     }
 
-    pub fn open_volume(&mut self) -> Result<Vol<'_>, ()> {
-        if self.is_attached() {
-            return Ok(self.volume_mgr.open_volume(VolumeIdx(0)).map_err(|_| ())?);
-        }
-        Err(())
-    }
-
     pub fn size(&self) -> u64 {
         let mut result = 0;
 
@@ -102,5 +98,39 @@ impl SdCard {
             DummyTimeSource {}
         });
         res.map_err(|_| ())
+    }
+
+    fn access_root_dir(&mut self, mut access: impl FnMut(Dir)) {
+        let volume0 = self.volume_mgr.open_volume(VolumeIdx(0)).unwrap();
+        let root_dir = volume0.open_root_dir().unwrap();
+
+        access(root_dir);
+    }
+
+    /// Returns a Vec of file names (long format) that match the given extension (e.g., "BIN")
+    pub fn list_files_by_extension(&mut self, ext: &str) -> Result<Vec<String>, ()> {
+        let mut result = Vec::new();
+
+        // Only proceed if card is inserted
+        if !self.is_attached() {
+            return Ok(result);
+        }
+
+        let mut lfn_storage = [0; 50];
+        let mut lfn_buffer = LfnBuffer::new(&mut lfn_storage);
+
+        self.access_root_dir(|dir| {
+            dir.iterate_dir_lfn(&mut lfn_buffer, |_entry, name| {
+                if let Some(name) = name {
+                    let name = String::from_str(name).unwrap();
+                    if name.contains(ext) {
+                        result.push(name);
+                    }
+                }
+            })
+            .unwrap()
+        });
+
+        Ok(result)
     }
 }
