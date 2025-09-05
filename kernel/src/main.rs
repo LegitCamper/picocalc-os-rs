@@ -30,6 +30,7 @@ use crate::{
     ui::{SELECTIONS, ui_handler},
     usb::usb_handler,
 };
+use abi_sys::EntryFn;
 use alloc::vec::Vec;
 
 use {defmt_rtt as _, panic_probe as _};
@@ -48,7 +49,7 @@ use embassy_rp::{
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
@@ -66,7 +67,7 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
-static mut ARENA: [u8; 10000] = [0; 10000];
+static mut ARENA: [u8; 10 * 1024] = [0; 10 * 1024];
 
 #[global_allocator]
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
@@ -121,19 +122,30 @@ async fn main(_spawner: Spawner) {
     executor0.run(|spawner| unwrap!(spawner.spawn(kernel_task(display, sd, mcu, p.USB))));
 }
 
+// One-slot channel to pass EntryFn from core1
+static BINARY_CH: Channel<CriticalSectionRawMutex, EntryFn, 1> = Channel::new();
+
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
-    // DRIVERS_READY.wait().await;
+    let recv = BINARY_CH.receiver();
+    loop {
+        let entry = recv.receive().await;
 
-    // defmt::info!("Loading binary");
-    // let binary_data: &[u8] =
-    //     include_bytes!("../../target/thumbv8m.main-none-eabihf/release/calculator");
+        // disable kernel ui
+        {
+            let mut state = TASK_STATE.lock().await;
+            *state = TaskState::Kernel;
+        }
 
-    // defmt::info!("Running binary");
-    // let entry = unsafe { load_binary(binary_data).unwrap() };
+        entry().await;
 
-    // entry().await;
+        // enable kernel ui
+        {
+            let mut state = TASK_STATE.lock().await;
+            *state = TaskState::Ui;
+        }
+    }
 }
 
 struct Display {
@@ -224,8 +236,8 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
         SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
     };
 
-    let usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    let usb_fut = usb_handler(usb);
+    // let usb = embassy_rp_usb::Driver::new(usb, Irqs);
+    // let usb_fut = usb_handler(usb);
 
     let key_abi_fut = async {
         loop {

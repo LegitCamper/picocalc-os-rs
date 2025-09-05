@@ -1,7 +1,7 @@
 #![allow(static_mut_refs)]
-use crate::abi;
+use crate::{abi, storage::SDCARD};
 use abi_sys::{CallAbiTable, EntryFn};
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     alloc::Layout,
     ffi::c_void,
@@ -10,7 +10,42 @@ use core::{
     slice::from_raw_parts_mut,
     task::{Context, Poll},
 };
+use embedded_sdmmc::ShortFileName;
 use goblin::elf::{Elf, header::ET_DYN, program_header::PT_LOAD, sym};
+
+pub async fn read_binary(name: &ShortFileName) -> Option<Vec<u8>> {
+    let mut guard = SDCARD.get().lock().await;
+    let sd = guard.as_mut()?;
+
+    let mut buf = Vec::new();
+
+    defmt::info!("sd closure");
+    sd.access_root_dir(|root_dir| {
+        // Try to open the file directly by name
+        defmt::info!("trying to open file: {:?}", name);
+        if let Ok(file) = root_dir.open_file_in_dir(name, embedded_sdmmc::Mode::ReadOnly) {
+            defmt::info!("opened");
+            let mut temp = [0u8; 512];
+
+            defmt::info!("caching binary");
+            loop {
+                match file.read(&mut temp) {
+                    Ok(n) if n > 0 => buf.extend_from_slice(&temp[..n]),
+                    _ => break,
+                }
+            }
+
+            defmt::info!("done");
+            let _ = file.close();
+        }
+    });
+
+    if buf.is_empty() {
+        return None;
+    }
+
+    Some(buf)
+}
 
 // userland ram region defined in memory.x
 unsafe extern "C" {

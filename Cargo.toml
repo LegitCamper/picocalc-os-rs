@@ -3,7 +3,16 @@ resolver = "3"
 members = ["kernel", "abi", "shared", "user-apps/calculator"]
 
 [profile.release]
-debug = 2
+debug = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+[profile.release-binary]
+inherits = "release"
+lto = true
+debug = false
+opt-level = "s"
 
 [profile.dev]
 lto = true

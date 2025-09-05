@@ -8,11 +8,11 @@ use embassy_sync::lazy_lock::LazyLock;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::LfnBuffer;
 use embedded_sdmmc::{
     Block, BlockCount, BlockDevice, BlockIdx, Directory, SdCard as SdmmcSdCard, TimeSource,
     Timestamp, Volume, VolumeIdx, VolumeManager, sdcard::Error,
 };
+use embedded_sdmmc::{LfnBuffer, ShortFileName};
 
 pub const MAX_DIRS: usize = 4;
 pub const MAX_FILES: usize = 5;
@@ -32,6 +32,12 @@ impl TimeSource for DummyTimeSource {
     fn get_timestamp(&self) -> Timestamp {
         Timestamp::from_calendar(2022, 1, 1, 0, 0, 0).unwrap()
     }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct FileName {
+    pub long_name: String,
+    pub short_name: ShortFileName,
 }
 
 pub struct SdCard {
@@ -100,7 +106,7 @@ impl SdCard {
         res.map_err(|_| ())
     }
 
-    fn access_root_dir(&mut self, mut access: impl FnMut(Dir)) {
+    pub fn access_root_dir(&mut self, mut access: impl FnMut(Dir)) {
         let volume0 = self.volume_mgr.open_volume(VolumeIdx(0)).unwrap();
         let root_dir = volume0.open_root_dir().unwrap();
 
@@ -108,7 +114,7 @@ impl SdCard {
     }
 
     /// Returns a Vec of file names (long format) that match the given extension (e.g., "BIN")
-    pub fn list_files_by_extension(&mut self, ext: &str) -> Result<Vec<String>, ()> {
+    pub fn list_files_by_extension(&mut self, ext: &str) -> Result<Vec<FileName>, ()> {
         let mut result = Vec::new();
 
         // Only proceed if card is inserted
@@ -120,11 +126,14 @@ impl SdCard {
         let mut lfn_buffer = LfnBuffer::new(&mut lfn_storage);
 
         self.access_root_dir(|dir| {
-            dir.iterate_dir_lfn(&mut lfn_buffer, |_entry, name| {
+            dir.iterate_dir_lfn(&mut lfn_buffer, |entry, name| {
                 if let Some(name) = name {
                     let name = String::from_str(name).unwrap();
                     if name.contains(ext) {
-                        result.push(name);
+                        result.push(FileName {
+                            long_name: name,
+                            short_name: entry.name.clone(),
+                        });
                     }
                 }
             })

@@ -1,8 +1,9 @@
 use crate::{
-    TASK_STATE, TaskState,
+    BINARY_CH, TASK_STATE, TaskState,
     display::{FRAMEBUFFER, SCREEN_HEIGHT, SCREEN_WIDTH},
     format,
     peripherals::keyboard,
+    storage::FileName,
     usb::RESTART_USB,
 };
 use alloc::{string::String, vec::Vec};
@@ -43,7 +44,7 @@ use embedded_text::TextBox;
 use shared::keyboard::{KeyCode, KeyState};
 
 pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
-    Mutex::new(SelectionList::new(Vec::new()));
+    Mutex::new(SelectionList::new());
 
 pub async fn ui_handler() {
     loop {
@@ -59,7 +60,22 @@ pub async fn ui_handler() {
                             let mut selections = SELECTIONS.lock().await;
                             selections.down();
                         }
-                        KeyCode::Enter | KeyCode::JoyRight => (),
+                        KeyCode::Enter | KeyCode::JoyRight => {
+                            let selections = SELECTIONS.lock().await;
+                            let selection = selections.selections
+                                [selections.current_selection as usize - 1]
+                                .clone();
+
+                            defmt::info!(
+                                "loading selected binary: {:?}",
+                                &selection.long_name.as_str()
+                            );
+                            let bytes = crate::elf::read_binary(&selection.short_name)
+                                .await
+                                .unwrap();
+                            let entry = unsafe { crate::elf::load_binary(&bytes).unwrap() };
+                            BINARY_CH.send(entry).await;
+                        }
                         _ => (),
                     }
                 }
@@ -71,7 +87,7 @@ pub async fn ui_handler() {
 }
 
 async fn draw_selection() {
-    let file_names: Vec<String> = {
+    let file_names: Vec<FileName> = {
         let guard = SELECTIONS.lock().await;
         guard.selections.clone()
     };
@@ -104,7 +120,7 @@ async fn draw_selection() {
                 return;
             };
 
-            let chain = Chain::new(Text::new(first, Point::zero(), text_style));
+            let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
 
             // for _ in 0..file_names.len() {
             //     let chain = chain.append(Text::new(
@@ -124,15 +140,16 @@ async fn draw_selection() {
     }
 }
 
+#[derive(Clone)]
 pub struct SelectionList {
     current_selection: u16,
-    pub selections: Vec<String>,
+    pub selections: Vec<FileName>,
 }
 
 impl SelectionList {
-    pub const fn new(selections: Vec<String>) -> Self {
+    pub const fn new() -> Self {
         Self {
-            selections,
+            selections: Vec::new(),
             current_selection: 0,
         }
     }
