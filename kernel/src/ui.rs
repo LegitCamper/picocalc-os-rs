@@ -1,13 +1,21 @@
 use crate::{
+    TASK_STATE, TaskState,
     display::{FRAMEBUFFER, SCREEN_HEIGHT, SCREEN_WIDTH},
     format,
+    peripherals::keyboard,
 };
+use alloc::{string::String, vec::Vec};
 use core::fmt::Debug;
 use defmt::info;
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Spi},
+};
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
+    mutex::Mutex,
+    signal::Signal,
 };
 use embassy_time::{Delay, Timer};
 use embedded_graphics::{
@@ -30,38 +38,38 @@ use embedded_layout::{
     object_chain::Chain,
     prelude::*,
 };
-use heapless::{String, Vec};
+use shared::keyboard::KeyCode;
 
-pub struct UI<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> {
-    pub selections_list: SelectionList<MAX_SELECTIONS, MAX_STR_LEN>,
-}
+static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
+    Mutex::new(SelectionList::new(Vec::new()));
 
-impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, MAX_STR_LEN> {
-    pub fn new() -> Self {
-        Self {
-            selections_list: SelectionList::new(Vec::new()),
+pub async fn ui_handler() {
+    loop {
+        let state = TASK_STATE.lock().await;
+        if let TaskState::Ui = *state {
+            let mut selections = SELECTIONS.lock().await;
+            if let Some(event) = keyboard::read_keyboard_fifo().await {
+                match event.key {
+                    KeyCode::JoyUp => selections.up(),
+                    KeyCode::JoyDown => selections.down(),
+                    KeyCode::Enter | KeyCode::JoyRight => (),
+                    _ => (),
+                }
+            }
+
+            draw_selection().await;
         }
     }
+}
 
-    pub async fn draw<D: DrawTarget<Color = Rgb565>>(&mut self)
-    where
-        <D as DrawTarget>::Error: Debug,
-    {
-        self.draw_selection().await;
-    }
-
-    async fn draw_selection(&mut self) {
-        let mut fb_lock = FRAMEBUFFER.lock().await;
-        let fb = fb_lock.as_mut().unwrap();
-
+async fn draw_selection() {
+    let mut fb_lock = FRAMEBUFFER.lock().await;
+    if let Some(fb) = fb_lock.as_mut() {
+        info!("UIINg");
         let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
 
-        let selection = Rectangle::new(
-            Point::new(0, 0),
-            Size::new(SCREEN_WIDTH as u32 - 1, SCREEN_HEIGHT as u32 - 1),
-        );
-
-        let mut file_names = self.selections_list.selections.iter();
+        let guard = SELECTIONS.lock().await;
+        let mut file_names = guard.selections.iter();
 
         let Some(first) = file_names.next() else {
             Text::new("No Programs found on SD Card\nEnsure programs end with '.bin',\nand are located in the root directory",
@@ -72,24 +80,25 @@ impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, M
 
         let chain = Chain::new(Text::new(first, Point::zero(), text_style));
 
-        LinearLayout::vertical(chain)
-            .with_alignment(horizontal::Center)
-            .arrange()
-            .align_to(&fb.bounding_box(), horizontal::Center, vertical::Center)
-            .draw(*fb)
-            .unwrap();
+        for _ in 0..10 {
+            LinearLayout::vertical(chain)
+                .with_alignment(horizontal::Center)
+                .arrange()
+                .align_to(&fb.bounding_box(), horizontal::Center, vertical::Center)
+                .draw(*fb)
+                .unwrap();
+            break;
+        }
     }
 }
 
-pub struct SelectionList<const MAX_SELECTION: usize, const MAX_STR_LEN: usize> {
+pub struct SelectionList {
     current_selection: u16,
-    selections: Vec<String<MAX_STR_LEN>, MAX_SELECTION>,
+    selections: Vec<String>,
 }
 
-impl<const MAX_SELECTION: usize, const MAX_STR_LEN: usize>
-    SelectionList<MAX_SELECTION, MAX_STR_LEN>
-{
-    pub fn new(selections: Vec<String<MAX_STR_LEN>, MAX_SELECTION>) -> Self {
+impl SelectionList {
+    pub const fn new(selections: Vec<String>) -> Self {
         Self {
             selections,
             current_selection: 0,

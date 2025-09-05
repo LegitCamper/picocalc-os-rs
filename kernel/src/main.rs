@@ -25,6 +25,7 @@ use crate::{
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
     },
     storage::{SDCARD, SdCard},
+    ui::ui_handler,
     usb::{ENABLE_SCSI, usb_handler},
 };
 use alloc::vec::Vec;
@@ -33,7 +34,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::join::{join, join3};
+use embassy_futures::join::{join, join3, join4};
 use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     i2c::{self, I2c},
@@ -45,10 +46,7 @@ use embassy_rp::{
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
-use embassy_sync::{
-    blocking_mutex::{Mutex, raw::CriticalSectionRawMutex},
-    signal::Signal,
-};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
@@ -73,7 +71,12 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
 
-static DRIVERS_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static TASK_STATE: Mutex<CriticalSectionRawMutex, TaskState> = Mutex::new(TaskState::Ui);
+
+enum TaskState {
+    Ui,
+    Kernel,
+}
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -119,16 +122,16 @@ async fn main(_spawner: Spawner) {
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
-    DRIVERS_READY.wait().await;
+    // DRIVERS_READY.wait().await;
 
-    defmt::info!("Loading binary");
-    let binary_data: &[u8] =
-        include_bytes!("../../target/thumbv8m.main-none-eabihf/release/calculator");
+    // defmt::info!("Loading binary");
+    // let binary_data: &[u8] =
+    //     include_bytes!("../../target/thumbv8m.main-none-eabihf/release/calculator");
 
-    defmt::info!("Running binary");
-    let entry = unsafe { load_binary(binary_data).unwrap() };
+    // defmt::info!("Running binary");
+    // let entry = unsafe { load_binary(binary_data).unwrap() };
 
-    entry().await;
+    // entry().await;
 }
 
 struct Display {
@@ -183,6 +186,8 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
 
     let display_fut = display_handler(display);
 
+    let ui_fut = ui_handler();
+
     {
         let mut config = spi::Config::default();
         config.frequency = 400_000;
@@ -201,15 +206,15 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
     let usb = embassy_rp_usb::Driver::new(usb, Irqs);
     let usb_fut = usb_handler(usb);
 
-    ENABLE_SCSI.store(true, core::sync::atomic::Ordering::Relaxed);
-    DRIVERS_READY.signal(());
-    join3(usb_fut, display_fut, async {
+    let key_abi_fut = async {
         loop {
             Timer::after_millis(100).await;
             get_keys().await
         }
-    })
-    .await;
+    };
+
+    ENABLE_SCSI.store(true, core::sync::atomic::Ordering::Relaxed);
+    join4(usb_fut, display_fut, key_abi_fut, ui_fut).await;
 }
 
 static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
