@@ -24,17 +24,23 @@ pub extern "Rust" fn print(msg: &str) {
     defmt::info!("{:?}", msg);
 }
 
+// TODO: maybe return result
 pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-    let framebuffer = block_on(FRAMEBUFFER.lock());
-    framebuffer
-        .borrow_mut()
-        .as_mut()
-        .unwrap()
-        .draw_iter(pixels.iter().copied())
-        .unwrap();
+    for _ in 0..10 {
+        if let Some(mut framebuffer) = FRAMEBUFFER.try_lock().ok() {
+            for _ in 0..10 {
+                // kernel takes() framebuffer
+                if let Some(framebuffer) = framebuffer.as_mut() {
+                    framebuffer.draw_iter(pixels.iter().copied()).unwrap();
+                }
+                break;
+            }
+            break;
+        }
+        cortex_m::asm::nop();
+    }
 }
 
 pub extern "Rust" fn get_key() -> Option<KeyEvent> {
-    defmt::info!("get key called");
     unsafe { KEY_CACHE.dequeue() }
 }

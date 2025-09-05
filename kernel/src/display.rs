@@ -1,10 +1,9 @@
-use core::cell::RefCell;
 use embassy_rp::{
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Spi},
 };
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::{FrameBuffer, ST7365P};
@@ -22,8 +21,7 @@ pub const SCREEN_HEIGHT: usize = 320;
 
 type FB = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, { SCREEN_WIDTH * SCREEN_HEIGHT }>;
 static FRAMEBUFFER_CELL: StaticCell<FB> = StaticCell::new();
-pub static FRAMEBUFFER: Mutex<ThreadModeRawMutex, RefCell<Option<&'static mut FB>>> =
-    Mutex::new(RefCell::new(None));
+pub static FRAMEBUFFER: Mutex<CriticalSectionRawMutex, Option<&'static mut FB>> = Mutex::new(None);
 
 pub async fn init_display(
     spi: Spi<'static, SPI1, Async>,
@@ -45,25 +43,23 @@ pub async fn init_display(
     display.set_custom_orientation(0x40).await.unwrap();
     framebuffer.draw(&mut display).await.unwrap();
     display.set_on().await.unwrap();
-    FRAMEBUFFER
-        .lock()
-        .await
-        .swap(&RefCell::new(Some(framebuffer)));
+    FRAMEBUFFER.lock().await.replace(framebuffer);
 
     display
 }
 
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
-        FRAMEBUFFER
-            .lock()
-            .await
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .partial_draw_batched(&mut display)
-            .await
-            .unwrap();
+        let fb: &mut FB = {
+            let mut guard = FRAMEBUFFER.lock().await;
+            guard.take().unwrap() // take ownership
+        }; // guard dropped
+
+        fb.partial_draw_batched(&mut display).await.unwrap();
+
+        // Put it back
+        FRAMEBUFFER.lock().await.replace(fb);
+
         Timer::after_millis(32).await; // 30 fps
     }
 }

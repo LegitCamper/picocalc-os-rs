@@ -51,6 +51,9 @@ impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, M
     }
 
     async fn draw_selection(&mut self) {
+        let mut fb_lock = FRAMEBUFFER.lock().await;
+        let fb = fb_lock.as_mut().unwrap();
+
         let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
 
         let selection = Rectangle::new(
@@ -62,7 +65,7 @@ impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, M
 
         let Some(first) = file_names.next() else {
             Text::new("No Programs found on SD Card\nEnsure programs end with '.bin',\nand are located in the root directory",
-                Point::zero(), text_style).draw(*FRAMEBUFFER.lock().await.borrow_mut().as_mut().unwrap()).unwrap();
+                Point::zero(), text_style).draw(*fb).unwrap();
 
             return;
         };
@@ -72,18 +75,8 @@ impl<const MAX_SELECTIONS: usize, const MAX_STR_LEN: usize> UI<MAX_SELECTIONS, M
         LinearLayout::vertical(chain)
             .with_alignment(horizontal::Center)
             .arrange()
-            .align_to(
-                &FRAMEBUFFER
-                    .lock()
-                    .await
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
-                    .bounding_box(),
-                horizontal::Center,
-                vertical::Center,
-            )
-            .draw(*FRAMEBUFFER.lock().await.borrow_mut().as_mut().unwrap())
+            .align_to(&fb.bounding_box(), horizontal::Center, vertical::Center)
+            .draw(*fb)
             .unwrap();
     }
 }

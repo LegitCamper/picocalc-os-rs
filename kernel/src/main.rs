@@ -181,8 +181,6 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
     );
     let display = init_display(spi, display.cs, display.data, display.reset).await;
 
-    DRIVERS_READY.signal(());
-
     let display_fut = display_handler(display);
 
     {
@@ -204,6 +202,7 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
     let usb_fut = usb_handler(usb);
 
     ENABLE_SCSI.store(true, core::sync::atomic::Ordering::Relaxed);
+    DRIVERS_READY.signal(());
     join3(usb_fut, display_fut, async {
         loop {
             Timer::after_millis(100).await;
