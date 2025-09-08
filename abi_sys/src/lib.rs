@@ -14,7 +14,7 @@ use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 pub type EntryFn = fn() -> Pin<Box<dyn Future<Output = ()>>>;
 
 #[unsafe(no_mangle)]
-#[unsafe(link_section = ".userapp")]
+#[unsafe(link_section = ".user_reloc")]
 pub static mut CALL_ABI_TABLE: [usize; CallAbiTable::COUNT] = [0; CallAbiTable::COUNT];
 
 #[repr(usize)]

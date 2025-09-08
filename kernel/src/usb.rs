@@ -17,7 +17,7 @@ pub static RESTART_USB: Signal<ThreadModeRawMutex, ()> = Signal::new();
 pub static ENABLE_SCSI: AtomicBool = AtomicBool::new(false);
 
 pub async fn usb_handler(driver: Driver<'static, USB>) {
-    let mut config = Config::new(0xc0de, 0xcafe);
+    let mut config = Config::new(0xc0de, 0xbabe);
     config.manufacturer = Some("LegitCamper");
     config.product = Some("PicoCalc");
     config.serial_number = Some("01001100");

@@ -138,6 +138,7 @@ async fn userland_task() {
             *state = TaskState::Kernel;
         }
 
+        defmt::info!("Executing Binary");
         entry().await;
 
         // enable kernel ui

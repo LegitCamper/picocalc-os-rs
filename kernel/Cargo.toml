@@ -79,11 +79,7 @@ static_cell = "2.1.1"
 bitflags = "2.9.1"
 heapless = "0.8.0"
 num_enum = { version = "0.7.4", default-features = false }
-goblin = { version = "0.10.0", default-features = false, features = [
-  "elf32",
-  "elf64",
-  "endian_fd",
-] }
+goblin = { version = "0.10.0", default-features = false, features = ["elf32"] }
 talc = "4.4.3"
 spin = "0.10.0"
 

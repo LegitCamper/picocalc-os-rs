@@ -12,7 +12,7 @@ use embedded_sdmmc::{
     Block, BlockCount, BlockDevice, BlockIdx, Directory, SdCard as SdmmcSdCard, TimeSource,
     Timestamp, Volume, VolumeIdx, VolumeManager, sdcard::Error,
 };
-use embedded_sdmmc::{LfnBuffer, ShortFileName};
+use embedded_sdmmc::{File as SdFile, LfnBuffer, Mode, ShortFileName};
 
 pub const MAX_DIRS: usize = 4;
 pub const MAX_FILES: usize = 5;
@@ -23,6 +23,7 @@ type SD = SdmmcSdCard<Device, Delay>;
 type VolMgr = VolumeManager<SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Vol<'a> = Volume<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Dir<'a> = Directory<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
+pub type File<'a> = SdFile<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 
 pub static SDCARD: LazyLock<Mutex<NoopRawMutex, Option<SdCard>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -111,6 +112,22 @@ impl SdCard {
         let root_dir = volume0.open_root_dir().unwrap();
 
         access(root_dir);
+    }
+
+    pub async fn read_file(
+        &mut self,
+        name: &ShortFileName,
+        mut access: impl FnMut(File),
+    ) -> Result<(), ()> {
+        let mut res = Err(());
+        self.access_root_dir(|root_dir| {
+            if let Ok(file) = root_dir.open_file_in_dir(name, Mode::ReadOnly) {
+                res = Ok(());
+                access(file);
+            }
+        });
+
+        res
     }
 
     /// Returns a Vec of file names (long format) that match the given extension (e.g., "BIN")

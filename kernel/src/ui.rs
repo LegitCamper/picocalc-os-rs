@@ -1,6 +1,7 @@
 use crate::{
     BINARY_CH, TASK_STATE, TaskState,
     display::{FRAMEBUFFER, SCREEN_HEIGHT, SCREEN_WIDTH},
+    elf::load_binary,
     format,
     peripherals::keyboard,
     storage::FileName,
@@ -66,14 +67,8 @@ pub async fn ui_handler() {
                                 [selections.current_selection as usize - 1]
                                 .clone();
 
-                            defmt::info!(
-                                "loading selected binary: {:?}",
-                                &selection.long_name.as_str()
-                            );
-                            let bytes = crate::elf::read_binary(&selection.short_name)
-                                .await
-                                .unwrap();
-                            let entry = unsafe { crate::elf::load_binary(&bytes).unwrap() };
+                            let entry =
+                                unsafe { load_binary(&selection.short_name).await.unwrap() };
                             BINARY_CH.send(entry).await;
                         }
                         _ => (),
