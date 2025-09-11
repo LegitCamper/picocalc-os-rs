@@ -27,29 +27,29 @@ pub async fn main() {
 
     let mut text = vec!['H', 'E', 'L', 'L', 'O'];
 
-    loop {
-        Text::with_alignment(
-            &text.iter().cloned().collect::<String>(),
-            display.bounding_box().center() + Point::new(0, 15),
-            character_style,
-            Alignment::Center,
-        )
-        .draw(&mut display)
-        .unwrap();
+    // loop {
+    Text::with_alignment(
+        &text.iter().cloned().collect::<String>(),
+        display.bounding_box().center() + Point::new(0, 15),
+        character_style,
+        Alignment::Center,
+    )
+    .draw(&mut display)
+    .unwrap();
 
-        if let Some(event) = get_key() {
-            print("User got event");
-            match event.key {
-                KeyCode::Char(ch) => {
-                    text.push(ch);
-                }
-                KeyCode::Backspace => {
-                    text.pop();
-                }
-                _ => (),
+    if let Some(event) = get_key() {
+        print("User got event");
+        match event.key {
+            KeyCode::Char(ch) => {
+                text.push(ch);
             }
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            _ => (),
         }
     }
+    // }
 }
 
 #[unsafe(no_mangle)]

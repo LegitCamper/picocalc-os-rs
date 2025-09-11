@@ -17,11 +17,8 @@ mod ui;
 mod usb;
 mod utils;
 
-use core::sync::atomic::Ordering;
-
 use crate::{
-    display::{display_handler, init_display},
-    elf::load_binary,
+    display::{access_framebuffer, display_handler, init_display},
     peripherals::{
         conf_peripherals,
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
@@ -30,11 +27,7 @@ use crate::{
     ui::{SELECTIONS, ui_handler},
     usb::usb_handler,
 };
-use abi_sys::EntryFn;
-use alloc::vec::Vec;
-
-use {defmt_rtt as _, panic_probe as _};
-
+use abi_sys::{EntryFn, Rgb565, RgbColor};
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::join::{join, join3, join4, join5};
@@ -49,14 +42,18 @@ use embassy_rp::{
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex, signal::Signal,
+};
 use embassy_time::{Delay, Timer};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
 use heapless::spsc::Queue;
 use shared::keyboard::KeyEvent;
 use static_cell::StaticCell;
 use talc::*;
+use {defmt_rtt as _, panic_probe as _};
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -75,7 +72,9 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
         .lock();
 
 static TASK_STATE: Mutex<CriticalSectionRawMutex, TaskState> = Mutex::new(TaskState::Ui);
+static TASK_STATE_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
+#[derive(Copy, Clone)]
 enum TaskState {
     Ui,
     Kernel,
@@ -131,20 +130,29 @@ async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
         let entry = recv.receive().await;
+        defmt::info!("got bin");
 
         // disable kernel ui
         {
             let mut state = TASK_STATE.lock().await;
             *state = TaskState::Kernel;
+            TASK_STATE_CHANGED.signal(());
         }
 
-        defmt::info!("Executing Binary");
+        access_framebuffer(|fb| {
+            fb.clear(Rgb565::BLACK).unwrap();
+        })
+        .await
+        .unwrap();
+
+        defmt::info!("running entry");
         entry().await;
 
         // enable kernel ui
         {
             let mut state = TASK_STATE.lock().await;
             *state = TaskState::Ui;
+            TASK_STATE_CHANGED.signal(());
         }
     }
 }

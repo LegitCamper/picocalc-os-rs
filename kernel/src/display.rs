@@ -21,7 +21,24 @@ pub const SCREEN_HEIGHT: usize = 320;
 
 type FB = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, { SCREEN_WIDTH * SCREEN_HEIGHT }>;
 static FRAMEBUFFER_CELL: StaticCell<FB> = StaticCell::new();
-pub static FRAMEBUFFER: Mutex<CriticalSectionRawMutex, Option<&'static mut FB>> = Mutex::new(None);
+static FRAMEBUFFER: Mutex<CriticalSectionRawMutex, Option<&'static mut FB>> = Mutex::new(None);
+
+pub fn access_framebuffer_blocking(mut access: impl FnMut(&mut FB)) -> Result<(), ()> {
+    let mut guard = FRAMEBUFFER.try_lock().ok().ok_or(())?;
+    let fb = guard.as_mut().ok_or(())?;
+    access(fb);
+    Ok(())
+}
+
+pub async fn access_framebuffer(mut access: impl FnMut(&mut FB)) -> Result<(), ()> {
+    let mut guard = FRAMEBUFFER.lock().await;
+    let fb: Option<&mut &'static mut FB> = guard.as_mut();
+    if let Some(fb) = fb {
+        access(&mut *fb);
+        return Ok(());
+    }
+    Err(())
+}
 
 pub async fn init_display(
     spi: Spi<'static, SPI1, Async>,
@@ -38,28 +55,22 @@ pub async fn init_display(
         true,
         Delay,
     );
-    let framebuffer = FRAMEBUFFER_CELL.init(FrameBuffer::new());
+
     display.init().await.unwrap();
     display.set_custom_orientation(0x40).await.unwrap();
-    framebuffer.draw(&mut display).await.unwrap();
+    let mut framebuffer = FRAMEBUFFER_CELL.init(FrameBuffer::new());
+    display.draw(&mut framebuffer).await.unwrap();
     display.set_on().await.unwrap();
     FRAMEBUFFER.lock().await.replace(framebuffer);
 
     display
 }
 
+static DISPLAYREF: StaticCell<DISPLAY> = StaticCell::new();
+
 pub async fn display_handler(mut display: DISPLAY) {
-    loop {
-        let fb: &mut FB = {
-            let mut guard = FRAMEBUFFER.lock().await;
-            guard.take().unwrap() // take ownership
-        }; // guard dropped
-
-        fb.partial_draw_batched(&mut display).await.unwrap();
-
-        // Put it back
-        FRAMEBUFFER.lock().await.replace(fb);
-
-        Timer::after_millis(32).await; // 30 fps
+    let mut guard = FRAMEBUFFER.lock().await;
+    if let Some(fb) = guard.as_mut() {
+        display.partial_draw_batched(fb).await.unwrap();
     }
 }

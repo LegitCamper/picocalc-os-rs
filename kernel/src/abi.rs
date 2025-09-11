@@ -3,7 +3,6 @@ use core::pin::Pin;
 use abi_sys::{DrawIterAbi, GetKeyAbi, Pixel, PrintAbi};
 use alloc::boxed::Box;
 use defmt::info;
-use embassy_futures::block_on;
 use embedded_graphics::{
     Drawable,
     draw_target::DrawTarget,
@@ -13,7 +12,7 @@ use embedded_graphics::{
 };
 use shared::keyboard::KeyEvent;
 
-use crate::{KEY_CACHE, display::FRAMEBUFFER};
+use crate::{KEY_CACHE, display::access_framebuffer_blocking};
 
 // ensure the abi and the kernel fn signatures are the same
 const _: PrintAbi = print;
@@ -26,17 +25,15 @@ pub extern "Rust" fn print(msg: &str) {
 
 // TODO: maybe return result
 pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-    for _ in 0..10 {
-        if let Some(mut framebuffer) = FRAMEBUFFER.try_lock().ok() {
-            for _ in 0..10 {
-                // kernel takes() framebuffer
-                if let Some(framebuffer) = framebuffer.as_mut() {
-                    framebuffer.draw_iter(pixels.iter().copied()).unwrap();
-                }
-                break;
-            }
+    loop {
+        if access_framebuffer_blocking(|fb| {
+            fb.draw_iter(pixels.iter().copied()).unwrap();
+        })
+        .is_ok()
+        {
             break;
         }
+
         cortex_m::asm::nop();
     }
 }

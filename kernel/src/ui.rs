@@ -1,6 +1,6 @@
 use crate::{
     BINARY_CH, TASK_STATE, TaskState,
-    display::{FRAMEBUFFER, SCREEN_HEIGHT, SCREEN_WIDTH},
+    display::{SCREEN_HEIGHT, SCREEN_WIDTH, access_framebuffer},
     elf::load_binary,
     format,
     peripherals::keyboard,
@@ -47,36 +47,51 @@ use shared::keyboard::{KeyCode, KeyState};
 pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
     Mutex::new(SelectionList::new());
 
+pub async fn run_selected() {
+    info!("Getting selections lock");
+    let selections = SELECTIONS.lock().await;
+    info!("Got selections lock");
+    let selection = selections.selections[selections.current_selection as usize - 1].clone();
+
+    let entry = unsafe { load_binary(&selection.short_name).await.unwrap() };
+    info!("loaded binary");
+    BINARY_CH.send(entry).await;
+    info!("sent bin");
+}
+
 pub async fn ui_handler() {
     loop {
-        if let TaskState::Ui = *TASK_STATE.lock().await {
+        let state = *TASK_STATE.lock().await;
+        if let TaskState::Ui = state {
+            let mut redraw = false;
+
             if let Some(event) = keyboard::read_keyboard_fifo().await {
-                if let KeyState::Pressed = event.state {
+                if event.state == KeyState::Pressed {
                     match event.key {
                         KeyCode::JoyUp => {
                             let mut selections = SELECTIONS.lock().await;
                             selections.up();
+                            redraw = true;
                         }
                         KeyCode::JoyDown => {
                             let mut selections = SELECTIONS.lock().await;
                             selections.down();
+                            redraw = true;
                         }
-                        KeyCode::Enter | KeyCode::JoyRight => {
-                            let selections = SELECTIONS.lock().await;
-                            let selection = selections.selections
-                                [selections.current_selection as usize - 1]
-                                .clone();
-
-                            let entry =
-                                unsafe { load_binary(&selection.short_name).await.unwrap() };
-                            BINARY_CH.send(entry).await;
-                        }
-                        _ => (),
+                        KeyCode::Enter | KeyCode::JoyRight => run_selected().await,
+                        _ => {}
                     }
                 }
             }
 
-            draw_selection().await;
+            {
+                let mut selections = SELECTIONS.lock().await;
+                redraw |= selections.take_changed();
+            }
+
+            if redraw {
+                draw_selection().await;
+            }
         }
     }
 }
@@ -87,8 +102,8 @@ async fn draw_selection() {
         guard.selections.clone()
     };
 
-    let mut fb_lock = FRAMEBUFFER.lock().await;
-    if let Some(fb) = fb_lock.as_mut() {
+    loop {
+        if access_framebuffer(|fb|{
         let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
         let display_area = fb.bounding_box();
 
@@ -104,13 +119,13 @@ async fn draw_selection() {
                 ),
                 text_style,
             )
-            .draw(*fb)
+            .draw(fb)
             .unwrap();
         } else {
             let mut file_names = file_names.iter();
             let Some(first) = file_names.next() else {
                 Text::new("No Programs found on SD Card\nEnsure programs end with '.bin',\nand are located in the root directory",
-                Point::zero(), text_style).draw(*fb).unwrap();
+                Point::zero(), text_style).draw(fb).unwrap();
 
                 return;
             };
@@ -129,9 +144,16 @@ async fn draw_selection() {
                 .with_alignment(horizontal::Center)
                 .arrange()
                 .align_to(&display_area, horizontal::Center, vertical::Center)
-                .draw(*fb)
+                .draw(fb)
                 .unwrap();
         };
+    }
+        ).await.is_ok() {
+            break;
+        }
+
+        defmt::warn!("Failed to draw selection: framebuffer unavailable");
+        Timer::after_micros(10).await;
     }
 }
 
@@ -139,6 +161,7 @@ async fn draw_selection() {
 pub struct SelectionList {
     current_selection: u16,
     pub selections: Vec<FileName>,
+    has_changed: bool,
 }
 
 impl SelectionList {
@@ -146,6 +169,7 @@ impl SelectionList {
         Self {
             selections: Vec::new(),
             current_selection: 0,
+            has_changed: true,
         }
     }
 
@@ -163,5 +187,11 @@ impl SelectionList {
         if self.current_selection > self.selections.len() as u16 {
             self.current_selection -= 1
         }
+    }
+
+    pub fn take_changed(&mut self) -> bool {
+        let changed = self.has_changed;
+        self.has_changed = false;
+        changed
     }
 }
