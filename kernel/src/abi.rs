@@ -12,7 +12,7 @@ use embedded_graphics::{
 };
 use shared::keyboard::KeyEvent;
 
-use crate::{KEY_CACHE, display::access_framebuffer_blocking};
+use crate::{KEY_CACHE, display::framebuffer_mut};
 
 // ensure the abi and the kernel fn signatures are the same
 const _: PrintAbi = print;
@@ -25,17 +25,8 @@ pub extern "Rust" fn print(msg: &str) {
 
 // TODO: maybe return result
 pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-    loop {
-        if access_framebuffer_blocking(|fb| {
-            fb.draw_iter(pixels.iter().copied()).unwrap();
-        })
-        .is_ok()
-        {
-            break;
-        }
-
-        cortex_m::asm::nop();
-    }
+    let fb = framebuffer_mut();
+    fb.draw_iter(pixels.iter().copied()).unwrap();
 }
 
 pub extern "Rust" fn get_key() -> Option<KeyEvent> {

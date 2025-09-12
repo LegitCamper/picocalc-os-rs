@@ -1,6 +1,6 @@
 use crate::{
     BINARY_CH, TASK_STATE, TaskState,
-    display::{SCREEN_HEIGHT, SCREEN_WIDTH, access_framebuffer},
+    display::{SCREEN_HEIGHT, SCREEN_WIDTH, framebuffer_mut},
     elf::load_binary,
     format,
     peripherals::keyboard,
@@ -102,59 +102,50 @@ async fn draw_selection() {
         guard.selections.clone()
     };
 
-    loop {
-        if access_framebuffer(|fb|{
-        let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
-        let display_area = fb.bounding_box();
+    let fb = framebuffer_mut();
+    let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
+    let display_area = fb.bounding_box();
 
-        const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
-        let no_bins = String::from_str(NO_BINS).unwrap();
+    const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
+    let no_bins = String::from_str(NO_BINS).unwrap();
 
-        if file_names.is_empty() {
-            TextBox::new(
-                &no_bins,
-                Rectangle::new(
-                    Point::new(25, 25),
-                    Size::new(display_area.size.width - 50, display_area.size.width - 50),
-                ),
-                text_style,
-            )
-            .draw(fb)
-            .unwrap();
-        } else {
-            let mut file_names = file_names.iter();
-            let Some(first) = file_names.next() else {
-                Text::new("No Programs found on SD Card\nEnsure programs end with '.bin',\nand are located in the root directory",
+    if file_names.is_empty() {
+        TextBox::new(
+            &no_bins,
+            Rectangle::new(
+                Point::new(25, 25),
+                Size::new(display_area.size.width - 50, display_area.size.width - 50),
+            ),
+            text_style,
+        )
+        .draw(fb)
+        .unwrap();
+    } else {
+        let mut file_names = file_names.iter();
+        let Some(first) = file_names.next() else {
+            Text::new("No Programs found on SD Card\nEnsure programs end with '.bin',\nand are located in the root directory",
                 Point::zero(), text_style).draw(fb).unwrap();
 
-                return;
-            };
-
-            let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
-
-            // for _ in 0..file_names.len() {
-            //     let chain = chain.append(Text::new(
-            //         file_names.next().unwrap(),
-            //         Point::zero(),
-            //         text_style,
-            //     ));
-            // }
-
-            LinearLayout::vertical(chain)
-                .with_alignment(horizontal::Center)
-                .arrange()
-                .align_to(&display_area, horizontal::Center, vertical::Center)
-                .draw(fb)
-                .unwrap();
+            return;
         };
-    }
-        ).await.is_ok() {
-            break;
-        }
 
-        defmt::warn!("Failed to draw selection: framebuffer unavailable");
-        Timer::after_micros(10).await;
-    }
+        let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
+
+        // for _ in 0..file_names.len() {
+        //     let chain = chain.append(Text::new(
+        //         file_names.next().unwrap(),
+        //         Point::zero(),
+        //         text_style,
+        //     ));
+        // }
+
+        LinearLayout::vertical(chain)
+            .with_alignment(horizontal::Center)
+            .arrange()
+            .align_to(&display_area, horizontal::Center, vertical::Center)
+            .draw(fb)
+            .unwrap();
+    };
 }
 
 #[derive(Clone)]

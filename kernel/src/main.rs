@@ -18,7 +18,7 @@ mod usb;
 mod utils;
 
 use crate::{
-    display::{access_framebuffer, display_handler, init_display},
+    display::{display_handler, framebuffer_mut, init_display},
     peripherals::{
         conf_peripherals,
         keyboard::{KeyCode, KeyState, read_keyboard_fifo},
@@ -139,11 +139,10 @@ async fn userland_task() {
             TASK_STATE_CHANGED.signal(());
         }
 
-        access_framebuffer(|fb| {
+        {
+            let fb = framebuffer_mut();
             fb.clear(Rgb565::BLACK).unwrap();
-        })
-        .await
-        .unwrap();
+        }
 
         defmt::info!("running entry");
         entry().await;

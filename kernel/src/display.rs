@@ -20,24 +20,10 @@ pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
 
 type FB = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, { SCREEN_WIDTH * SCREEN_HEIGHT }>;
-static FRAMEBUFFER_CELL: StaticCell<FB> = StaticCell::new();
-static FRAMEBUFFER: Mutex<CriticalSectionRawMutex, Option<&'static mut FB>> = Mutex::new(None);
+static mut FRAMEBUFFER: Option<FB> = None;
 
-pub fn access_framebuffer_blocking(mut access: impl FnMut(&mut FB)) -> Result<(), ()> {
-    let mut guard = FRAMEBUFFER.try_lock().ok().ok_or(())?;
-    let fb = guard.as_mut().ok_or(())?;
-    access(fb);
-    Ok(())
-}
-
-pub async fn access_framebuffer(mut access: impl FnMut(&mut FB)) -> Result<(), ()> {
-    let mut guard = FRAMEBUFFER.lock().await;
-    let fb: Option<&mut &'static mut FB> = guard.as_mut();
-    if let Some(fb) = fb {
-        access(&mut *fb);
-        return Ok(());
-    }
-    Err(())
+pub fn framebuffer_mut() -> &'static mut FB {
+    unsafe { FRAMEBUFFER.as_mut().unwrap() }
 }
 
 pub async fn init_display(
@@ -58,19 +44,17 @@ pub async fn init_display(
 
     display.init().await.unwrap();
     display.set_custom_orientation(0x40).await.unwrap();
-    let mut framebuffer = FRAMEBUFFER_CELL.init(FrameBuffer::new());
-    display.draw(&mut framebuffer).await.unwrap();
+    unsafe { FRAMEBUFFER.replace(FrameBuffer::new()) };
+    display.draw(framebuffer_mut()).await.unwrap();
     display.set_on().await.unwrap();
-    FRAMEBUFFER.lock().await.replace(framebuffer);
 
     display
 }
 
-static DISPLAYREF: StaticCell<DISPLAY> = StaticCell::new();
-
 pub async fn display_handler(mut display: DISPLAY) {
-    let mut guard = FRAMEBUFFER.lock().await;
-    if let Some(fb) = guard.as_mut() {
+    let fb = framebuffer_mut();
+    loop {
         display.partial_draw_batched(fb).await.unwrap();
+        embassy_time::Timer::after_millis(32).await; // 30 fps
     }
 }
