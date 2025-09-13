@@ -1,16 +1,10 @@
-use crate::{
-    TASK_STATE, TASK_STATE_CHANGED, TaskState,
-    scsi::MassStorageClass,
-    storage::{SDCARD, SdCard},
-};
+use crate::{TASK_STATE, TASK_STATE_CHANGED, TaskState, scsi::MassStorageClass};
 use embassy_futures::{
     join::join,
     select::{select, select3},
 };
 use embassy_rp::{peripherals::USB, usb::Driver};
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_usb::{Builder, Config};
-use portable_atomic::AtomicBool;
 
 pub async fn usb_handler(driver: Driver<'static, USB>) {
     let mut config = Config::new(0xc0de, 0xbabe);

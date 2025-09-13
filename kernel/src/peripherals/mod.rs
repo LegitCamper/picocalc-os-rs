@@ -5,7 +5,9 @@ use embassy_rp::{
     i2c::{Async, I2c},
     peripherals::I2C1,
 };
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, lazy_lock::LazyLock, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, lazy_lock::LazyLock, mutex::Mutex,
+};
 use embassy_time::Timer;
 
 pub mod keyboard;
@@ -15,7 +17,7 @@ use crate::peripherals::keyboard::{configure_keyboard, read_keyboard_fifo};
 const MCU_ADDR: u8 = 0x1F;
 
 type I2CBUS = I2c<'static, I2C1, Async>;
-pub static PERIPHERAL_BUS: LazyLock<Mutex<NoopRawMutex, Option<I2CBUS>>> =
+pub static PERIPHERAL_BUS: LazyLock<Mutex<CriticalSectionRawMutex, Option<I2CBUS>>> =
     LazyLock::new(|| Mutex::new(None));
 
 const REG_ID_VER: u8 = 0x01;

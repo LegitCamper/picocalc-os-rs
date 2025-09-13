@@ -1,4 +1,5 @@
 use embassy_rp::{
+    Peri,
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Spi},
@@ -30,9 +31,9 @@ pub static FRAMEBUFFER: LazyLock<Mutex<CriticalSectionRawMutex, FB>> =
 
 pub async fn init_display(
     spi: Spi<'static, SPI1, Async>,
-    cs: PIN_13,
-    data: PIN_14,
-    reset: PIN_15,
+    cs: Peri<'static, PIN_13>,
+    data: Peri<'static, PIN_14>,
+    reset: Peri<'static, PIN_15>,
 ) -> DISPLAY {
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
     let mut display = ST7365P::new(

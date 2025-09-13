@@ -23,8 +23,8 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         let mut interface = function.interface();
         let mut alt = interface.alt_setting(0x08, SUBCLASS_SCSI, 0x50, None);
 
-        let bulk_out = alt.endpoint_bulk_out(BULK_ENDPOINT_PACKET_SIZE as u16);
-        let bulk_in = alt.endpoint_bulk_in(BULK_ENDPOINT_PACKET_SIZE as u16);
+        let bulk_out = alt.endpoint_bulk_out(None, BULK_ENDPOINT_PACKET_SIZE as u16);
+        let bulk_in = alt.endpoint_bulk_in(None, BULK_ENDPOINT_PACKET_SIZE as u16);
 
         Self { bulk_out, bulk_in }
     }

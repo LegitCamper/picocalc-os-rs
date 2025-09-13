@@ -17,8 +17,6 @@ mod ui;
 mod usb;
 mod utils;
 
-use core::sync::atomic::Ordering;
-
 use crate::{
     display::{FRAMEBUFFER, clear_fb, display_handler, init_display},
     elf::load_binary,
@@ -31,14 +29,15 @@ use crate::{
     usb::usb_handler,
 };
 use abi_sys::EntryFn;
-use alloc::vec::Vec;
 
 use {defmt_rtt as _, panic_probe as _};
 
+use assign_resources::assign_resources;
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::join::{join, join3, join4, join5};
 use embassy_rp::{
+    Peri,
     gpio::{Input, Level, Output, Pull},
     i2c::{self, I2c},
     multicore::{Stack, spawn_core1},
@@ -157,34 +156,32 @@ async fn userland_task() {
 }
 
 struct Display {
-    spi: SPI1,
-    clk: PIN_10,
-    mosi: PIN_11,
-    miso: PIN_12,
-    dma1: DMA_CH0,
-    dma2: DMA_CH1,
-    cs: PIN_13,
-    data: PIN_14,
-    reset: PIN_15,
+    spi: Peri<'static, SPI1>,
+    clk: Peri<'static, PIN_10>,
+    mosi: Peri<'static, PIN_11>,
+    miso: Peri<'static, PIN_12>,
+    dma1: Peri<'static, DMA_CH0>,
+    dma2: Peri<'static, DMA_CH1>,
+    cs: Peri<'static, PIN_13>,
+    data: Peri<'static, PIN_14>,
+    reset: Peri<'static, PIN_15>,
 }
-
 struct Sd {
-    spi: SPI0,
-    clk: PIN_18,
-    mosi: PIN_19,
-    miso: PIN_16,
-    cs: PIN_17,
-    det: PIN_22,
+    spi: Peri<'static, SPI0>,
+    clk: Peri<'static, PIN_18>,
+    mosi: Peri<'static, PIN_19>,
+    miso: Peri<'static, PIN_16>,
+    cs: Peri<'static, PIN_17>,
+    det: Peri<'static, PIN_22>,
 }
-
 struct Mcu {
-    i2c: I2C1,
-    clk: PIN_7,
-    data: PIN_6,
+    i2c: Peri<'static, I2C1>,
+    clk: Peri<'static, PIN_7>,
+    data: Peri<'static, PIN_6>,
 }
 
 #[embassy_executor::task]
-async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
+async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: Peri<'static, USB>) {
     // MCU i2c bus for peripherals
     let mut config = i2c::Config::default();
     config.frequency = 400_000;

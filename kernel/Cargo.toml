@@ -31,20 +31,20 @@ defmt = [
 ]
 
 [dependencies]
-embassy-executor = { version = "0.7", features = [
+embassy-executor = { version = "0.9", features = [
   "arch-cortex-m",
   "executor-interrupt",
   "executor-thread",
   "nightly",
 ] }
-embassy-rp = { version = "0.4.0", features = [
+embassy-rp = { version = "0.8.0", features = [
   "critical-section-impl",
   "unstable-pac",
   "time-driver",
 ] }
-embassy-usb = "0.4.0"
-embassy-futures = "0.1.1"
-embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
+embassy-usb = "0.5.1"
+embassy-futures = "0.1.2"
+embassy-time = { version = "0.5.0", features = ["generic-queue-8"] }
 embassy-embedded-hal = "0.3.1"
 embassy-sync = { version = "0.7" }
 trouble-host = { version = "0.1", features = [
@@ -65,6 +65,7 @@ cortex-m = { version = "0.7.7" }
 cortex-m-rt = "0.7.5"
 panic-probe = "0.3"
 portable-atomic = { version = "1.11", features = ["critical-section"] }
+assign-resources = "0.5.0"
 
 defmt = { version = "0.3", optional = true }
 defmt-rtt = "0.4.2"
