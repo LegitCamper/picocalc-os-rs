@@ -20,7 +20,7 @@ mod utils;
 use core::sync::atomic::Ordering;
 
 use crate::{
-    display::{display_handler, init_display},
+    display::{FRAMEBUFFER, clear_fb, display_handler, init_display},
     elf::load_binary,
     peripherals::{
         conf_peripherals,
@@ -49,7 +49,9 @@ use embassy_rp::{
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex, signal::Signal,
+};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
@@ -75,7 +77,9 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
         .lock();
 
 static TASK_STATE: Mutex<CriticalSectionRawMutex, TaskState> = Mutex::new(TaskState::Ui);
+static TASK_STATE_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
+#[derive(Copy, Clone, PartialEq)]
 enum TaskState {
     Ui,
     Kernel,
@@ -131,12 +135,15 @@ async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
         let entry = recv.receive().await;
+        defmt::info!("Got Entry");
 
         // disable kernel ui
         {
             let mut state = TASK_STATE.lock().await;
             *state = TaskState::Kernel;
         }
+
+        // clear_fb().await; // blocks future exec?
 
         defmt::info!("Executing Binary");
         entry().await;
@@ -237,8 +244,8 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
         SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
     };
 
-    // let usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    // let usb_fut = usb_handler(usb);
+    let usb = embassy_rp_usb::Driver::new(usb, Irqs);
+    let usb_fut = usb_handler(usb);
 
     let key_abi_fut = async {
         loop {
@@ -247,7 +254,7 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: USB) {
         }
     };
 
-    join4(display_fut, ui_fut, binary_search_fut, key_abi_fut).await;
+    join5(display_fut, ui_fut, usb_fut, binary_search_fut, key_abi_fut).await;
 }
 
 static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();

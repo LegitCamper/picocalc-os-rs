@@ -5,36 +5,21 @@ use crate::{
     format,
     peripherals::keyboard,
     storage::FileName,
-    usb::RESTART_USB,
 };
 use alloc::{string::String, vec::Vec};
 use core::{fmt::Debug, str::FromStr, sync::atomic::Ordering};
-use defmt::info;
-use embassy_rp::{
-    gpio::{Level, Output},
-    peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
-    spi::{Async, Spi},
-};
 use embassy_sync::{
     blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
     mutex::Mutex,
-    signal::Signal,
 };
-use embassy_time::{Delay, Timer};
 use embedded_graphics::{
     Drawable,
-    draw_target::DrawTarget,
-    mono_font::{
-        MonoTextStyle,
-        ascii::{FONT_6X9, FONT_6X10, FONT_9X15, FONT_10X20},
-    },
+    mono_font::{MonoTextStyle, ascii::FONT_9X15},
     pixelcolor::Rgb565,
-    prelude::{Dimensions, Point, Primitive, RgbColor, Size},
-    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
+    prelude::{Dimensions, Point, RgbColor, Size},
+    primitives::Rectangle,
     text::Text,
 };
-use embedded_hal_async::spi::SpiDevice;
-use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use embedded_layout::{
     align::{horizontal, vertical},
     layout::linear::LinearLayout,
@@ -77,6 +62,8 @@ pub async fn ui_handler() {
             }
 
             draw_selection().await;
+        } else {
+            embassy_time::Timer::after_millis(50).await;
         }
     }
 }
@@ -87,51 +74,50 @@ async fn draw_selection() {
         guard.selections.clone()
     };
 
-    let mut fb_lock = FRAMEBUFFER.lock().await;
-    if let Some(fb) = fb_lock.as_mut() {
-        let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
-        let display_area = fb.bounding_box();
+    let mut fb = FRAMEBUFFER.get().lock().await;
+    let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
+    let display_area = fb.bounding_box();
 
-        const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
-        let no_bins = String::from_str(NO_BINS).unwrap();
+    const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
+    let no_bins = String::from_str(NO_BINS).unwrap();
 
-        if file_names.is_empty() {
-            TextBox::new(
-                &no_bins,
-                Rectangle::new(
-                    Point::new(25, 25),
-                    Size::new(display_area.size.width - 50, display_area.size.width - 50),
-                ),
-                text_style,
-            )
-            .draw(*fb)
-            .unwrap();
-        } else {
-            let mut file_names = file_names.iter();
-            let Some(first) = file_names.next() else {
-                Text::new("No Programs found on SD Card\nEnsure programs end with '.bin',\nand are located in the root directory",
-                Point::zero(), text_style).draw(*fb).unwrap();
-
-                return;
-            };
-
-            let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
-
-            // for _ in 0..file_names.len() {
-            //     let chain = chain.append(Text::new(
-            //         file_names.next().unwrap(),
-            //         Point::zero(),
-            //         text_style,
-            //     ));
-            // }
-
-            LinearLayout::vertical(chain)
-                .with_alignment(horizontal::Center)
-                .arrange()
-                .align_to(&display_area, horizontal::Center, vertical::Center)
-                .draw(*fb)
+    if file_names.is_empty() {
+        TextBox::new(
+            &no_bins,
+            Rectangle::new(
+                Point::new(25, 25),
+                Size::new(display_area.size.width - 50, display_area.size.width - 50),
+            ),
+            text_style,
+        )
+        .draw(&mut *fb)
+        .unwrap();
+    } else {
+        let mut file_names = file_names.iter();
+        let Some(first) = file_names.next() else {
+            Text::new(NO_BINS, Point::zero(), text_style)
+                .draw(&mut *fb)
                 .unwrap();
+
+            return;
         };
+
+        let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
+
+        // for _ in 0..file_names.len() {
+        //     let chain = chain.append(Text::new(
+        //         file_names.next().unwrap(),
+        //         Point::zero(),
+        //         text_style,
+        //     ));
+        // }
+
+        LinearLayout::vertical(chain)
+            .with_alignment(horizontal::Center)
+            .arrange()
+            .align_to(&display_area, horizontal::Center, vertical::Center)
+            .draw(&mut *fb)
+            .unwrap();
     }
 }
 

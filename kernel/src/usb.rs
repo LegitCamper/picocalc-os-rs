@@ -1,6 +1,5 @@
-use core::sync::atomic::Ordering;
-
 use crate::{
+    TASK_STATE, TASK_STATE_CHANGED, TaskState,
     scsi::MassStorageClass,
     storage::{SDCARD, SdCard},
 };
@@ -12,9 +11,6 @@ use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_usb::{Builder, Config};
 use portable_atomic::AtomicBool;
-
-pub static RESTART_USB: Signal<ThreadModeRawMutex, ()> = Signal::new();
-pub static ENABLE_SCSI: AtomicBool = AtomicBool::new(false);
 
 pub async fn usb_handler(driver: Driver<'static, USB>) {
     let mut config = Config::new(0xc0de, 0xbabe);
@@ -37,27 +33,17 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
         &mut control_buf,
     );
 
-    let lock = SDCARD.get().lock().await;
-    let sdcard = lock.as_ref().unwrap();
-
-    let mut scsi = MassStorageClass::new(&mut builder, &sdcard);
+    let mut scsi = MassStorageClass::new(&mut builder);
     let mut usb = builder.build();
 
     loop {
-        select3(
-            async {
-                loop {
-                    RESTART_USB.wait().await;
-                    return;
-                }
-            },
-            usb.run(),
-            async {
-                if ENABLE_SCSI.load(Ordering::Acquire) {
-                    scsi.poll().await
-                }
-            },
-        )
-        .await;
+        defmt::info!("in: {}", *TASK_STATE.lock().await as u32);
+        if *TASK_STATE.lock().await == TaskState::Ui {
+            defmt::info!("running scsi and usb");
+            select(join(usb.run(), scsi.poll()), TASK_STATE_CHANGED.wait()).await;
+        } else {
+            defmt::info!("not in ui state");
+            TASK_STATE_CHANGED.wait().await;
+        }
     }
 }

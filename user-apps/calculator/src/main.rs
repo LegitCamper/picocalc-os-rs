@@ -37,6 +37,8 @@ pub async fn main() {
         .draw(&mut display)
         .unwrap();
 
+        embassy_time::Timer::after_millis(1000).await;
+
         if let Some(event) = get_key() {
             print("User got event");
             match event.key {

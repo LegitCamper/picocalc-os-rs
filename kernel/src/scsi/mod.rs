@@ -8,18 +8,17 @@ use heapless::Vec;
 mod scsi_types;
 use scsi_types::*;
 
-use crate::storage::SdCard;
+use crate::storage::{SDCARD, SdCard};
 
 const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 
-pub struct MassStorageClass<'d, 's, D: Driver<'d>> {
-    sdcard: &'s SdCard,
+pub struct MassStorageClass<'d, D: Driver<'d>> {
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
 }
 
-impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
-    pub fn new(builder: &mut Builder<'d, D>, sdcard: &'s SdCard) -> Self {
+impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
+    pub fn new(builder: &mut Builder<'d, D>) -> Self {
         let mut function = builder.function(0x08, SUBCLASS_SCSI, 0x50); // Mass Storage class
         let mut interface = function.interface();
         let mut alt = interface.alt_setting(0x08, SUBCLASS_SCSI, 0x50, None);
@@ -27,11 +26,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
         let bulk_out = alt.endpoint_bulk_out(BULK_ENDPOINT_PACKET_SIZE as u16);
         let bulk_in = alt.endpoint_bulk_in(BULK_ENDPOINT_PACKET_SIZE as u16);
 
-        Self {
-            bulk_out,
-            bulk_in,
-            sdcard,
-        }
+        Self { bulk_out, bulk_in }
     }
 
     pub async fn poll(&mut self) {
@@ -139,7 +134,9 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
             ScsiCommand::TestUnitReady => {
-                if self.sdcard.is_attached() {
+                let guard = SDCARD.get().lock().await;
+                let sdcard = guard.as_ref().unwrap();
+                if sdcard.is_attached() {
                     Ok(())
                 } else {
                     Err(())
@@ -185,8 +182,11 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
             ScsiCommand::ReadCapacity10 => {
+                let guard = SDCARD.get().lock().await;
+                let sdcard = guard.as_ref().unwrap();
+
                 let block_size = SdCard::BLOCK_SIZE as u64;
-                let total_blocks = self.sdcard.size() / block_size;
+                let total_blocks = sdcard.size() / block_size;
 
                 let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
@@ -196,8 +196,11 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
                 self.bulk_in.write(&response).await.map_err(|_| ())
             }
             ScsiCommand::ReadCapacity16 { alloc_len } => {
+                let guard = SDCARD.get().lock().await;
+                let sdcard = guard.as_ref().unwrap();
+
                 let block_size = SdCard::BLOCK_SIZE as u64;
-                let total_blocks = self.sdcard.size() / block_size;
+                let total_blocks = sdcard.size() / block_size;
 
                 let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
@@ -209,9 +212,12 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
             ScsiCommand::Read { lba, len } => {
+                let guard = SDCARD.get().lock().await;
+                let sdcard = guard.as_ref().unwrap();
+
                 for i in 0..len {
                     let block_idx = BlockIdx(lba as u32 + i as u32);
-                    self.sdcard.read_blocks(&mut block, block_idx)?;
+                    sdcard.read_blocks(&mut block, block_idx)?;
                     for chunk in block[0].contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
                         self.bulk_in.write(chunk).await.map_err(|_| ())?;
                     }
@@ -219,6 +225,9 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
                 Ok(())
             }
             ScsiCommand::Write { lba, len } => {
+                let guard = SDCARD.get().lock().await;
+                let sdcard = guard.as_ref().unwrap();
+
                 for i in 0..len {
                     let block_idx = BlockIdx(lba as u32 + i as u32);
                     for chunk in block[0]
@@ -227,13 +236,16 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, 's, D> {
                     {
                         self.bulk_out.read(chunk).await.map_err(|_| ())?;
                     }
-                    self.sdcard.write_blocks(&mut block, block_idx)?;
+                    sdcard.write_blocks(&mut block, block_idx)?;
                 }
                 Ok(())
             }
             ScsiCommand::ReadFormatCapacities { alloc_len } => {
+                let guard = SDCARD.get().lock().await;
+                let sdcard = guard.as_ref().unwrap();
+
                 let block_size = SdCard::BLOCK_SIZE as u32;
-                let num_blocks = (self.sdcard.size() / block_size as u64) as u32;
+                let num_blocks = (sdcard.size() / block_size as u64) as u32;
 
                 let mut response = [0u8; 12];
 

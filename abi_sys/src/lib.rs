@@ -21,12 +21,13 @@ pub static mut CALL_ABI_TABLE: [usize; CallAbiTable::COUNT] = [0; CallAbiTable::
 #[derive(Clone, Copy)]
 pub enum CallAbiTable {
     Print = 0,
-    DrawIter = 1,
-    GetKey = 2,
+    Sleep = 1,
+    DrawIter = 2,
+    GetKey = 3,
 }
 
 impl CallAbiTable {
-    pub const COUNT: usize = 3;
+    pub const COUNT: usize = 4;
 }
 
 pub type PrintAbi = extern "Rust" fn(msg: &str);
@@ -36,6 +37,16 @@ pub fn print(msg: &str) {
         let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
         let f: PrintAbi = core::mem::transmute(ptr);
         f(msg);
+    }
+}
+
+pub type SleepAbi = extern "Rust" fn(ticks: u64);
+
+pub fn sleep(ticks: u64) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
+        let f: SleepAbi = core::mem::transmute(ptr);
+        f(ticks);
     }
 }
 
