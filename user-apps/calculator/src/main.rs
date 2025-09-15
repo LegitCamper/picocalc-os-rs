@@ -2,7 +2,7 @@
 #![no_main]
 
 extern crate alloc;
-use abi::{KeyCode, display::Display, embassy_time, get_key, print};
+use abi::{KeyCode, display::Display, embassy_time, get_key, print, sleep};
 use alloc::{boxed::Box, string::String, vec};
 use core::{panic::PanicInfo, pin::Pin};
 use embedded_graphics::{
@@ -10,7 +10,8 @@ use embedded_graphics::{
     geometry::{Dimensions, Point},
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
-    prelude::RgbColor,
+    prelude::{Primitive, RgbColor, Size},
+    primitives::{PrimitiveStyle, Rectangle},
     text::{Alignment, Text},
 };
 
@@ -28,6 +29,16 @@ pub async fn main() {
     let mut text = vec!['H', 'E', 'L', 'L', 'O'];
 
     loop {
+        // First, clear the text area
+        let text_area = Rectangle::new(
+            display.bounding_box().center() + Point::new(0, 0),
+            Size::new(320, 320),
+        );
+        Rectangle::new(text_area.top_left, text_area.size)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(&mut display)
+            .unwrap();
+
         Text::with_alignment(
             &text.iter().cloned().collect::<String>(),
             display.bounding_box().center() + Point::new(0, 15),
@@ -36,8 +47,6 @@ pub async fn main() {
         )
         .draw(&mut display)
         .unwrap();
-
-        embassy_time::Timer::after_millis(1000).await;
 
         if let Some(event) = get_key() {
             print("User got event");
@@ -51,6 +60,7 @@ pub async fn main() {
                 _ => (),
             }
         }
+        sleep(1000)
     }
 }
 

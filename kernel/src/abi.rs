@@ -4,6 +4,7 @@ use abi_sys::{DrawIterAbi, GetKeyAbi, Pixel, PrintAbi, SleepAbi};
 use alloc::boxed::Box;
 use defmt::info;
 use embassy_futures::block_on;
+use embassy_rp::clocks::clk_sys_freq;
 use embassy_time::Timer;
 use embedded_graphics::{
     Drawable,
@@ -26,9 +27,10 @@ pub extern "Rust" fn print(msg: &str) {
     defmt::info!("{:?}", msg);
 }
 
-pub extern "Rust" fn sleep(ticks: u64) {
-    for _ in 0..ticks {
-        for _ in 0..100 {
+pub extern "Rust" fn sleep(ms: u64) {
+    let cycles_per_ms = clk_sys_freq() / 1000;
+    for _ in 0..ms {
+        for _ in 0..cycles_per_ms {
             cortex_m::asm::nop();
         }
     }
@@ -36,10 +38,7 @@ pub extern "Rust" fn sleep(ticks: u64) {
 
 // TODO: maybe return result
 pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-    loop {
-        unsafe { FRAMEBUFFER.draw_iter(pixels.iter().copied()).unwrap() }
-        return;
-    }
+    unsafe { FRAMEBUFFER.draw_iter(pixels.iter().copied()).unwrap() }
 }
 
 pub extern "Rust" fn get_key() -> Option<KeyEvent> {

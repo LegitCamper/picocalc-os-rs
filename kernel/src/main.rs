@@ -259,8 +259,10 @@ static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
 
 async fn get_keys() {
     if let Some(event) = read_keyboard_fifo().await {
-        unsafe {
-            let _ = KEY_CACHE.enqueue(event);
+        if let KeyState::Pressed = event.state {
+            unsafe {
+                let _ = KEY_CACHE.enqueue(event);
+            }
         }
     }
 }

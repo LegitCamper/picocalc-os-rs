@@ -40,13 +40,13 @@ pub fn print(msg: &str) {
     }
 }
 
-pub type SleepAbi = extern "Rust" fn(ticks: u64);
+pub type SleepAbi = extern "Rust" fn(ms: u64);
 
-pub fn sleep(ticks: u64) {
+pub fn sleep(ms: u64) {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
         let f: SleepAbi = core::mem::transmute(ptr);
-        f(ticks);
+        f(ms);
     }
 }
 
