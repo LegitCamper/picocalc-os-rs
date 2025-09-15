@@ -1,80 +1,19 @@
-[package]
-name = "picocalc-os-rs"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "3"
+members = ["kernel", "abi", "shared", "user-apps/calculator"]
 
 [profile.release]
-debug = 2
+debug = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+[profile.release-binary]
+inherits = "release"
+lto = true
+debug = false
+opt-level = "s"
 
 [profile.dev]
 lto = true
 opt-level = "z"
-
-[features]
-default = ["rp235x", "defmt"]
-rp2040 = ["embassy-rp/rp2040"]
-rp235x = ["embassy-rp/rp235xb"]
-trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
-defmt = [
-  "dep:defmt",
-  "panic-probe/print-defmt",
-  "embassy-executor/defmt",
-  "embassy-time/defmt",
-  "embassy-time/defmt-timestamp-uptime",
-  "embassy-rp/defmt",
-  "embassy-sync/defmt",
-  "embedded-graphics/defmt",
-  "embedded-sdmmc/defmt-log",
-  # "bt-hci/defmt",
-  # "cyw43/defmt",
-  # "cyw43-pio/defmt",
-]
-
-[dependencies]
-embassy-executor = { version = "0.7", features = [
-  "arch-cortex-m",
-  "executor-interrupt",
-  "executor-thread",
-  "nightly",
-] }
-embassy-rp = { version = "0.4.0", features = [
-  "critical-section-impl",
-  "unstable-pac",
-  "time-driver",
-  "binary-info",
-] }
-embassy-futures = "0.1.1"
-embassy-time = "0.4.0"
-embassy-embedded-hal = "0.3.0"
-embassy-sync = { version = "0.7" }
-trouble-host = { version = "0.1", features = [
-  "derive",
-  "scan",
-], optional = true }
-bt-hci = { version = "0.2", default-features = false, optional = true }
-cyw43 = { version = "0.3.0", features = [
-  "firmware-logs",
-  "bluetooth",
-], optional = true }
-cyw43-pio = { version = "0.3.0", optional = true }
-
-embedded-hal-bus = { version = "0.3.0", features = ["async"] }
-embedded-hal = "0.2.7"
-embedded-hal-async = "1.0.0"
-cortex-m = { version = "0.7.7" }
-cortex-m-rt = "0.7.5"
-panic-probe = "0.3"
-portable-atomic = { version = "1.11", features = ["critical-section"] }
-
-defmt = { version = "0.3", optional = true }
-defmt-rtt = "0.4.2"
-
-embedded-graphics = { version = "0.8.1" }
-embedded-sdmmc = { git = "https://github.com/Be-ing/embedded-sdmmc-rs", branch = "bisync", default-features = false }
-st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs", branch = "async" }
-
-static_cell = "2.1.1"
-bitflags = "2.9.1"
-talc = "4.4.3"
-spin = "0.10.0"
-heapless = "0.8.0"

@@ -1,0 +1,8 @@
+[package]
+name = "abi_sys"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-graphics = "0.8.1"
+shared = { path = "../shared" }
