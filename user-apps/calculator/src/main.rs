@@ -26,41 +26,48 @@ pub async fn main() {
 
     let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::RED);
 
-    let mut text = vec!['H', 'E', 'L', 'L', 'O'];
+    let mut text = vec!['T', 'y', 'p', 'e'];
+    let mut dirty = true;
+    let mut last_bounds: Option<Rectangle> = None;
 
     loop {
-        // First, clear the text area
-        let text_area = Rectangle::new(
-            display.bounding_box().center() + Point::new(0, 0),
-            Size::new(320, 320),
-        );
-        Rectangle::new(text_area.top_left, text_area.size)
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-            .draw(&mut display)
-            .unwrap();
+        if dirty {
+            if let Some(bounds) = last_bounds {
+                Rectangle::new(bounds.top_left, bounds.size)
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(&mut display)
+                    .unwrap();
+            }
 
-        Text::with_alignment(
-            &text.iter().cloned().collect::<String>(),
-            display.bounding_box().center() + Point::new(0, 15),
-            character_style,
-            Alignment::Center,
-        )
-        .draw(&mut display)
-        .unwrap();
+            let text = text.iter().cloned().collect::<String>();
+            let aligned_text = Text::with_alignment(
+                &text,
+                display.bounding_box().center(),
+                character_style,
+                Alignment::Center,
+            );
+            last_bounds = Some(aligned_text.bounding_box());
+
+            aligned_text.draw(&mut display).unwrap();
+            dirty = false;
+        }
 
         if let Some(event) = get_key() {
-            print("User got event");
+            dirty = true;
             match event.key {
                 KeyCode::Char(ch) => {
                     text.push(ch);
                 }
+                KeyCode::Del => {
+                    text.clear();
+                }
                 KeyCode::Backspace => {
                     text.pop();
                 }
+                KeyCode::Esc => return,
                 _ => (),
             }
         }
-        sleep(1000)
     }
 }
 

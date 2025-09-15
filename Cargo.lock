@@ -18,7 +18,7 @@ version = "0.1.0"
 dependencies = [
  "abi_sys",
  "embassy-time 0.5.0",
- "embedded-graphics",
+ "embedded-graphics 0.8.1",
  "shared",
  "spin",
  "talc",
@@ -28,7 +28,7 @@ dependencies = [
 name = "abi_sys"
 version = "0.1.0"
 dependencies = [
- "embedded-graphics",
+ "embedded-graphics 0.8.1",
  "shared",
 ]
 
@@ -226,7 +226,7 @@ name = "calculator"
 version = "0.1.0"
 dependencies = [
  "abi",
- "embedded-graphics",
+ "embedded-graphics 0.8.1",
 ]
 
 [[package]]
@@ -803,6 +803,19 @@ dependencies = [
 
 [[package]]
 name = "embedded-graphics"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "750082c65094fbcc4baf9ba31583ce9a8bb7f52cadfb96f6164b1bc7f922f32b"
+dependencies = [
+ "az",
+ "byteorder",
+ "embedded-graphics-core 0.3.3",
+ "float-cmp 0.8.0",
+ "micromath 1.1.1",
+]
+
+[[package]]
+name = "embedded-graphics"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0649998afacf6d575d126d83e68b78c0ab0e00ca2ac7e9b3db11b4cbe8274ef0"
@@ -810,9 +823,19 @@ dependencies = [
  "az",
  "byteorder",
  "defmt 0.3.100",
- "embedded-graphics-core",
- "float-cmp",
- "micromath",
+ "embedded-graphics-core 0.4.0",
+ "float-cmp 0.9.0",
+ "micromath 2.1.0",
+]
+
+[[package]]
+name = "embedded-graphics-core"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8b1239db5f3eeb7e33e35bd10bd014e7b2537b17e071f726a09351431337cfa"
+dependencies = [
+ "az",
+ "byteorder",
 ]
 
 [[package]]
@@ -893,7 +916,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a90553247f2b05c59ac7894ea13d830636c2b1203fa03bff400eddbd1fa9f52"
 dependencies = [
- "embedded-graphics",
+ "embedded-graphics 0.8.1",
  "embedded-layout-macros",
 ]
 
@@ -922,6 +945,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-snake"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af598ad20b839c26b95be615a94619a069303ec776a58aef6dc0e86cf7eabbb8"
+dependencies = [
+ "embedded-graphics 0.7.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "embedded-storage"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -943,7 +976,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "005680edc0d075af5e02d5788ca291737bd9aba7fc404ae031cc9dfa715e5f7d"
 dependencies = [
  "az",
- "embedded-graphics",
+ "embedded-graphics 0.8.1",
  "object-chain",
 ]
 
@@ -991,6 +1024,15 @@ name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
+name = "float-cmp"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1267f4ac4f343772758f7b1bdcbe767c218bbab93bb432acbf5162bbf85a6c4"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "float-cmp"
@@ -1262,7 +1304,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time 0.5.0",
  "embassy-usb",
- "embedded-graphics",
+ "embedded-graphics 0.8.1",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -1395,6 +1437,12 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "micromath"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc4010833aea396656c2f91ee704d51a6f1329ec2ab56ffd00bfd56f7481ea94"
 
 [[package]]
 name = "micromath"
@@ -1971,6 +2019,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "snake"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "embedded-graphics 0.8.1",
+ "embedded-snake",
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1995,7 +2053,7 @@ version = "0.11.0"
 source = "git+https://github.com/legitcamper/st7365p-lcd-rs?rev=1d15123929fa7ef73d5d6aead7faf1bba50ce915#1d15123929fa7ef73d5d6aead7faf1bba50ce915"
 dependencies = [
  "bitvec",
- "embedded-graphics-core",
+ "embedded-graphics-core 0.4.0",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "heapless",

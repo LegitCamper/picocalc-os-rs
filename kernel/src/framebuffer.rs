@@ -29,7 +29,7 @@ static mut BUFFER: [u16; SIZE] = [0; SIZE];
 static mut DIRTY_TILES: LazyLock<Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
     let mut tiles = Vec::new();
     for _ in 0..TILE_COUNT {
-        tiles.push(AtomicBool::new(true));
+        tiles.push(AtomicBool::new(true)).unwrap();
     }
     tiles
 });

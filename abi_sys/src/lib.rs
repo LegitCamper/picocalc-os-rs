@@ -44,7 +44,7 @@ pub type SleepAbi = extern "Rust" fn(ms: u64);
 
 pub fn sleep(ms: u64) {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
+        let ptr = CALL_ABI_TABLE[CallAbiTable::Sleep as usize];
         let f: SleepAbi = core::mem::transmute(ptr);
         f(ms);
     }

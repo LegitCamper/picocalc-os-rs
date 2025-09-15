@@ -9,6 +9,7 @@ use embassy_time::{Delay, Timer};
 use embedded_graphics::{
     draw_target::DrawTarget,
     pixelcolor::{Rgb565, RgbColor},
+    prelude::Dimensions,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
@@ -48,8 +49,11 @@ pub async fn init_display(
     display
 }
 
-pub async fn clear_fb() {
-    unsafe { FRAMEBUFFER.clear(Rgb565::BLACK).unwrap() }
+pub fn clear_fb() {
+    let bounds = unsafe { FRAMEBUFFER.bounding_box() };
+    unsafe {
+        let _ = FRAMEBUFFER.fill_solid(&bounds, Rgb565::BLACK);
+    }
 }
 
 pub async fn display_handler(mut display: DISPLAY) {

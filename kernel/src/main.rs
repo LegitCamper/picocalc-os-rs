@@ -143,7 +143,7 @@ async fn userland_task() {
             *state = TaskState::Kernel;
         }
 
-        // clear_fb().await; // blocks future exec?
+        // clear_fb();
 
         defmt::info!("Executing Binary");
         entry().await;
