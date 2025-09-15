@@ -37,12 +37,8 @@ pub extern "Rust" fn sleep(ticks: u64) {
 // TODO: maybe return result
 pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
     loop {
-        let fb = FRAMEBUFFER.get().try_lock();
-        if let Ok(mut fb) = fb {
-            fb.draw_iter(pixels.iter().copied()).unwrap();
-            return;
-        }
-        sleep(1)
+        unsafe { FRAMEBUFFER.draw_iter(pixels.iter().copied()).unwrap() }
+        return;
     }
 }
 

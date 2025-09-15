@@ -74,9 +74,8 @@ async fn draw_selection() {
         guard.selections.clone()
     };
 
-    let mut fb = FRAMEBUFFER.get().lock().await;
     let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
-    let display_area = fb.bounding_box();
+    let display_area = unsafe { FRAMEBUFFER.bounding_box() };
 
     const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
     let no_bins = String::from_str(NO_BINS).unwrap();
@@ -90,13 +89,13 @@ async fn draw_selection() {
             ),
             text_style,
         )
-        .draw(&mut *fb)
+        .draw(unsafe { &mut FRAMEBUFFER })
         .unwrap();
     } else {
         let mut file_names = file_names.iter();
         let Some(first) = file_names.next() else {
             Text::new(NO_BINS, Point::zero(), text_style)
-                .draw(&mut *fb)
+                .draw(unsafe { &mut FRAMEBUFFER })
                 .unwrap();
 
             return;
@@ -116,7 +115,7 @@ async fn draw_selection() {
             .with_alignment(horizontal::Center)
             .arrange()
             .align_to(&display_area, horizontal::Center, vertical::Center)
-            .draw(&mut *fb)
+            .draw(unsafe { &mut FRAMEBUFFER })
             .unwrap();
     }
 }

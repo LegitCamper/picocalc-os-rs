@@ -1,11 +1,9 @@
+use crate::framebuffer::AtomicFrameBuffer;
 use embassy_rp::{
     Peri,
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Spi},
-};
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex, lazy_lock::LazyLock, mutex::Mutex,
 };
 use embassy_time::{Delay, Timer};
 use embedded_graphics::{
@@ -13,7 +11,7 @@ use embedded_graphics::{
     pixelcolor::{Rgb565, RgbColor},
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
-use st7365p_lcd::{FrameBuffer, ST7365P};
+use st7365p_lcd::ST7365P;
 
 type DISPLAY = ST7365P<
     ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
@@ -25,9 +23,7 @@ type DISPLAY = ST7365P<
 pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
 
-type FB = FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, { SCREEN_WIDTH * SCREEN_HEIGHT }>;
-pub static FRAMEBUFFER: LazyLock<Mutex<CriticalSectionRawMutex, FB>> =
-    LazyLock::new(|| Mutex::new(FrameBuffer::new()));
+pub static mut FRAMEBUFFER: AtomicFrameBuffer = AtomicFrameBuffer::new();
 
 pub async fn init_display(
     spi: Spi<'static, SPI1, Async>,
@@ -44,26 +40,25 @@ pub async fn init_display(
         true,
         Delay,
     );
-    let mut fb = FRAMEBUFFER.get().lock().await;
     display.init().await.unwrap();
     display.set_custom_orientation(0x40).await.unwrap();
-    display.draw(&mut fb).await.unwrap();
+    unsafe { FRAMEBUFFER.draw(&mut display).await.unwrap() }
     display.set_on().await.unwrap();
 
     display
 }
 
 pub async fn clear_fb() {
-    let mut fb = FRAMEBUFFER.get().lock().await;
-    let fb = &mut *fb;
-    fb.clear(Rgb565::BLACK).unwrap();
+    unsafe { FRAMEBUFFER.clear(Rgb565::BLACK).unwrap() }
 }
 
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
-        {
-            let mut fb = FRAMEBUFFER.get().lock().await;
-            display.partial_draw_batched(&mut fb).await.unwrap();
+        unsafe {
+            FRAMEBUFFER
+                .partial_draw_batched(&mut display)
+                .await
+                .unwrap()
         }
 
         Timer::after_millis(32).await; // 30 fps

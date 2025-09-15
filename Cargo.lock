@@ -1264,6 +1264,7 @@ dependencies = [
  "embassy-usb",
  "embedded-graphics",
  "embedded-hal 0.2.7",
+ "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-layout",
@@ -1991,7 +1992,7 @@ dependencies = [
 [[package]]
 name = "st7365p-lcd"
 version = "0.11.0"
-source = "git+https://github.com/legitcamper/st7365p-lcd-rs?rev=2a484aaab5f6b9824cc813fe4ae087250c9e39c1#2a484aaab5f6b9824cc813fe4ae087250c9e39c1"
+source = "git+https://github.com/legitcamper/st7365p-lcd-rs?rev=1d15123929fa7ef73d5d6aead7faf1bba50ce915#1d15123929fa7ef73d5d6aead7faf1bba50ce915"
 dependencies = [
  "bitvec",
  "embedded-graphics-core",

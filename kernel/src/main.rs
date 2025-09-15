@@ -10,6 +10,7 @@ extern crate alloc;
 mod abi;
 mod display;
 mod elf;
+mod framebuffer;
 mod peripherals;
 mod scsi;
 mod storage;
