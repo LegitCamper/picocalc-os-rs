@@ -2,7 +2,6 @@
 
 use abi_sys::draw_iter;
 pub use abi_sys::{get_key, print, sleep};
-pub use embassy_time;
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use talc::*;
 

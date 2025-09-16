@@ -19,12 +19,12 @@ mod usb;
 mod utils;
 
 use crate::{
-    display::{FRAMEBUFFER, clear_fb, display_handler, init_display},
-    elf::load_binary,
+    display::{clear_fb, display_handler, init_display},
     peripherals::{
         conf_peripherals,
-        keyboard::{KeyCode, KeyState, read_keyboard_fifo},
+        keyboard::{KeyState, read_keyboard_fifo},
     },
+    scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, ui_handler},
     usb::usb_handler,
@@ -33,10 +33,12 @@ use abi_sys::EntryFn;
 
 use {defmt_rtt as _, panic_probe as _};
 
-use assign_resources::assign_resources;
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::join::{join, join3, join4, join5};
+use embassy_futures::{
+    join::{join, join3, join5},
+    yield_now,
+};
 use embassy_rp::{
     Peri,
     gpio::{Input, Level, Output, Pull},
@@ -86,7 +88,7 @@ enum TaskState {
 }
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     spawn_core1(
@@ -123,7 +125,7 @@ async fn main(_spawner: Spawner) {
         data: p.PIN_6,
     };
     let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(|spawner| unwrap!(spawner.spawn(kernel_task(display, sd, mcu, p.USB))));
+    executor0.run(|spawner| unwrap!(spawner.spawn(kernel_task(spawner, display, sd, mcu, p.USB))));
 }
 
 // One-slot channel to pass EntryFn from core1
@@ -141,9 +143,10 @@ async fn userland_task() {
         {
             let mut state = TASK_STATE.lock().await;
             *state = TaskState::Kernel;
+            TASK_STATE_CHANGED.signal(());
+            // clear_fb();
+            MSC_SHUTDOWN.signal(());
         }
-
-        // clear_fb();
 
         defmt::info!("Executing Binary");
         entry().await;
@@ -152,6 +155,8 @@ async fn userland_task() {
         {
             let mut state = TASK_STATE.lock().await;
             *state = TaskState::Ui;
+            TASK_STATE_CHANGED.signal(());
+            // clear_fb();
         }
     }
 }
@@ -181,16 +186,15 @@ struct Mcu {
     data: Peri<'static, PIN_6>,
 }
 
-#[embassy_executor::task]
-async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: Peri<'static, USB>) {
-    // MCU i2c bus for peripherals
+async fn setup_mcu(mcu: Mcu) {
+    // MCU i2c bus for peripherals( keyboard)
     let mut config = i2c::Config::default();
     config.frequency = 400_000;
     let i2c1 = I2c::new_async(mcu.i2c, mcu.clk, mcu.data, Irqs, config);
     conf_peripherals(i2c1).await;
+}
 
-    Timer::after_millis(250).await;
-
+async fn setup_display(display: Display, spawner: Spawner) {
     let mut config = spi::Config::default();
     config.frequency = 16_000_000;
     let spi = Spi::new(
@@ -203,66 +207,85 @@ async fn kernel_task(display: Display, sd: Sd, mcu: Mcu, usb: Peri<'static, USB>
         config,
     );
     let display = init_display(spi, display.cs, display.data, display.reset).await;
+    spawner.spawn(display_handler(display)).unwrap();
+}
 
-    let display_fut = display_handler(display);
+async fn setup_sd(sd: Sd) {
+    let mut config = spi::Config::default();
+    config.frequency = 400_000;
+    let spi = Spi::new_blocking(sd.spi, sd.clk, sd.mosi, sd.miso, config.clone());
+    let cs = Output::new(sd.cs, Level::High);
+    let det = Input::new(sd.det, Pull::None);
 
-    let ui_fut = ui_handler();
+    let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
+    let sdcard = SdmmcSdCard::new(device, Delay);
 
-    let binary_search_fut = async {
-        loop {
-            {
-                let mut guard = SDCARD.get().lock().await;
+    config.frequency = 32_000_000;
+    sdcard.spi(|dev| dev.bus_mut().set_config(&config));
+    SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
+}
 
-                if let Some(sd) = guard.as_mut() {
-                    let files = sd.list_files_by_extension(".bin").unwrap();
-                    let mut select = SELECTIONS.lock().await;
-
-                    if select.selections != files {
-                        select.selections = files;
-                        select.reset();
-                    }
-                }
-            }
-            Timer::after_secs(5).await;
-        }
-    };
-
-    {
-        let mut config = spi::Config::default();
-        config.frequency = 400_000;
-        let spi = Spi::new_blocking(sd.spi, sd.clk, sd.mosi, sd.miso, config.clone());
-        let cs = Output::new(sd.cs, Level::High);
-        let det = Input::new(sd.det, Pull::None);
-
-        let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
-        let sdcard = SdmmcSdCard::new(device, Delay);
-
-        config.frequency = 32_000_000;
-        sdcard.spi(|dev| dev.bus_mut().set_config(&config));
-        SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
-    };
+#[embassy_executor::task]
+async fn kernel_task(
+    spawner: Spawner,
+    display: Display,
+    sd: Sd,
+    mcu: Mcu,
+    usb: Peri<'static, USB>,
+) {
+    setup_mcu(mcu).await;
+    Timer::after_millis(250).await;
+    setup_display(display, spawner).await;
+    setup_sd(sd).await;
 
     let usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    let usb_fut = usb_handler(usb);
+    spawner.spawn(usb_handler(usb)).unwrap();
 
-    let key_abi_fut = async {
-        loop {
-            Timer::after_millis(100).await;
-            get_keys().await
+    spawner.spawn(key_handler()).unwrap();
+
+    loop {
+        if let TaskState::Ui = *TASK_STATE.lock().await {
+            let ui_fut = ui_handler();
+            let binary_search_fut = prog_search_handler();
+
+            join(ui_fut, binary_search_fut).await;
         }
-    };
 
-    join5(display_fut, ui_fut, usb_fut, binary_search_fut, key_abi_fut).await;
+        yield_now().await;
+    }
+}
+
+async fn prog_search_handler() {
+    loop {
+        {
+            let mut guard = SDCARD.get().lock().await;
+
+            if let Some(sd) = guard.as_mut() {
+                let files = sd.list_files_by_extension(".bin").unwrap();
+                let mut select = SELECTIONS.lock().await;
+
+                if select.selections != files {
+                    select.selections = files;
+                    select.reset();
+                }
+            }
+        }
+        Timer::after_secs(5).await;
+    }
 }
 
 static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
 
-async fn get_keys() {
-    if let Some(event) = read_keyboard_fifo().await {
-        if let KeyState::Pressed = event.state {
-            unsafe {
-                let _ = KEY_CACHE.enqueue(event);
+#[embassy_executor::task]
+async fn key_handler() {
+    loop {
+        if let Some(event) = read_keyboard_fifo().await {
+            if let KeyState::Pressed = event.state {
+                unsafe {
+                    let _ = KEY_CACHE.enqueue(event);
+                }
             }
         }
+        Timer::after_millis(50).await;
     }
 }

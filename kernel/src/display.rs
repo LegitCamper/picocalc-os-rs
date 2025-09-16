@@ -50,12 +50,12 @@ pub async fn init_display(
 }
 
 pub fn clear_fb() {
-    let bounds = unsafe { FRAMEBUFFER.bounding_box() };
     unsafe {
-        let _ = FRAMEBUFFER.fill_solid(&bounds, Rgb565::BLACK);
+        FRAMEBUFFER.clear(Rgb565::WHITE).unwrap();
     }
 }
 
+#[embassy_executor::task]
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
         unsafe {

@@ -1,7 +1,7 @@
-use crate::format;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
-use embassy_usb::types::StringIndex;
-use embassy_usb::{Builder, Config};
 use embedded_sdmmc::{Block, BlockIdx};
 use heapless::Vec;
 
@@ -11,6 +11,8 @@ use scsi_types::*;
 use crate::storage::{SDCARD, SdCard};
 
 const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
+
+pub static MSC_SHUTDOWN: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     bulk_out: D::EndpointOut,
@@ -31,16 +33,24 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
     pub async fn poll(&mut self) {
         loop {
-            let mut cbw_buf = [0u8; 31];
-            if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
-                if n == 31 {
-                    if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
-                        // TODO: validate cbw
-                        if self.handle_command(&cbw.CBWCB).await.is_ok() {
-                            self.send_csw_success(cbw.dCBWTag).await
-                        } else {
-                            self.send_csw_fail(cbw.dCBWTag).await
-                        }
+            embassy_futures::select::select(self.handle_cbw(), MSC_SHUTDOWN.wait()).await;
+
+            if MSC_SHUTDOWN.signaled() {
+                defmt::info!("MSC shutting down");
+                return; // or break
+            }
+        }
+    }
+
+    async fn handle_cbw(&mut self) {
+        let mut cbw_buf = [0u8; 31];
+        if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
+            if n == 31 {
+                if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
+                    if self.handle_command(&cbw.CBWCB).await.is_ok() {
+                        self.send_csw_success(cbw.dCBWTag).await
+                    } else {
+                        self.send_csw_fail(cbw.dCBWTag).await
                     }
                 }
             }

@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 abi = { path = "../../abi" }
 embedded-graphics = "0.8.1"
+kolibri-embedded-gui = "0.1.0"

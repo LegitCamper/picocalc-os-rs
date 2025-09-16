@@ -14,7 +14,10 @@ use embassy_sync::{
 };
 use embedded_graphics::{
     Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_9X15},
+    mono_font::{
+        MonoTextStyle,
+        ascii::{self, FONT_9X15},
+    },
     pixelcolor::Rgb565,
     prelude::{Dimensions, Point, RgbColor, Size},
     primitives::Rectangle,
@@ -27,6 +30,7 @@ use embedded_layout::{
     prelude::*,
 };
 use embedded_text::TextBox;
+use kolibri_embedded_gui::{label::Label, style::medsize_rgb565_style, ui::Ui};
 use shared::keyboard::{KeyCode, KeyState};
 
 pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
@@ -34,89 +38,50 @@ pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
 
 pub async fn ui_handler() {
     loop {
-        if let TaskState::Ui = *TASK_STATE.lock().await {
-            if let Some(event) = keyboard::read_keyboard_fifo().await {
-                if let KeyState::Pressed = event.state {
-                    match event.key {
-                        KeyCode::JoyUp => {
-                            let mut selections = SELECTIONS.lock().await;
-                            selections.up();
-                        }
-                        KeyCode::JoyDown => {
-                            let mut selections = SELECTIONS.lock().await;
-                            selections.down();
-                        }
-                        KeyCode::Enter | KeyCode::JoyRight => {
-                            let selections = SELECTIONS.lock().await;
-                            let selection = selections.selections
-                                [selections.current_selection as usize - 1]
-                                .clone();
-
-                            let entry =
-                                unsafe { load_binary(&selection.short_name).await.unwrap() };
-                            BINARY_CH.send(entry).await;
-                        }
-                        _ => (),
+        if let Some(event) = keyboard::read_keyboard_fifo().await {
+            if let KeyState::Pressed = event.state {
+                match event.key {
+                    KeyCode::JoyUp => {
+                        let mut selections = SELECTIONS.lock().await;
+                        selections.up();
                     }
+                    KeyCode::JoyDown => {
+                        let mut selections = SELECTIONS.lock().await;
+                        selections.down();
+                    }
+                    KeyCode::Enter | KeyCode::JoyRight => {
+                        let selections = SELECTIONS.lock().await;
+                        let selection = selections.selections
+                            [selections.current_selection as usize - 1]
+                            .clone();
+
+                        let entry = unsafe { load_binary(&selection.short_name).await.unwrap() };
+                        BINARY_CH.send(entry).await;
+                    }
+                    _ => (),
                 }
             }
-
-            draw_selection().await;
-        } else {
-            embassy_time::Timer::after_millis(50).await;
         }
+
+        draw_selection().await;
     }
 }
 
 async fn draw_selection() {
+    const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
     let file_names: Vec<FileName> = {
         let guard = SELECTIONS.lock().await;
         guard.selections.clone()
     };
 
-    let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
-    let display_area = unsafe { FRAMEBUFFER.bounding_box() };
-
-    const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
-    let no_bins = String::from_str(NO_BINS).unwrap();
+    let mut ui = Ui::new_fullscreen(unsafe { &mut FRAMEBUFFER }, medsize_rgb565_style());
 
     if file_names.is_empty() {
-        TextBox::new(
-            &no_bins,
-            Rectangle::new(
-                Point::new(25, 25),
-                Size::new(display_area.size.width - 50, display_area.size.width - 50),
-            ),
-            text_style,
-        )
-        .draw(unsafe { &mut FRAMEBUFFER })
-        .unwrap();
+        ui.add(Label::new(NO_BINS).with_font(ascii::FONT_10X20));
     } else {
-        let mut file_names = file_names.iter();
-        let Some(first) = file_names.next() else {
-            Text::new(NO_BINS, Point::zero(), text_style)
-                .draw(unsafe { &mut FRAMEBUFFER })
-                .unwrap();
-
-            return;
-        };
-
-        let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
-
-        // for _ in 0..file_names.len() {
-        //     let chain = chain.append(Text::new(
-        //         file_names.next().unwrap(),
-        //         Point::zero(),
-        //         text_style,
-        //     ));
-        // }
-
-        LinearLayout::vertical(chain)
-            .with_alignment(horizontal::Center)
-            .arrange()
-            .align_to(&display_area, horizontal::Center, vertical::Center)
-            .draw(unsafe { &mut FRAMEBUFFER })
-            .unwrap();
+        for file in file_names {
+            ui.add(Label::new(&file.long_name).with_font(ascii::FONT_10X20));
+        }
     }
 }
 

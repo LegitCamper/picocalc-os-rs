@@ -1,11 +1,9 @@
-use crate::{TASK_STATE, TASK_STATE_CHANGED, TaskState, scsi::MassStorageClass};
-use embassy_futures::{
-    join::join,
-    select::{select, select3},
-};
+use crate::scsi::MassStorageClass;
+use embassy_futures::join::join;
 use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_usb::{Builder, Config};
 
+#[embassy_executor::task]
 pub async fn usb_handler(driver: Driver<'static, USB>) {
     let mut config = Config::new(0xc0de, 0xbabe);
     config.manufacturer = Some("LegitCamper");
@@ -30,14 +28,5 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
     let mut scsi = MassStorageClass::new(&mut builder);
     let mut usb = builder.build();
 
-    loop {
-        defmt::info!("in: {}", *TASK_STATE.lock().await as u32);
-        if *TASK_STATE.lock().await == TaskState::Ui {
-            defmt::info!("running scsi and usb");
-            select(join(usb.run(), scsi.poll()), TASK_STATE_CHANGED.wait()).await;
-        } else {
-            defmt::info!("not in ui state");
-            TASK_STATE_CHANGED.wait().await;
-        }
-    }
+    join(usb.run(), scsi.poll()).await;
 }

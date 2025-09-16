@@ -17,8 +17,7 @@ name = "abi"
 version = "0.1.0"
 dependencies = [
  "abi_sys",
- "embassy-time 0.5.0",
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
  "shared",
  "spin",
  "talc",
@@ -28,7 +27,7 @@ dependencies = [
 name = "abi_sys"
 version = "0.1.0"
 dependencies = [
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
  "shared",
 ]
 
@@ -144,6 +143,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
+name = "bit_field"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e4b40c7323adcfc0a41c4b88143ed58346ff65a288fc144329c5c45e05d70c6"
+
+[[package]]
 name = "bitfield"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -226,7 +231,8 @@ name = "calculator"
 version = "0.1.0"
 dependencies = [
  "abi",
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
+ "kolibri-embedded-gui",
 ]
 
 [[package]]
@@ -803,19 +809,6 @@ dependencies = [
 
 [[package]]
 name = "embedded-graphics"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "750082c65094fbcc4baf9ba31583ce9a8bb7f52cadfb96f6164b1bc7f922f32b"
-dependencies = [
- "az",
- "byteorder",
- "embedded-graphics-core 0.3.3",
- "float-cmp 0.8.0",
- "micromath 1.1.1",
-]
-
-[[package]]
-name = "embedded-graphics"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0649998afacf6d575d126d83e68b78c0ab0e00ca2ac7e9b3db11b4cbe8274ef0"
@@ -823,19 +816,9 @@ dependencies = [
  "az",
  "byteorder",
  "defmt 0.3.100",
- "embedded-graphics-core 0.4.0",
- "float-cmp 0.9.0",
- "micromath 2.1.0",
-]
-
-[[package]]
-name = "embedded-graphics-core"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8b1239db5f3eeb7e33e35bd10bd014e7b2537b17e071f726a09351431337cfa"
-dependencies = [
- "az",
- "byteorder",
+ "embedded-graphics-core",
+ "float-cmp",
+ "micromath",
 ]
 
 [[package]]
@@ -896,6 +879,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-iconoir"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c52b9899b636b56d4e66834f7a90766d0bc6600c0f067d91ed0711b11fa3f5c8"
+dependencies = [
+ "bit_field",
+ "embedded-graphics",
+ "paste",
+ "static_assertions",
+]
+
+[[package]]
 name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -916,7 +911,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a90553247f2b05c59ac7894ea13d830636c2b1203fa03bff400eddbd1fa9f52"
 dependencies = [
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
  "embedded-layout-macros",
 ]
 
@@ -945,16 +940,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-snake"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af598ad20b839c26b95be615a94619a069303ec776a58aef6dc0e86cf7eabbb8"
-dependencies = [
- "embedded-graphics 0.7.1",
- "rand_core 0.6.4",
-]
-
-[[package]]
 name = "embedded-storage"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -976,7 +961,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "005680edc0d075af5e02d5788ca291737bd9aba7fc404ae031cc9dfa715e5f7d"
 dependencies = [
  "az",
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
  "object-chain",
 ]
 
@@ -1027,15 +1012,6 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "float-cmp"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1267f4ac4f343772758f7b1bdcbe767c218bbab93bb432acbf5162bbf85a6c4"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
@@ -1048,6 +1024,12 @@ name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "funty"
@@ -1210,6 +1192,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
  "hash32",
+ "serde",
  "stable_deref_trait",
 ]
 
@@ -1304,7 +1287,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time 0.5.0",
  "embassy-usb",
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -1314,6 +1297,7 @@ dependencies = [
  "embedded-text",
  "goblin",
  "heapless",
+ "kolibri-embedded-gui",
  "num_enum 0.7.4",
  "panic-probe",
  "portable-atomic",
@@ -1323,6 +1307,18 @@ dependencies = [
  "static_cell",
  "talc",
  "trouble-host",
+]
+
+[[package]]
+name = "kolibri-embedded-gui"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "011f8f415e8c2f03e4ad752afcf1bb156a18926250401b1fe29d8feda644c140"
+dependencies = [
+ "embedded-graphics",
+ "embedded-iconoir",
+ "foldhash",
+ "heapless",
 ]
 
 [[package]]
@@ -1437,12 +1433,6 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
-
-[[package]]
-name = "micromath"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc4010833aea396656c2f91ee704d51a6f1329ec2ab56ffd00bfd56f7481ea94"
 
 [[package]]
 name = "micromath"
@@ -2019,16 +2009,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "snake"
-version = "0.1.0"
-dependencies = [
- "abi",
- "embedded-graphics 0.8.1",
- "embedded-snake",
- "rand_core 0.6.4",
-]
-
-[[package]]
 name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2050,10 +2030,10 @@ dependencies = [
 [[package]]
 name = "st7365p-lcd"
 version = "0.11.0"
-source = "git+https://github.com/legitcamper/st7365p-lcd-rs?rev=1d15123929fa7ef73d5d6aead7faf1bba50ce915#1d15123929fa7ef73d5d6aead7faf1bba50ce915"
+source = "git+https://github.com/legitcamper/st7365p-lcd-rs?rev=a784b9e6df0769371dfc522528e770cf8fc6403a#a784b9e6df0769371dfc522528e770cf8fc6403a"
 dependencies = [
  "bitvec",
- "embedded-graphics-core 0.4.0",
+ "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "heapless",
@@ -2065,6 +2045,12 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "static_cell"

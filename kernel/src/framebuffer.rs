@@ -26,7 +26,7 @@ const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 
 static mut BUFFER: [u16; SIZE] = [0; SIZE];
 
-static mut DIRTY_TILES: LazyLock<Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
+static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
     let mut tiles = Vec::new();
     for _ in 0..TILE_COUNT {
         tiles.push(AtomicBool::new(true)).unwrap();
@@ -71,10 +71,10 @@ impl AtomicFrameBuffer {
         ey: u16,
         colors: P,
     ) -> Result<(), ()> {
-        if sx >= self.size().width as u16 - 1
-            || ex >= self.size().width as u16 - 1
-            || sy >= self.size().height as u16 - 1
-            || ey >= self.size().height as u16 - 1
+        if sx >= self.size().width as u16
+            || ex >= self.size().width as u16
+            || sy >= self.size().height as u16
+            || ey >= self.size().height as u16
         {
             return Err(()); // Bounds check
         }
@@ -101,7 +101,7 @@ impl AtomicFrameBuffer {
 
     // walk the dirty tiles and mark groups of tiles(meta-tiles) for batched updates
     fn find_meta_tiles(&mut self, tiles_x: usize, tiles_y: usize) -> MetaTileVec {
-        let mut meta_tiles: MetaTileVec = Vec::new();
+        let mut meta_tiles: MetaTileVec = heapless::Vec::new();
 
         for ty in 0..tiles_y {
             let mut tx = 0;
@@ -415,10 +415,8 @@ impl DrawTarget for AtomicFrameBuffer {
                 .take((self.size().width * self.size().height) as usize),
         )?;
 
-        unsafe {
-            for tile in DIRTY_TILES.get_mut().iter() {
-                tile.store(true, Ordering::Relaxed);
-            }
+        for tile in unsafe { DIRTY_TILES.get_mut() }.iter() {
+            tile.store(true, Ordering::Release);
         }
 
         Ok(())
