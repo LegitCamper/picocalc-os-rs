@@ -74,19 +74,19 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
     async fn handle_cbw(&mut self) {
         let mut cbw_buf = [0u8; 31];
         if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
-            // Take sdcard to increase speed
-            if self.temp_sd.is_none() {
-                let mut guard = SDCARD.get().lock().await;
-                if let Some(sd) = guard.take() {
-                    self.temp_sd = Some(sd);
-                } else {
-                    defmt::warn!("Tried to take SDCARD but it was already taken");
-                    return;
-                }
-            }
-
             if n == 31 {
                 if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
+                    // Take sdcard to increase speed
+                    if self.temp_sd.is_none() {
+                        let mut guard = SDCARD.get().lock().await;
+                        if let Some(sd) = guard.take() {
+                            self.temp_sd = Some(sd);
+                        } else {
+                            defmt::warn!("Tried to take SDCARD but it was already taken");
+                            return;
+                        }
+                    }
+
                     let command = parse_cb(&cbw.CBWCB);
                     if self.handle_command(command).await.is_ok() {
                         self.send_csw_success(cbw.dCBWTag).await

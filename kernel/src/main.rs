@@ -18,6 +18,8 @@ mod ui;
 mod usb;
 mod utils;
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{
     display::{clear_fb, display_handler, init_display},
     peripherals::{
@@ -78,14 +80,7 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
 
-static TASK_STATE: Mutex<CriticalSectionRawMutex, TaskState> = Mutex::new(TaskState::Selection);
-static TASK_STATE_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-
-#[derive(Copy, Clone, PartialEq)]
-enum TaskState {
-    Selection,
-    Kernel,
-}
+static ENABLE_UI: AtomicBool = AtomicBool::new(true);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -141,9 +136,7 @@ async fn userland_task() {
 
         // disable kernel ui
         {
-            let mut state = TASK_STATE.lock().await;
-            *state = TaskState::Kernel;
-            TASK_STATE_CHANGED.signal(());
+            ENABLE_UI.store(false, Ordering::Release);
             // clear_fb();
             MSC_SHUTDOWN.signal(());
         }
@@ -153,9 +146,7 @@ async fn userland_task() {
 
         // enable kernel ui
         {
-            let mut state = TASK_STATE.lock().await;
-            *state = TaskState::Selection;
-            TASK_STATE_CHANGED.signal(());
+            ENABLE_UI.store(true, Ordering::Release);
             // clear_fb();
         }
     }
@@ -244,7 +235,7 @@ async fn kernel_task(
     spawner.spawn(key_handler()).unwrap();
 
     loop {
-        if let TaskState::Selection = *TASK_STATE.lock().await {
+        if ENABLE_UI.load(Ordering::Relaxed) {
             let ui_fut = ui_handler();
             let binary_search_fut = prog_search_handler();
 
