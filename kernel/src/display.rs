@@ -9,7 +9,6 @@ use embassy_time::{Delay, Timer};
 use embedded_graphics::{
     draw_target::DrawTarget,
     pixelcolor::{Rgb565, RgbColor},
-    prelude::Dimensions,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;

@@ -78,6 +78,7 @@ embedded-text = "0.7.2"
 embedded-layout = "0.4.2"
 kolibri-embedded-gui = "0.1.0"
 
+once_cell = { version = "1.21.3", default-features = false }
 static_cell = "2.1.1"
 bitflags = "2.9.1"
 heapless = "0.8.0"

@@ -1299,6 +1299,7 @@ dependencies = [
  "heapless",
  "kolibri-embedded-gui",
  "num_enum 0.7.4",
+ "once_cell",
  "panic-probe",
  "portable-atomic",
  "shared",

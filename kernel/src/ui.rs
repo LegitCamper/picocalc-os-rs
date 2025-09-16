@@ -1,35 +1,12 @@
+use core::sync::atomic::Ordering;
+
 use crate::{
-    BINARY_CH, TASK_STATE, TaskState,
-    display::{FRAMEBUFFER, SCREEN_HEIGHT, SCREEN_WIDTH},
-    elf::load_binary,
-    format,
-    peripherals::keyboard,
-    storage::FileName,
+    BINARY_CH, display::FRAMEBUFFER, elf::load_binary, peripherals::keyboard, storage::FileName,
+    usb::USB_ACTIVE,
 };
-use alloc::{string::String, vec::Vec};
-use core::{fmt::Debug, str::FromStr, sync::atomic::Ordering};
-use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
-    mutex::Mutex,
-};
-use embedded_graphics::{
-    Drawable,
-    mono_font::{
-        MonoTextStyle,
-        ascii::{self, FONT_9X15},
-    },
-    pixelcolor::Rgb565,
-    prelude::{Dimensions, Point, RgbColor, Size},
-    primitives::Rectangle,
-    text::Text,
-};
-use embedded_layout::{
-    align::{horizontal, vertical},
-    layout::linear::LinearLayout,
-    object_chain::Chain,
-    prelude::*,
-};
-use embedded_text::TextBox;
+use alloc::vec::Vec;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embedded_graphics::mono_font::ascii;
 use kolibri_embedded_gui::{label::Label, style::medsize_rgb565_style, ui::Ui};
 use shared::keyboard::{KeyCode, KeyState};
 
@@ -63,7 +40,9 @@ pub async fn ui_handler() {
             }
         }
 
-        draw_selection().await;
+        if SELECTIONS.lock().await.changed {
+            draw_selection().await;
+        }
     }
 }
 
@@ -83,12 +62,16 @@ async fn draw_selection() {
             ui.add(Label::new(&file.long_name).with_font(ascii::FONT_10X20));
         }
     }
+
+    let mut sel = SELECTIONS.lock().await;
+    sel.changed = false;
 }
 
 #[derive(Clone)]
 pub struct SelectionList {
     current_selection: u16,
-    pub selections: Vec<FileName>,
+    selections: Vec<FileName>,
+    changed: bool,
 }
 
 impl SelectionList {
@@ -96,11 +79,22 @@ impl SelectionList {
         Self {
             selections: Vec::new(),
             current_selection: 0,
+            changed: false,
         }
     }
 
+    pub fn update_selections(&mut self, selections: Vec<FileName>) {
+        self.selections = selections;
+        self.changed = true;
+    }
+
+    pub fn selections(&self) -> &Vec<FileName> {
+        &self.selections
+    }
+
     pub fn reset(&mut self) {
-        self.current_selection = 1
+        self.current_selection = 1;
+        self.changed = true;
     }
 
     fn down(&mut self) {

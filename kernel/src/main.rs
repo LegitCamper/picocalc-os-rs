@@ -78,12 +78,12 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
 
-static TASK_STATE: Mutex<CriticalSectionRawMutex, TaskState> = Mutex::new(TaskState::Ui);
+static TASK_STATE: Mutex<CriticalSectionRawMutex, TaskState> = Mutex::new(TaskState::Selection);
 static TASK_STATE_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[derive(Copy, Clone, PartialEq)]
 enum TaskState {
-    Ui,
+    Selection,
     Kernel,
 }
 
@@ -154,7 +154,7 @@ async fn userland_task() {
         // enable kernel ui
         {
             let mut state = TASK_STATE.lock().await;
-            *state = TaskState::Ui;
+            *state = TaskState::Selection;
             TASK_STATE_CHANGED.signal(());
             // clear_fb();
         }
@@ -244,7 +244,7 @@ async fn kernel_task(
     spawner.spawn(key_handler()).unwrap();
 
     loop {
-        if let TaskState::Ui = *TASK_STATE.lock().await {
+        if let TaskState::Selection = *TASK_STATE.lock().await {
             let ui_fut = ui_handler();
             let binary_search_fut = prog_search_handler();
 
@@ -264,8 +264,8 @@ async fn prog_search_handler() {
                 let files = sd.list_files_by_extension(".bin").unwrap();
                 let mut select = SELECTIONS.lock().await;
 
-                if select.selections != files {
-                    select.selections = files;
+                if *select.selections() != files {
+                    select.update_selections(files);
                     select.reset();
                 }
             }
