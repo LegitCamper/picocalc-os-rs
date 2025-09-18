@@ -3,6 +3,7 @@ use crate::{
 };
 use alloc::{str::FromStr, string::String, vec::Vec};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_time::Timer;
 use embedded_graphics::{
     Drawable,
     mono_font::{MonoTextStyle, ascii::FONT_9X15},
@@ -55,6 +56,8 @@ pub async fn ui_handler() {
             clear_selection().await;
             draw_selection().await;
         }
+
+        Timer::after_millis(50).await;
     }
 }
 
@@ -144,6 +147,10 @@ impl SelectionList {
             current_selection: 0,
             changed: false,
         }
+    }
+
+    pub fn set_changed(&mut self, changed: bool) {
+        self.changed = changed
     }
 
     pub fn update_selections(&mut self, selections: Vec<FileName>) {

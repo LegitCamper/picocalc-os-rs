@@ -21,7 +21,7 @@ mod utils;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
-    display::{clear_fb, display_handler, init_display},
+    display::{FRAMEBUFFER, clear_fb, display_handler, init_display},
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
@@ -31,7 +31,8 @@ use crate::{
     ui::{SELECTIONS, clear_selection, ui_handler},
     usb::usb_handler,
 };
-use abi_sys::EntryFn;
+use abi_sys::{EntryFn, Rgb565, RgbColor};
+use embedded_graphics::prelude::DrawTarget;
 
 use {defmt_rtt as _, panic_probe as _};
 
@@ -149,10 +150,15 @@ async fn userland_task() {
         defmt::info!("Executing Binary");
         entry();
 
+        defmt::info!("Putting kernel back in UI mode");
         // enable kernel ui
         {
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
+            unsafe { FRAMEBUFFER.clear(Rgb565::BLACK).unwrap() };
+
+            let mut selections = SELECTIONS.lock().await;
+            selections.set_changed(true);
         }
     }
 }
@@ -239,11 +245,11 @@ async fn kernel_task(
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
+        defmt::info!("ui enabled? {:?}", ui_enabled);
         if ui_enabled {
-            let ui_fut = ui_handler();
-            let binary_search_fut = prog_search_handler();
+            defmt::info!("starting ui");
 
-            select(join(ui_fut, binary_search_fut), UI_CHANGE.wait()).await;
+            select(join(ui_handler(), prog_search_handler()), UI_CHANGE.wait()).await;
         } else {
             select(key_handler(), UI_CHANGE.wait()).await;
         }
