@@ -160,7 +160,7 @@ impl SelectionList {
     }
 
     pub fn reset(&mut self) {
-        self.current_selection = 1;
+        self.current_selection = 0;
         self.changed = true;
     }
 
