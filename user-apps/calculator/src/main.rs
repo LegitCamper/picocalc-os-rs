@@ -11,11 +11,21 @@ use embedded_graphics::{
     mono_font::{
         MonoTextStyle,
         ascii::{self, FONT_6X10},
+        iso_8859_1::FONT_10X20,
     },
     pixelcolor::Rgb565,
     prelude::{Primitive, RgbColor, Size},
     primitives::{PrimitiveStyle, Rectangle},
     text::{Alignment, Text},
+};
+use embedded_layout::{
+    align::{horizontal, vertical},
+    layout::linear::{
+        LinearLayout,
+        spacing::{DistributeFill, FixedMargin},
+    },
+    object_chain::Chain,
+    prelude::*,
 };
 
 #[panic_handler]
@@ -28,13 +38,16 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
+#[unsafe(no_mangle)]
+pub extern "Rust" fn _start() {
+    main()
+}
+
 pub fn main() {
     print("Starting Async Calculator app");
     let mut display = Display;
 
-    let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::RED);
-
-    let mut text = vec!['T', 'y', 'p', 'e'];
+    let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];
     let mut dirty = true;
     let mut last_area: Option<Rectangle> = None;
 
@@ -47,17 +60,45 @@ pub fn main() {
                     .unwrap();
             }
 
-            let text = text.iter().cloned().collect::<String>();
-            let aligned_text = Text::with_alignment(
+            let text = input.iter().cloned().collect::<String>();
+
+            let expr = Text::new(
                 &text,
-                display.bounding_box().center() + Point::new(0, 15),
-                character_style,
-                Alignment::Center,
+                display.bounding_box().center(),
+                MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE),
             );
 
-            last_area = Some(aligned_text.bounding_box());
+            let layout = LinearLayout::vertical(
+                Chain::new(Text::new(
+                    "Calculator!",
+                    Point::zero(),
+                    MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE),
+                ))
+                .append(
+                    LinearLayout::horizontal(Chain::new(expr).append(Text::new(
+                        " = 901",
+                        Point::zero(),
+                        MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE),
+                    )))
+                    .with_spacing(DistributeFill(expr.size().width))
+                    .arrange()
+                    .align_to(
+                        &display.bounding_box(),
+                        horizontal::Center,
+                        vertical::Center,
+                    ),
+                ),
+            )
+            .with_spacing(DistributeFill(50))
+            .arrange()
+            .align_to(
+                &display.bounding_box(),
+                horizontal::Center,
+                vertical::Center,
+            );
 
-            aligned_text.draw(&mut display).unwrap();
+            last_area = Some(layout.bounds());
+            layout.draw(&mut display).unwrap();
 
             dirty = false;
         }
@@ -65,13 +106,13 @@ pub fn main() {
         if let Some(event) = get_key() {
             match event.key {
                 KeyCode::Char(ch) => {
-                    text.push(ch);
+                    input.push(ch);
                 }
                 KeyCode::Del => {
-                    text.clear();
+                    input.clear();
                 }
                 KeyCode::Backspace => {
-                    text.pop();
+                    input.pop();
                 }
                 KeyCode::Esc => return,
                 _ => (),
@@ -79,9 +120,4 @@ pub fn main() {
             dirty = true;
         }
     }
-}
-
-#[unsafe(no_mangle)]
-pub extern "Rust" fn _start() {
-    main()
 }

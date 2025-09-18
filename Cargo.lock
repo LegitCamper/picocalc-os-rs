@@ -232,6 +232,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "embedded-graphics",
+ "embedded-layout",
 ]
 
 [[package]]
