@@ -21,7 +21,7 @@ mod utils;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
-    display::{FRAMEBUFFER, clear_fb, display_handler, init_display},
+    display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
@@ -29,20 +29,18 @@ use crate::{
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},
-    usb::usb_handler,
 };
-use abi_sys::{EntryFn, Rgb565, RgbColor};
-use embedded_graphics::prelude::DrawTarget;
+use abi_sys::EntryFn;
+use embedded_graphics::{
+    pixelcolor::Rgb565,
+    prelude::{DrawTarget, RgbColor},
+};
 
 use {defmt_rtt as _, panic_probe as _};
 
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::{
-    join::{join, join3, join5},
-    select::select,
-    yield_now,
-};
+use embassy_futures::{join::join, select::select};
 use embassy_rp::{
     Peri,
     gpio::{Input, Level, Output, Pull},
@@ -56,7 +54,7 @@ use embassy_rp::{
     usb as embassy_rp_usb,
 };
 use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex, signal::Signal,
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -86,7 +84,7 @@ static ENABLE_UI: AtomicBool = AtomicBool::new(true);
 static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     spawn_core1(
@@ -239,7 +237,7 @@ async fn kernel_task(
     setup_display(display, spawner).await;
     setup_sd(sd).await;
 
-    let usb = embassy_rp_usb::Driver::new(usb, Irqs);
+    let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
     // spawner.spawn(usb_handler(usb)).unwrap();
 
     loop {

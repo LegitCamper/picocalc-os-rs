@@ -1,6 +1,6 @@
 use crate::{scsi::MassStorageClass, storage::SdCard};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::{join::join, select::select};
+use embassy_futures::select::select;
 use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_usb::{Builder, Config, UsbDevice};
 

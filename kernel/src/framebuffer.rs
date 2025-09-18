@@ -13,7 +13,7 @@ use embedded_graphics::{
 use embedded_hal_2::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
 use heapless::Vec;
-use st7365p_lcd::{FrameBuffer, ST7365P};
+use st7365p_lcd::ST7365P;
 
 pub const TILE_SIZE: usize = 16; // 16x16 tile
 pub const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE_SIZE); // 400 tiles

@@ -101,7 +101,7 @@ impl SdCard {
     pub fn write_blocks(&self, blocks: &mut [Block], start_block_idx: BlockIdx) -> Result<(), ()> {
         let mut res: Result<(), Error> = Ok(());
         self.volume_mgr.device(|sd| {
-            let res = sd.write(blocks, start_block_idx);
+            res = sd.write(blocks, start_block_idx);
             DummyTimeSource {}
         });
         res.map_err(|_| ())

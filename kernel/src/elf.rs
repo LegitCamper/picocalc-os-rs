@@ -28,7 +28,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<EntryFn, &str> {
     let mut sd_lock = SDCARD.get().lock().await;
     let sd = sd_lock.as_mut().unwrap();
 
-    let mut error = "";
+    let error = "";
     let mut entry = 0;
 
     let mut header_buf = [0; ELF32_HDR_SIZE];

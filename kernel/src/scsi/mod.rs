@@ -1,5 +1,3 @@
-use core::sync::atomic::AtomicBool;
-
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::lazy_lock::LazyLock;
@@ -25,7 +23,7 @@ static mut BLOCK_BUF: LazyLock<[Block; BLOCKS]> =
     LazyLock::new(|| core::array::from_fn(|_| Block::new()));
 
 pub struct MassStorageClass<'d, D: Driver<'d>> {
-    temp_sd: Option<SdCard>, // temporarly owns sdcard when scsi is running
+    temp_sd: Option<SdCard>, // temporary owns sdcard when scsi is running
     ejected: bool,
     pending_eject: bool,
     bulk_out: D::EndpointOut,
@@ -192,12 +190,15 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                     Err(())
                 }
             }
-            ScsiCommand::RequestSense { desc, alloc_len } => Ok(()),
+            ScsiCommand::RequestSense {
+                desc: _,
+                alloc_len: _,
+            } => Ok(()),
             ScsiCommand::ModeSense6 {
-                dbd,
-                page_control,
-                page_code,
-                subpage_code,
+                dbd: _,
+                page_control: _,
+                page_code: _,
+                subpage_code: _,
                 alloc_len,
             } => {
                 // DBD=0, no block descriptors; total length = 4
@@ -213,10 +214,10 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
             ScsiCommand::ModeSense10 {
-                dbd,
-                page_control,
-                page_code,
-                subpage_code,
+                dbd: _,
+                page_control: _,
+                page_code: _,
+                subpage_code: _,
                 alloc_len,
             } => {
                 let response = [
@@ -377,6 +378,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 }
 
 #[repr(C, packed)]
+#[allow(non_snake_case)]
 struct CommandBlockWrapper {
     dCBWSignature: u32,
     dCBWTag: u32,
@@ -387,6 +389,7 @@ struct CommandBlockWrapper {
     CBWCB: [u8; 16],
 }
 
+#[allow(non_snake_case)]
 impl CommandBlockWrapper {
     fn parse(buf: &[u8]) -> Option<Self> {
         if buf.len() < 31 {

@@ -1,15 +1,14 @@
 #![no_std]
 
 extern crate alloc;
-use alloc::boxed::Box;
 
-use core::pin::Pin;
-pub use embedded_graphics::{
+#[allow(unused)]
+use embedded_graphics::{
     Pixel,
     geometry::Point,
     pixelcolor::{Rgb565, RgbColor},
 };
-use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
+pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
 pub type EntryFn = fn();
 
@@ -32,6 +31,7 @@ impl CallAbiTable {
 
 pub type PrintAbi = extern "Rust" fn(msg: &str);
 
+#[allow(unused)]
 pub fn print(msg: &str) {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
@@ -42,6 +42,7 @@ pub fn print(msg: &str) {
 
 pub type SleepAbi = extern "Rust" fn(ms: u64);
 
+#[allow(unused)]
 pub fn sleep(ms: u64) {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallAbiTable::Sleep as usize];
@@ -52,6 +53,7 @@ pub fn sleep(ms: u64) {
 
 pub type DrawIterAbi = extern "Rust" fn(pixels: &[Pixel<Rgb565>]);
 
+#[allow(unused)]
 pub fn draw_iter(pixels: &[Pixel<Rgb565>]) {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallAbiTable::DrawIter as usize];
@@ -62,6 +64,7 @@ pub fn draw_iter(pixels: &[Pixel<Rgb565>]) {
 
 pub type GetKeyAbi = extern "Rust" fn() -> Option<KeyEvent>;
 
+#[allow(unused)]
 pub fn get_key() -> Option<KeyEvent> {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallAbiTable::GetKey as usize];

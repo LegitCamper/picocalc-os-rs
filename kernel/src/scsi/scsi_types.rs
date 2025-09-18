@@ -1,10 +1,5 @@
 use num_enum::TryFromPrimitive;
 
-#[derive(Debug, Clone, Copy)]
-pub enum ScsiError {
-    NotReady,
-}
-
 /// THE CODE BELOW ORIGINATES FROM: https://github.com/apohrebniak/usbd-storage/blob/master/usbd-storage/src/subclass/scsi.rs
 
 /// SCSI device subclass code

@@ -1,18 +1,6 @@
-use core::{pin::Pin, time::Duration};
-
-use abi_sys::{DrawIterAbi, GetKeyAbi, Pixel, PrintAbi, SleepAbi};
-use alloc::boxed::Box;
-use defmt::info;
-use embassy_futures::block_on;
+use abi_sys::{DrawIterAbi, GetKeyAbi, PrintAbi, SleepAbi};
 use embassy_rp::clocks::clk_sys_freq;
-use embassy_time::Timer;
-use embedded_graphics::{
-    Drawable,
-    draw_target::DrawTarget,
-    pixelcolor::Rgb565,
-    prelude::{Point, RgbColor, Size},
-    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
-};
+use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
 use shared::keyboard::KeyEvent;
 
 use crate::{KEY_CACHE, display::FRAMEBUFFER};
