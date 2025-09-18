@@ -7,8 +7,8 @@ use embedded_graphics::{
     Drawable,
     mono_font::{MonoTextStyle, ascii::FONT_9X15},
     pixelcolor::Rgb565,
-    prelude::{Dimensions, Point, RgbColor, Size},
-    primitives::Rectangle,
+    prelude::{Dimensions, Point, Primitive, RgbColor, Size},
+    primitives::{PrimitiveStyle, Rectangle},
     text::Text,
 };
 use embedded_layout::{
@@ -50,9 +50,22 @@ pub async fn ui_handler() {
             }
         }
 
-        if SELECTIONS.lock().await.changed {
+        let changed = SELECTIONS.lock().await.changed;
+        if changed {
+            clear_selection().await;
             draw_selection().await;
         }
+    }
+}
+
+pub async fn clear_selection() {
+    let sel = SELECTIONS.lock().await;
+
+    if let Some(area) = sel.last_bounds {
+        Rectangle::new(area.top_left, area.size)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(unsafe { &mut FRAMEBUFFER })
+            .unwrap();
     }
 }
 
@@ -99,12 +112,14 @@ async fn draw_selection() {
         //     ));
         // }
 
-        LinearLayout::vertical(chain)
+        let layout = LinearLayout::vertical(chain)
             .with_alignment(horizontal::Center)
             .arrange()
-            .align_to(&display_area, horizontal::Center, vertical::Center)
-            .draw(unsafe { &mut FRAMEBUFFER })
-            .unwrap();
+            .align_to(&display_area, horizontal::Center, vertical::Center);
+
+        SELECTIONS.lock().await.last_bounds = Some(layout.bounds());
+
+        layout.draw(unsafe { &mut FRAMEBUFFER }).unwrap();
     }
 
     let mut sel = SELECTIONS.lock().await;
@@ -113,6 +128,9 @@ async fn draw_selection() {
 
 #[derive(Clone)]
 pub struct SelectionList {
+    // allows easy clearing of selection ui,
+    // based on previous bounds
+    last_bounds: Option<Rectangle>,
     current_selection: u16,
     selections: Vec<FileName>,
     changed: bool,
@@ -121,6 +139,7 @@ pub struct SelectionList {
 impl SelectionList {
     pub const fn new() -> Self {
         Self {
+            last_bounds: None,
             selections: Vec::new(),
             current_selection: 0,
             changed: false,

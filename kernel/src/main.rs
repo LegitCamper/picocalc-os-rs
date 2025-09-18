@@ -28,7 +28,7 @@ use crate::{
     },
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
-    ui::{SELECTIONS, ui_handler},
+    ui::{SELECTIONS, clear_selection, ui_handler},
     usb::usb_handler,
 };
 use abi_sys::EntryFn;
@@ -140,7 +140,9 @@ async fn userland_task() {
         {
             ENABLE_UI.store(false, Ordering::Release);
             UI_CHANGE.signal(());
-            // clear_fb();
+
+            clear_selection().await;
+
             MSC_SHUTDOWN.signal(());
         }
 
@@ -151,7 +153,6 @@ async fn userland_task() {
         {
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
-            // clear_fb();
         }
     }
 }
