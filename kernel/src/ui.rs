@@ -6,7 +6,10 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
     Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_9X15},
+    mono_font::{
+        MonoTextStyle,
+        ascii::{FONT_9X15, FONT_10X20},
+    },
     pixelcolor::Rgb565,
     prelude::{Dimensions, Point, Primitive, RgbColor, Size},
     primitives::{PrimitiveStyle, Rectangle},
@@ -14,8 +17,7 @@ use embedded_graphics::{
 };
 use embedded_layout::{
     align::{horizontal, vertical},
-    layout::linear::LinearLayout,
-    object_chain::Chain,
+    layout::linear::{FixedMargin, LinearLayout},
     prelude::*,
 };
 use embedded_text::TextBox;
@@ -29,19 +31,18 @@ pub async fn ui_handler() {
         if let Some(event) = keyboard::read_keyboard_fifo().await {
             if let KeyState::Pressed = event.state {
                 match event.key {
-                    KeyCode::JoyUp => {
+                    KeyCode::Up => {
                         let mut selections = SELECTIONS.lock().await;
                         selections.up();
                     }
-                    KeyCode::JoyDown => {
+                    KeyCode::Down => {
                         let mut selections = SELECTIONS.lock().await;
                         selections.down();
                     }
-                    KeyCode::Enter | KeyCode::JoyRight => {
+                    KeyCode::Enter | KeyCode::Right => {
                         let selections = SELECTIONS.lock().await;
-                        let selection = selections.selections
-                            [selections.current_selection as usize - 1]
-                            .clone();
+                        let selection =
+                            selections.selections[selections.current_selection as usize].clone();
 
                         let entry = unsafe { load_binary(&selection.short_name).await.unwrap() };
                         BINARY_CH.send(entry).await;
@@ -56,8 +57,6 @@ pub async fn ui_handler() {
             clear_selection().await;
             draw_selection().await;
         }
-
-        Timer::after_millis(50).await;
     }
 }
 
@@ -73,12 +72,10 @@ pub async fn clear_selection() {
 }
 
 async fn draw_selection() {
-    let file_names: Vec<FileName> = {
-        let guard = SELECTIONS.lock().await;
-        guard.selections.clone()
-    };
+    let mut guard = SELECTIONS.lock().await;
+    let file_names = &guard.selections.clone();
 
-    let text_style = MonoTextStyle::new(&FONT_9X15, Rgb565::WHITE);
+    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
     let display_area = unsafe { FRAMEBUFFER.bounding_box() };
 
     const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
@@ -96,37 +93,37 @@ async fn draw_selection() {
         .draw(unsafe { &mut FRAMEBUFFER })
         .unwrap();
     } else {
-        let mut file_names = file_names.iter();
-        let Some(first) = file_names.next() else {
-            Text::new(NO_BINS, Point::zero(), text_style)
-                .draw(unsafe { &mut FRAMEBUFFER })
-                .unwrap();
+        let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
 
-            return;
-        };
+        for i in file_names {
+            views.push(Text::new(&i.long_name, Point::zero(), text_style));
+        }
 
-        let chain = Chain::new(Text::new(&first.long_name, Point::zero(), text_style));
+        let views_group = Views::new(views.as_mut_slice());
 
-        // for _ in 0..file_names.len() {
-        //     let chain = chain.append(Text::new(
-        //         file_names.next().unwrap(),
-        //         Point::zero(),
-        //         text_style,
-        //     ));
-        // }
-
-        let layout = LinearLayout::vertical(chain)
+        let layout = LinearLayout::vertical(views_group)
             .with_alignment(horizontal::Center)
+            .with_spacing(FixedMargin(5))
             .arrange()
             .align_to(&display_area, horizontal::Center, vertical::Center);
 
-        SELECTIONS.lock().await.last_bounds = Some(layout.bounds());
+        // draw selected box
+        let selected_bounds = layout
+            .inner()
+            .get(guard.current_selection as usize)
+            .expect("Selected binary missing")
+            .bounding_box();
+        Rectangle::new(selected_bounds.top_left, selected_bounds.size)
+            .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
+            .draw(unsafe { &mut FRAMEBUFFER })
+            .unwrap();
+
+        guard.last_bounds = Some(layout.bounds());
 
         layout.draw(unsafe { &mut FRAMEBUFFER }).unwrap();
     }
 
-    let mut sel = SELECTIONS.lock().await;
-    sel.changed = false;
+    guard.changed = false;
 }
 
 #[derive(Clone)]
@@ -167,15 +164,17 @@ impl SelectionList {
         self.changed = true;
     }
 
-    fn down(&mut self) {
-        if self.current_selection + 1 < self.selections.len() as u16 {
-            self.current_selection += 1
+    fn up(&mut self) {
+        if self.current_selection > 0 {
+            self.current_selection -= 1;
+            self.changed = true;
         }
     }
 
-    fn up(&mut self) {
-        if self.current_selection > self.selections.len() as u16 {
-            self.current_selection -= 1
+    fn down(&mut self) {
+        if self.current_selection + 1 < self.selections.len() as u16 {
+            self.current_selection += 1;
+            self.changed = true;
         }
     }
 }

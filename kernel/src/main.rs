@@ -18,8 +18,6 @@ mod ui;
 mod usb;
 mod utils;
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use crate::{
     display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{
@@ -31,6 +29,7 @@ use crate::{
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
 use abi_sys::EntryFn;
+use alloc::string::String;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::{DrawTarget, RgbColor},
@@ -38,6 +37,7 @@ use embedded_graphics::{
 
 use {defmt_rtt as _, panic_probe as _};
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::{join::join, select::select};
