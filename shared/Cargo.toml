@@ -7,5 +7,5 @@ edition = "2024"
 defmt = ["dep:defmt"]
 
 [dependencies]
-bitflags = "2.9.1"
+bitflags = "2.9.4"
 defmt = { version = "1.0.1", optional = true }
