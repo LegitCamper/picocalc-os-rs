@@ -150,7 +150,6 @@ async fn userland_task() {
         defmt::info!("Executing Binary");
         entry();
 
-        defmt::info!("Putting kernel back in UI mode");
         // enable kernel ui
         {
             ENABLE_UI.store(true, Ordering::Release);
@@ -245,10 +244,7 @@ async fn kernel_task(
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
-        defmt::info!("ui enabled? {:?}", ui_enabled);
         if ui_enabled {
-            defmt::info!("starting ui");
-
             select(join(ui_handler(), prog_search_handler()), UI_CHANGE.wait()).await;
         } else {
             select(key_handler(), UI_CHANGE.wait()).await;
