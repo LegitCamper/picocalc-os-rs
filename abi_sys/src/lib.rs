@@ -11,7 +11,7 @@ pub use embedded_graphics::{
 };
 use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
-pub type EntryFn = fn() -> Pin<Box<dyn Future<Output = ()>>>;
+pub type EntryFn = fn();
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".user_reloc")]

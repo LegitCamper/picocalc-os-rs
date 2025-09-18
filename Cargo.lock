@@ -232,7 +232,6 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "embedded-graphics",
- "kolibri-embedded-gui",
 ]
 
 [[package]]

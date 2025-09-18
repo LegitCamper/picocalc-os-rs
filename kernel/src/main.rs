@@ -39,6 +39,7 @@ use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::{
     join::{join, join3, join5},
+    select::select,
     yield_now,
 };
 use embassy_rp::{
@@ -81,6 +82,7 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
         .lock();
 
 static ENABLE_UI: AtomicBool = AtomicBool::new(true);
+static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -137,16 +139,18 @@ async fn userland_task() {
         // disable kernel ui
         {
             ENABLE_UI.store(false, Ordering::Release);
+            UI_CHANGE.signal(());
             // clear_fb();
             MSC_SHUTDOWN.signal(());
         }
 
         defmt::info!("Executing Binary");
-        entry().await;
+        entry();
 
         // enable kernel ui
         {
             ENABLE_UI.store(true, Ordering::Release);
+            UI_CHANGE.signal(());
             // clear_fb();
         }
     }
@@ -230,19 +234,18 @@ async fn kernel_task(
     setup_sd(sd).await;
 
     let usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    spawner.spawn(usb_handler(usb)).unwrap();
-
-    spawner.spawn(key_handler()).unwrap();
+    // spawner.spawn(usb_handler(usb)).unwrap();
 
     loop {
-        if ENABLE_UI.load(Ordering::Relaxed) {
+        let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
+        if ui_enabled {
             let ui_fut = ui_handler();
             let binary_search_fut = prog_search_handler();
 
-            join(ui_fut, binary_search_fut).await;
+            select(join(ui_fut, binary_search_fut), UI_CHANGE.wait()).await;
+        } else {
+            select(key_handler(), UI_CHANGE.wait()).await;
         }
-
-        yield_now().await;
     }
 }
 
@@ -267,7 +270,6 @@ async fn prog_search_handler() {
 
 static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
 
-#[embassy_executor::task]
 async fn key_handler() {
     loop {
         if let Some(event) = read_keyboard_fifo().await {

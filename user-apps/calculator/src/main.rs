@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use abi::{KeyCode, display::Display, get_key, print, sleep};
-use alloc::{boxed::Box, string::String, vec};
+use alloc::{boxed::Box, format, string::String, vec};
 use core::{panic::PanicInfo, pin::Pin};
 use embedded_graphics::{
     Drawable,
@@ -17,27 +17,48 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle},
     text::{Alignment, Text},
 };
-use kolibri_embedded_gui::{label::Label, style::medsize_rgb565_style, ui::Ui};
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    print(&format!(
+        "user panic: {} @ {:?}",
+        info.message(),
+        info.location(),
+    ));
     loop {}
 }
 
-pub async fn main() {
+pub fn main() {
     print("Starting Async Calculator app");
     let mut display = Display;
 
+    let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::RED);
+
     let mut text = vec!['T', 'y', 'p', 'e'];
     let mut dirty = true;
+    let mut last_area: Option<Rectangle> = None;
 
     loop {
         if dirty {
-            let mut ui = Ui::new_fullscreen(&mut display, medsize_rgb565_style());
-            let text = text.iter().cloned().collect::<String>();
+            if let Some(area) = last_area {
+                Rectangle::new(area.top_left, area.size)
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(&mut display)
+                    .unwrap();
+            }
 
-            // ui.clear_background();
-            ui.add(Label::new(&text).with_font(ascii::FONT_10X20));
+            let text = text.iter().cloned().collect::<String>();
+            let aligned_text = Text::with_alignment(
+                &text,
+                display.bounding_box().center() + Point::new(0, 15),
+                character_style,
+                Alignment::Center,
+            );
+
+            last_area = Some(aligned_text.bounding_box());
+
+            aligned_text.draw(&mut display).unwrap();
+
             dirty = false;
         }
 
@@ -61,6 +82,6 @@ pub async fn main() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "Rust" fn _start() -> Pin<Box<dyn Future<Output = ()>>> {
-    Box::pin(async { main().await })
+pub extern "Rust" fn _start() {
+    main()
 }
