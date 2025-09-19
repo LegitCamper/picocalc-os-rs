@@ -29,7 +29,6 @@ use crate::{
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
 use abi_sys::EntryFn;
-use alloc::string::String;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::{DrawTarget, RgbColor},

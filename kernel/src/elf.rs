@@ -54,6 +54,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<EntryFn, &str> {
         let entries: &[(CallAbiTable, usize)] = &[
             (CallAbiTable::Print, abi::print as usize),
             (CallAbiTable::Sleep, abi::sleep as usize),
+            (CallAbiTable::LockDisplay, abi::lock_display as usize),
             (CallAbiTable::DrawIter, abi::draw_iter as usize),
             (CallAbiTable::GetKey, abi::get_key as usize),
         ];

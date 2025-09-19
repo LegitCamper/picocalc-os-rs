@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::framebuffer::AtomicFrameBuffer;
 use embassy_rp::{
     Peri,
@@ -24,6 +26,7 @@ pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
 
 pub static mut FRAMEBUFFER: AtomicFrameBuffer = AtomicFrameBuffer::new();
+pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub async fn init_display(
     spi: Spi<'static, SPI1, Async>,
@@ -48,20 +51,16 @@ pub async fn init_display(
     display
 }
 
-pub fn clear_fb() {
-    unsafe {
-        FRAMEBUFFER.clear(Rgb565::WHITE).unwrap();
-    }
-}
-
 #[embassy_executor::task]
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
-        unsafe {
-            FRAMEBUFFER
-                .partial_draw_batched(&mut display)
-                .await
-                .unwrap()
+        if !FB_PAUSED.load(Ordering::Acquire) {
+            unsafe {
+                FRAMEBUFFER
+                    .partial_draw_batched(&mut display)
+                    .await
+                    .unwrap()
+            }
         }
 
         Timer::after_millis(32).await; // 30 fps

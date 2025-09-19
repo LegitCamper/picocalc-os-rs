@@ -1,7 +1,7 @@
 #![no_std]
 
 use abi_sys::draw_iter;
-pub use abi_sys::{get_key, print, sleep};
+pub use abi_sys::{get_key, lock_display, print, sleep};
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use talc::*;
 

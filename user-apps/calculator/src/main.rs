@@ -2,7 +2,7 @@
 #![no_main]
 
 extern crate alloc;
-use abi::{KeyCode, display::Display, get_key, print};
+use abi::{KeyCode, display::Display, get_key, lock_display, print};
 use alloc::{format, string::String, vec, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{
@@ -57,6 +57,8 @@ pub fn main() {
 
     loop {
         if dirty {
+            lock_display(true);
+
             let style = PrimitiveStyle::with_fill(Rgb565::BLACK);
             if let Some(area) = last_area {
                 Rectangle::new(area.0.top_left, area.0.size)
@@ -100,6 +102,7 @@ pub fn main() {
             eq_layout.draw(&mut display).unwrap();
 
             dirty = false;
+            lock_display(false);
         }
 
         if let Some(event) = get_key() {

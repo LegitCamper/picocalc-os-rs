@@ -1,13 +1,19 @@
-use abi_sys::{DrawIterAbi, GetKeyAbi, PrintAbi, SleepAbi};
+use core::sync::atomic::Ordering;
+
+use abi_sys::{DrawIterAbi, GetKeyAbi, LockDisplay, PrintAbi, SleepAbi};
 use embassy_rp::clocks::clk_sys_freq;
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
 use shared::keyboard::KeyEvent;
 
-use crate::{KEY_CACHE, display::FRAMEBUFFER};
+use crate::{
+    KEY_CACHE,
+    display::{FB_PAUSED, FRAMEBUFFER},
+};
 
 // ensure the abi and the kernel fn signatures are the same
 const _: PrintAbi = print;
 const _: SleepAbi = sleep;
+const _: LockDisplay = lock_display;
 const _: DrawIterAbi = draw_iter;
 const _: GetKeyAbi = get_key;
 
@@ -22,6 +28,10 @@ pub extern "Rust" fn sleep(ms: u64) {
             cortex_m::asm::nop();
         }
     }
+}
+
+pub extern "Rust" fn lock_display(lock: bool) {
+    FB_PAUSED.store(lock, Ordering::Relaxed);
 }
 
 // TODO: maybe return result

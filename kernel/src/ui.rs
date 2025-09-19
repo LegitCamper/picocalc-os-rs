@@ -1,15 +1,16 @@
 use crate::{
-    BINARY_CH, display::FRAMEBUFFER, elf::load_binary, peripherals::keyboard, storage::FileName,
+    BINARY_CH,
+    display::{FB_PAUSED, FRAMEBUFFER},
+    elf::load_binary,
+    peripherals::keyboard,
+    storage::FileName,
 };
 use alloc::{str::FromStr, string::String, vec::Vec};
+use core::sync::atomic::Ordering;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::Timer;
 use embedded_graphics::{
     Drawable,
-    mono_font::{
-        MonoTextStyle,
-        ascii::{FONT_9X15, FONT_10X20},
-    },
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::Rgb565,
     prelude::{Dimensions, Point, Primitive, RgbColor, Size},
     primitives::{PrimitiveStyle, Rectangle},
@@ -81,6 +82,8 @@ async fn draw_selection() {
     const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
     let no_bins = String::from_str(NO_BINS).unwrap();
 
+    FB_PAUSED.store(true, Ordering::Release); // ensure all elements show up at once
+
     if file_names.is_empty() {
         TextBox::new(
             &no_bins,
@@ -124,6 +127,7 @@ async fn draw_selection() {
     }
 
     guard.changed = false;
+    FB_PAUSED.store(false, Ordering::Release); // ensure all elements show up at once
 }
 
 #[derive(Clone)]
