@@ -9,3 +9,4 @@ shared = { path = "../shared" }
 abi_sys = { path = "../abi_sys" }
 talc = "4.4.3"
 spin = "0.10.0"
+rand_core = "0.9.3"

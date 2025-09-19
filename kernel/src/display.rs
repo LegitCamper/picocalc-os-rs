@@ -59,6 +59,6 @@ pub async fn display_handler(mut display: DISPLAY) {
             }
         }
 
-        Timer::after_millis(32).await; // 30 fps
+        Timer::after_millis(10).await;
     }
 }

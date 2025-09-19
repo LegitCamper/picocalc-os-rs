@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "abi", "shared", "user-apps/calculator"]
+members = ["kernel", "abi", "shared", "user-apps/calculator", "user-apps/snake"]
 
 [profile.release]
 debug = true

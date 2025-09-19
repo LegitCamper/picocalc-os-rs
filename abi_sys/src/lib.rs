@@ -24,10 +24,11 @@ pub enum CallAbiTable {
     LockDisplay = 2,
     DrawIter = 3,
     GetKey = 4,
+    GenRand = 5,
 }
 
 impl CallAbiTable {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 6;
 }
 
 pub type PrintAbi = extern "Rust" fn(msg: &str);
@@ -82,5 +83,23 @@ pub fn get_key() -> Option<KeyEvent> {
         let ptr = CALL_ABI_TABLE[CallAbiTable::GetKey as usize];
         let f: GetKeyAbi = core::mem::transmute(ptr);
         f()
+    }
+}
+
+pub type GenRand = extern "Rust" fn(req: &mut RngRequest);
+
+#[repr(C)]
+pub enum RngRequest {
+    U32(u32),
+    U64(u64),
+    Bytes { ptr: *mut u8, len: usize },
+}
+
+#[allow(unused)]
+pub fn gen_rand(req: &mut RngRequest) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::GenRand as usize];
+        let f: GenRand = core::mem::transmute(ptr);
+        f(req)
     }
 }

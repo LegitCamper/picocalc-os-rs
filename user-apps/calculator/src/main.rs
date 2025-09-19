@@ -15,10 +15,10 @@ use embedded_graphics::{
     text::Text,
 };
 use embedded_layout::{
-    align::{horizontal, vertical},
+    View,
+    align::{Align, horizontal, vertical},
     layout::linear::LinearLayout,
-    object_chain::Chain,
-    prelude::*,
+    prelude::Chain,
 };
 
 #[panic_handler]
@@ -37,7 +37,7 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print("Starting Async Calculator app");
+    print("Starting Calculator app");
     let mut display = Display;
 
     let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];

@@ -1,7 +1,8 @@
 #![no_std]
 
-use abi_sys::draw_iter;
+use abi_sys::{RngRequest, draw_iter, gen_rand};
 pub use abi_sys::{get_key, lock_display, print, sleep};
+use rand_core::RngCore;
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use talc::*;
 
@@ -69,5 +70,34 @@ pub mod display {
 
             Ok(())
         }
+    }
+}
+
+pub struct Rng;
+
+impl RngCore for Rng {
+    fn next_u32(&mut self) -> u32 {
+        let mut req = RngRequest::U32(0);
+        gen_rand(&mut req);
+        if let RngRequest::U32(i) = req {
+            return i;
+        };
+        0
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut req = RngRequest::U64(0);
+        gen_rand(&mut req);
+        if let RngRequest::U64(i) = req {
+            return i;
+        };
+        0
+    }
+    fn fill_bytes(&mut self, dst: &mut [u8]) {
+        let mut req = RngRequest::Bytes {
+            ptr: dst.as_mut_ptr(),
+            len: dst.len(),
+        };
+        gen_rand(&mut req);
     }
 }

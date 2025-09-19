@@ -57,6 +57,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<EntryFn, &str> {
             (CallAbiTable::LockDisplay, abi::lock_display as usize),
             (CallAbiTable::DrawIter, abi::draw_iter as usize),
             (CallAbiTable::GetKey, abi::get_key as usize),
+            (CallAbiTable::GenRand, abi::gen_rand as usize),
         ];
         assert!(entries.len() == CallAbiTable::COUNT);
 

@@ -1,8 +1,8 @@
-use core::sync::atomic::Ordering;
-
-use abi_sys::{DrawIterAbi, GetKeyAbi, LockDisplay, PrintAbi, SleepAbi};
-use embassy_rp::clocks::clk_sys_freq;
+use abi_sys::{DrawIterAbi, GetKeyAbi, LockDisplay, PrintAbi, RngRequest, SleepAbi};
+use core::{ptr::slice_from_raw_parts, sync::atomic::Ordering};
+use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
+use rand::Rng;
 use shared::keyboard::KeyEvent;
 
 use crate::{
@@ -23,10 +23,10 @@ pub extern "Rust" fn print(msg: &str) {
 
 pub extern "Rust" fn sleep(ms: u64) {
     let cycles_per_ms = clk_sys_freq() / 1000;
-    for _ in 0..ms {
-        for _ in 0..cycles_per_ms {
-            cortex_m::asm::nop();
-        }
+    let total_cycles = ms * cycles_per_ms as u64;
+
+    for _ in 0..total_cycles {
+        cortex_m::asm::nop();
     }
 }
 
@@ -41,4 +41,17 @@ pub extern "Rust" fn draw_iter(pixels: &[Pixel<Rgb565>]) {
 
 pub extern "Rust" fn get_key() -> Option<KeyEvent> {
     unsafe { KEY_CACHE.dequeue() }
+}
+
+pub extern "Rust" fn gen_rand(req: &mut RngRequest) {
+    let mut rng = RoscRng;
+
+    match req {
+        RngRequest::U32(i) => *i = rng.next_u32(),
+        RngRequest::U64(i) => *i = rng.next_u64(),
+        RngRequest::Bytes { ptr, len } => {
+            let slice: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(*ptr, *len) };
+            rng.fill_bytes(slice);
+        }
+    }
 }
