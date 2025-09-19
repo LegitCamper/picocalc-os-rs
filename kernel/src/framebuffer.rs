@@ -184,69 +184,6 @@ impl AtomicFrameBuffer {
         Ok(())
     }
 
-    /// Sends only dirty tiles (16x16px) individually to the display without batching
-    pub async fn partial_draw<SPI, DC, RST, DELAY: DelayNs>(
-        &mut self,
-        display: &mut ST7365P<SPI, DC, RST, DELAY>,
-    ) -> Result<(), ()>
-    where
-        SPI: SpiDevice,
-        DC: OutputPin,
-        RST: OutputPin,
-    {
-        if unsafe { DIRTY_TILES.get().iter().any(|p| p.load(Ordering::Acquire)) } {
-            let tiles_x = (SCREEN_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
-            let tiles_y = (SCREEN_HEIGHT + TILE_SIZE - 1) / TILE_SIZE;
-
-            let mut tile_buffer = [0u16; TILE_SIZE * TILE_SIZE];
-
-            for ty in 0..tiles_y {
-                for tx in 0..tiles_x {
-                    if unsafe { !DIRTY_TILES.get()[ty * tiles_x + tx].load(Ordering::Acquire) } {
-                        continue;
-                    }
-
-                    let x = tx * TILE_SIZE;
-                    let y = ty * TILE_SIZE;
-
-                    // Copy pixels for the tile into tile_buffer
-                    for row in 0..TILE_SIZE {
-                        for col in 0..TILE_SIZE {
-                            let actual_x = x + col;
-                            let actual_y = y + row;
-
-                            if actual_x < SCREEN_WIDTH && actual_y < SCREEN_HEIGHT {
-                                let idx = actual_y * SCREEN_WIDTH + actual_x;
-                                tile_buffer[row * TILE_SIZE + col] = unsafe { BUFFER[idx] };
-                            } else {
-                                // Out of bounds, fill with zero (or background)
-                                tile_buffer[row * TILE_SIZE + col] = 0;
-                            }
-                        }
-                    }
-
-                    // Send the tile's pixel data to the display
-                    display
-                        .set_pixels_buffered(
-                            x as u16,
-                            y as u16,
-                            (x + TILE_SIZE - 1).min(SCREEN_WIDTH - 1) as u16,
-                            (y + TILE_SIZE - 1).min(SCREEN_HEIGHT - 1) as u16,
-                            &tile_buffer,
-                        )
-                        .await?;
-
-                    // Mark tile as clean
-                    unsafe {
-                        DIRTY_TILES.get_mut()[ty * tiles_x + tx].store(false, Ordering::Release)
-                    };
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// Sends only dirty tiles (16x16px) in batches to the display
     pub async fn partial_draw_batched<SPI, DC, RST, DELAY>(
         &mut self,
