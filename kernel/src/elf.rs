@@ -15,6 +15,7 @@ use goblin::{
     },
     elf32::{section_header::SectionHeader, sym::Sym},
 };
+use strum::IntoEnumIterator;
 
 const ELF32_HDR_SIZE: usize = 52;
 
@@ -50,18 +51,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<EntryFn, &str> {
             }
         }
 
-        // MUST MATCH ABI EXACTLY
-        let entries: &[(CallAbiTable, usize)] = &[
-            (CallAbiTable::Print, abi::print as usize),
-            (CallAbiTable::Sleep, abi::sleep as usize),
-            (CallAbiTable::LockDisplay, abi::lock_display as usize),
-            (CallAbiTable::DrawIter, abi::draw_iter as usize),
-            (CallAbiTable::GetKey, abi::get_key as usize),
-            (CallAbiTable::GenRand, abi::gen_rand as usize),
-        ];
-        assert!(entries.len() == CallAbiTable::COUNT);
-
-        patch_abi(entries, &elf_header, &mut file).unwrap();
+        patch_abi(&elf_header, &mut file).unwrap();
 
         // TODO: dynamically search for abi table
 
@@ -77,11 +67,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<EntryFn, &str> {
     }
 }
 
-fn patch_abi(
-    entries: &[(CallAbiTable, usize)],
-    elf_header: &Header,
-    file: &mut File,
-) -> Result<(), ()> {
+fn patch_abi(elf_header: &Header, file: &mut File) -> Result<(), ()> {
     for i in 1..=elf_header.e_shnum {
         let sh = read_section(file, &elf_header, i.into());
 
@@ -117,9 +103,17 @@ fn patch_abi(
                 if symbol_name == "CALL_ABI_TABLE" {
                     let table_base = sym.st_value as *mut usize;
 
-                    for &(abi_idx, func_ptr) in entries {
+                    for (idx, call) in CallAbiTable::iter().enumerate() {
+                        let ptr = match call {
+                            CallAbiTable::Print => abi::print as usize,
+                            CallAbiTable::Sleep => abi::sleep as usize,
+                            CallAbiTable::LockDisplay => abi::lock_display as usize,
+                            CallAbiTable::DrawIter => abi::draw_iter as usize,
+                            CallAbiTable::GetKey => abi::get_key as usize,
+                            CallAbiTable::GenRand => abi::gen_rand as usize,
+                        };
                         unsafe {
-                            table_base.add(abi_idx as usize).write(func_ptr);
+                            table_base.add(idx as usize).write(ptr);
                         }
                     }
                     return Ok(());

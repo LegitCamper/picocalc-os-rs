@@ -9,6 +9,7 @@ use embedded_graphics::{
     pixelcolor::{Rgb565, RgbColor},
 };
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
+use strum::EnumIter;
 
 pub type EntryFn = fn();
 
@@ -17,7 +18,7 @@ pub type EntryFn = fn();
 pub static mut CALL_ABI_TABLE: [usize; CallAbiTable::COUNT] = [0; CallAbiTable::COUNT];
 
 #[repr(usize)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, EnumIter)]
 pub enum CallAbiTable {
     Print = 0,
     Sleep = 1,

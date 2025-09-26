@@ -1,8 +1,7 @@
 use abi_sys::{DrawIterAbi, GetKeyAbi, LockDisplay, PrintAbi, RngRequest, SleepAbi};
-use core::{ptr::slice_from_raw_parts, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
-use rand::Rng;
 use shared::keyboard::KeyEvent;
 
 use crate::{
