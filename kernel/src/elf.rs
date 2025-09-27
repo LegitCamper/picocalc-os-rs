@@ -1,7 +1,3 @@
-#![allow(static_mut_refs)]
-
-use core::ptr;
-
 use crate::{
     abi,
     storage::{File, SDCARD},
@@ -9,6 +5,7 @@ use crate::{
 use abi_sys::{CallAbiTable, EntryFn};
 use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
+use core::ptr;
 use embedded_sdmmc::ShortFileName;
 use goblin::{
     elf::{

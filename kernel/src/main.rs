@@ -1,6 +1,4 @@
 #![feature(impl_trait_in_assoc_type)]
-#![feature(type_alias_impl_trait)]
-#![feature(ascii_char)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![allow(static_mut_refs)]
