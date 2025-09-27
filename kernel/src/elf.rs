@@ -44,10 +44,8 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
             let (total_size, min_vaddr, _max_vaddr) =
                 total_loadable_size(&mut file, &elf_header, &mut ph_buf);
 
-            defmt::info!("total_size: {}", total_size);
             let bump = Bump::with_capacity(total_size);
             let base = bump.alloc_slice_fill_default::<u8>(total_size);
-            defmt::info!("base ptr: {}", base.as_ptr());
 
             // load each segment into bump, relative to base_ptr
             for i in 0..elf_header.e_phnum {
@@ -57,7 +55,6 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
                 let ph = cast_phdr(&ph_buf);
 
                 let seg_offset = (ph.p_vaddr - min_vaddr) as usize;
-                defmt::info!("segment offset {}", seg_offset);
                 let mut segment = &mut base[seg_offset..seg_offset + ph.p_memsz as usize];
 
                 if ph.p_type == PT_LOAD {
@@ -83,12 +80,10 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
 
             patch_abi(&elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
 
-            defmt::info!("elf entry point before offset: {}", elf_header.e_entry);
             // entry pointer is base_ptr + (entry - min_vaddr)
             let entry_ptr: EntryFn = unsafe {
                 core::mem::transmute(base.as_ptr().add((elf_header.e_entry - min_vaddr) as usize))
             };
-            defmt::info!("entry ptr: {}", entry_ptr);
 
             Some((entry_ptr, bump))
         })
@@ -156,7 +151,6 @@ fn apply_relocations(
                 }
             }
             _ => {
-                defmt::warn!("Unsupported relocation type: {}", reloc_type);
                 return Err(());
             }
         }
@@ -206,8 +200,6 @@ fn patch_abi(
                     let table_base =
                         unsafe { base.add((sym.st_value as usize) - min_vaddr as usize) }
                             as *mut usize;
-                    defmt::info!("CALL_ABI_TABLE st_value: {:x}", sym.st_value);
-                    defmt::info!("table base {}", table_base);
 
                     for (idx, call) in CallAbiTable::iter().enumerate() {
                         let ptr = match call {
@@ -219,13 +211,6 @@ fn patch_abi(
                             CallAbiTable::GenRand => abi::gen_rand as usize,
                         };
                         unsafe {
-                            defmt::info!(
-                                "table {:?}#{} @ {} -> 0x{:X}",
-                                call,
-                                idx,
-                                table_base.wrapping_add(idx),
-                                ptr
-                            );
                             table_base.add(idx as usize).write(ptr);
                         }
                     }

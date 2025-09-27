@@ -133,7 +133,6 @@ async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
         let (entry, _bump) = recv.receive().await;
-        defmt::info!("Got Entry");
 
         // disable kernel ui
         {
