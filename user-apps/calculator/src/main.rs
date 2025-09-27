@@ -2,7 +2,7 @@
 #![no_main]
 
 extern crate alloc;
-use abi::{KeyCode, display::Display, get_key, lock_display, print};
+use abi::{KeyCode, KeyState, display::Display, get_key, lock_display, print};
 use alloc::{format, string::String, vec, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{
@@ -105,7 +105,8 @@ pub fn main() {
             lock_display(false);
         }
 
-        if let Some(event) = get_key() {
+        let event = get_key();
+        if event.state != KeyState::Idle {
             match event.key {
                 KeyCode::Char(ch) => {
                     input.push(ch);

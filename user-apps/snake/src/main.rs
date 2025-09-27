@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use abi::{
-    KeyCode, Rng,
+    KeyCode, KeyState, Rng,
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
     get_key, lock_display, print, sleep,
 };
@@ -46,7 +46,8 @@ pub fn main() {
     );
 
     loop {
-        if let Some(event) = get_key() {
+        let event = get_key();
+        if event.state != KeyState::Idle {
             let direction = match event.key {
                 KeyCode::Up => Direction::Up,
                 KeyCode::Down => Direction::Down,
@@ -56,7 +57,7 @@ pub fn main() {
                 _ => Direction::None,
             };
             game.set_direction(direction);
-        }
+        };
 
         // ensure all draws show up at once
         lock_display(true);

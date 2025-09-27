@@ -29,62 +29,48 @@ pub enum CallAbiTable {
     GenRand = 5,
 }
 
-pub type PrintAbi = extern "Rust" fn(msg: &str);
+pub type PrintAbi = extern "C" fn(ptr: *const u8, len: usize);
 
 #[allow(unused)]
 pub fn print(msg: &str) {
-    unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::Print as usize];
-        let f: PrintAbi = core::mem::transmute(ptr);
-        f(msg);
-    }
+    let f: PrintAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::Print as usize]) };
+    f(msg.as_ptr(), msg.len());
 }
 
-pub type SleepAbi = extern "Rust" fn(ms: u64);
+pub type SleepAbi = extern "C" fn(ms: u64);
 
 #[allow(unused)]
 pub fn sleep(ms: u64) {
-    unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::Sleep as usize];
-        let f: SleepAbi = core::mem::transmute(ptr);
-        f(ms);
-    }
+    let f: SleepAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::Sleep as usize]) };
+    f(ms);
 }
 
-pub type LockDisplay = extern "Rust" fn(lock: bool);
+pub type LockDisplay = extern "C" fn(lock: bool);
 
 #[allow(unused)]
 pub fn lock_display(lock: bool) {
-    unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::LockDisplay as usize];
-        let f: LockDisplay = core::mem::transmute(ptr);
-        f(lock);
-    }
+    let f: LockDisplay =
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::LockDisplay as usize]) };
+    f(lock);
 }
 
-pub type DrawIterAbi = extern "Rust" fn(pixels: &[Pixel<Rgb565>]);
+pub type DrawIterAbi = extern "C" fn(ptr: *const Pixel<Rgb565>, len: usize);
 
 #[allow(unused)]
 pub fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-    unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::DrawIter as usize];
-        let f: DrawIterAbi = core::mem::transmute(ptr);
-        f(pixels);
-    }
+    let f: DrawIterAbi =
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::DrawIter as usize]) };
+    f(pixels.as_ptr(), pixels.len());
 }
 
-pub type GetKeyAbi = extern "Rust" fn() -> Option<KeyEvent>;
+pub type GetKeyAbi = extern "C" fn() -> KeyEvent;
 
 #[allow(unused)]
-pub fn get_key() -> Option<KeyEvent> {
-    unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::GetKey as usize];
-        let f: GetKeyAbi = core::mem::transmute(ptr);
-        f()
-    }
+pub fn get_key() -> KeyEvent {
+    let f: GetKeyAbi =
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::GetKey as usize]) };
+    f()
 }
-
-pub type GenRand = extern "Rust" fn(req: &mut RngRequest);
 
 #[repr(C)]
 pub enum RngRequest {
@@ -92,6 +78,8 @@ pub enum RngRequest {
     U64(u64),
     Bytes { ptr: *mut u8, len: usize },
 }
+
+pub type GenRand = extern "C" fn(req: &mut RngRequest);
 
 #[allow(unused)]
 pub fn gen_rand(req: &mut RngRequest) {

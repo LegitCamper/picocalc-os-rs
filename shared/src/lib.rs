@@ -14,6 +14,7 @@ pub mod keyboard {
     }
 
     #[derive(Debug)]
+    #[repr(C)]
     pub struct KeyEvent {
         pub key: KeyCode,
         pub state: KeyState,
@@ -22,6 +23,7 @@ pub mod keyboard {
 
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[repr(u8)]
     pub enum KeyState {
         Idle = 0,
         Pressed = 1,
