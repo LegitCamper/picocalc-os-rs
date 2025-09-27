@@ -1,6 +1,8 @@
+binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
+
 kernel:
     cargo run --bin kernel
 calculator:
-    RUSTFLAGS="-C link-arg=--noinhibit-exec" cargo build --bin calculator --profile release-binary
+    {{binary-args}} cargo build --bin calculator --profile release-binary
 snake:
-    RUSTFLAGS="-C link-arg=--noinhibit-exec" cargo build --bin snake --profile release-binary
+     {{binary-args}} cargo build --bin snake --profile release-binary

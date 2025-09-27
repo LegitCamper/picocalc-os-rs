@@ -9,16 +9,17 @@ use embedded_graphics::{
     pixelcolor::{Rgb565, RgbColor},
 };
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
-use strum::EnumIter;
+use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
 #[unsafe(no_mangle)]
-#[unsafe(link_section = ".user_reloc")]
+#[unsafe(link_section = ".syscall_table")]
 pub static mut CALL_ABI_TABLE: [usize; CallAbiTable::COUNT] = [0; CallAbiTable::COUNT];
 
 #[repr(usize)]
-#[derive(Clone, Copy, EnumIter)]
+#[derive(Clone, Copy, EnumIter, EnumCount)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum CallAbiTable {
     Print = 0,
     Sleep = 1,
@@ -26,10 +27,6 @@ pub enum CallAbiTable {
     DrawIter = 3,
     GetKey = 4,
     GenRand = 5,
-}
-
-impl CallAbiTable {
-    pub const COUNT: usize = 6;
 }
 
 pub type PrintAbi = extern "Rust" fn(msg: &str);

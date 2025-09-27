@@ -29,6 +29,7 @@ use crate::{
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
 use abi_sys::EntryFn;
+use bumpalo::Bump;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::{DrawTarget, RgbColor},
@@ -72,7 +73,7 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
-static mut ARENA: [u8; 10 * 1024] = [0; 10 * 1024];
+static mut ARENA: [u8; 200 * 1024] = [0; 200 * 1024];
 
 #[global_allocator]
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
@@ -124,14 +125,14 @@ async fn main(_spawner: Spawner) {
 }
 
 // One-slot channel to pass EntryFn from core1
-static BINARY_CH: Channel<CriticalSectionRawMutex, EntryFn, 1> = Channel::new();
+static BINARY_CH: Channel<CriticalSectionRawMutex, (EntryFn, Bump), 1> = Channel::new();
 
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
-        let entry = recv.receive().await;
+        let (entry, _bump) = recv.receive().await;
         defmt::info!("Got Entry");
 
         // disable kernel ui

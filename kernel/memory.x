@@ -1,10 +1,7 @@
 MEMORY {
     FLASH : ORIGIN = 0x10000000, LENGTH = 4096K
+
     RAM : ORIGIN = 0x20000000, LENGTH = 512K
-
-	/* Reserve a block of RAM for the user app */
-    USERAPP : ORIGIN = 0x20010000, LENGTH = 192K
-
     SRAM4 : ORIGIN = 0x20080000, LENGTH = 4K
     SRAM5 : ORIGIN = 0x20081000, LENGTH = 4K
 }
@@ -61,11 +58,3 @@ SECTIONS {
 
 PROVIDE(start_to_end = __end_block_addr - __start_block_addr);
 PROVIDE(end_to_start = __start_block_addr - __end_block_addr);
-
-SECTIONS {
-	.userapp (NOLOAD) :
-	{
-	    __userapp_start__ = ORIGIN(USERAPP);
-	    __userapp_end__   = ORIGIN(USERAPP) + LENGTH(USERAPP);
-	} > USERAPP
-}

@@ -114,16 +114,15 @@ impl SdCard {
         access(root_dir);
     }
 
-    pub async fn read_file(
+    pub async fn read_file<T>(
         &mut self,
         name: &ShortFileName,
-        mut access: impl FnMut(File),
-    ) -> Result<(), ()> {
+        mut access: impl FnMut(File) -> T,
+    ) -> Result<T, ()> {
         let mut res = Err(());
         self.access_root_dir(|root_dir| {
             if let Ok(file) = root_dir.open_file_in_dir(name, Mode::ReadOnly) {
-                res = Ok(());
-                access(file);
+                res = Ok(access(file));
             }
         });
 

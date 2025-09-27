@@ -45,7 +45,11 @@ pub async fn ui_handler() {
                         let selection =
                             selections.selections[selections.current_selection as usize].clone();
 
-                        let entry = unsafe { load_binary(&selection.short_name).await.unwrap() };
+                        let entry = unsafe {
+                            load_binary(&selection.short_name)
+                                .await
+                                .expect("unable to load binary")
+                        };
                         BINARY_CH.send(entry).await;
                     }
                     _ => (),
