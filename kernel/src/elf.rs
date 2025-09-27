@@ -62,13 +62,8 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
                 }
             }
 
-            let mut sh_buf = vec![0_u8; elf_header.e_shentsize as usize];
-
             for i in 0..elf_header.e_shnum {
-                file.seek_from_start(elf_header.e_shoff + (elf_header.e_shentsize * i) as u32)
-                    .unwrap();
-                file.read(&mut sh_buf).unwrap();
-                let sh = cast_shdr(&sh_buf);
+                let sh = read_section(&mut file, elf_header, i.into());
 
                 match sh.sh_type {
                     SHT_REL => {
@@ -250,13 +245,13 @@ fn total_loadable_size(
 }
 
 fn read_section(file: &mut File, elf_header: &Header, section: u32) -> SectionHeader {
-    let mut section_header_buf = vec![0_u8; elf_header.e_shentsize as usize];
+    let mut sh_buf = vec![0_u8; elf_header.e_shentsize as usize];
 
     file.seek_from_start(elf_header.e_shoff + (elf_header.e_shentsize as u32 * section))
         .unwrap();
-    file.read(&mut section_header_buf).unwrap();
+    file.read(&mut sh_buf).unwrap();
 
-    cast_shdr(&section_header_buf)
+    cast_shdr(&sh_buf)
 }
 
 fn cast_phdr(buf: &[u8]) -> ProgramHeader {
