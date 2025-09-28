@@ -1,4 +1,5 @@
 #![feature(impl_trait_in_assoc_type)]
+#![feature(str_from_raw_parts)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![allow(static_mut_refs)]
@@ -17,6 +18,7 @@ mod usb;
 mod utils;
 
 use crate::{
+    abi::KEY_CACHE,
     display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{
         conf_peripherals,
@@ -57,8 +59,6 @@ use embassy_sync::{
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
-use heapless::spsc::Queue;
-use shared::keyboard::KeyEvent;
 use static_cell::StaticCell;
 use talc::*;
 
@@ -251,22 +251,19 @@ async fn prog_search_handler() {
     loop {
         {
             let mut guard = SDCARD.get().lock().await;
+            let sd = guard.as_mut().unwrap();
 
-            if let Some(sd) = guard.as_mut() {
-                let files = sd.list_files_by_extension(".bin").unwrap();
-                let mut select = SELECTIONS.lock().await;
+            let files = sd.list_files_by_extension(".bin").unwrap();
+            let mut select = SELECTIONS.lock().await;
 
-                if *select.selections() != files {
-                    select.update_selections(files);
-                    select.reset();
-                }
+            if *select.selections() != files {
+                select.update_selections(files);
+                select.reset();
             }
         }
         Timer::after_secs(5).await;
     }
 }
-
-static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
 
 async fn key_handler() {
     loop {

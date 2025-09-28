@@ -22,7 +22,7 @@ type Device = ExclusiveDevice<Spi<'static, SPI0, Blocking>, Output<'static>, emb
 type SD = SdmmcSdCard<Device, Delay>;
 type VolMgr = VolumeManager<SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 type Vol<'a> = Volume<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
-type Dir<'a> = Directory<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
+pub type Dir<'a> = Directory<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 pub type File<'a> = SdFile<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 
 pub static SDCARD: LazyLock<Mutex<CriticalSectionRawMutex, Option<SdCard>>> =

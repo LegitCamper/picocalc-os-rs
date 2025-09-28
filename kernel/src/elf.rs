@@ -195,12 +195,14 @@ fn patch_abi(
 
                     for (idx, call) in CallAbiTable::iter().enumerate() {
                         let ptr = match call {
-                            CallAbiTable::Print => abi::print as usize,
-                            CallAbiTable::Sleep => abi::sleep as usize,
+                            CallAbiTable::PrintString => abi::print as usize,
+                            CallAbiTable::SleepMs => abi::sleep as usize,
                             CallAbiTable::LockDisplay => abi::lock_display as usize,
                             CallAbiTable::DrawIter => abi::draw_iter as usize,
                             CallAbiTable::GetKey => abi::get_key as usize,
                             CallAbiTable::GenRand => abi::gen_rand as usize,
+                            CallAbiTable::ListDir => abi::list_dir as usize,
+                            CallAbiTable::ReadFile => abi::read_file as usize,
                         };
                         unsafe {
                             table_base.add(idx as usize).write(ptr);
