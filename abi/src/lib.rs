@@ -1,7 +1,7 @@
 #![no_std]
 
 use abi_sys::{RngRequest, draw_iter, gen_rand};
-pub use abi_sys::{get_key, lock_display, print, sleep};
+pub use abi_sys::{file_len, get_key, list_dir, lock_display, print, read_file, sleep};
 use rand_core::RngCore;
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use talc::*;

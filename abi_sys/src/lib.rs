@@ -30,6 +30,7 @@ pub enum CallAbiTable {
     GenRand = 5,
     ListDir = 6,
     ReadFile = 7,
+    FileLen = 8,
 }
 
 pub type PrintAbi = extern "C" fn(ptr: *const u8, len: usize);
@@ -95,11 +96,15 @@ pub fn gen_rand(req: &mut RngRequest) {
     }
 }
 
-pub type ListDir =
-    extern "C" fn(str: *const u8, len: usize, files: *mut Option<DirEntry>, file_len: usize);
+pub type ListDir = extern "C" fn(
+    str: *const u8,
+    len: usize,
+    files: *mut Option<DirEntry>,
+    file_len: usize,
+) -> usize;
 
 #[allow(unused)]
-pub fn list_dir(path: &str, files: &mut [Option<DirEntry>]) {
+pub fn list_dir(path: &str, files: &mut [Option<DirEntry>]) -> usize {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallAbiTable::ListDir as usize];
         let f: ListDir = core::mem::transmute(ptr);
@@ -127,5 +132,16 @@ pub fn read_file(file: &str, read_from: usize, buf: &mut [u8]) -> usize {
             buf.as_mut_ptr(),
             buf.len(),
         )
+    }
+}
+
+pub type FileLen = extern "C" fn(str: *const u8, len: usize) -> usize;
+
+#[allow(unused)]
+pub fn file_len(file: &str) -> usize {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::FileLen as usize];
+        let f: FileLen = core::mem::transmute(ptr);
+        f(file.as_ptr(), file.len())
     }
 }

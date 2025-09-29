@@ -1,12 +1,12 @@
 use abi_sys::{
-    DrawIterAbi, GenRand, GetKeyAbi, ListDir, LockDisplay, Modifiers, PrintAbi, ReadFile,
+    DrawIterAbi, FileLen, GenRand, GetKeyAbi, ListDir, LockDisplay, Modifiers, PrintAbi, ReadFile,
     RngRequest, SleepAbi,
 };
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
-use embedded_sdmmc::{DirEntry, ShortFileName};
+use embedded_sdmmc::{DirEntry, LfnBuffer, ShortFileName};
 use heapless::spsc::Queue;
 use shared::keyboard::KeyEvent;
 
@@ -80,25 +80,25 @@ pub extern "C" fn gen_rand(req: &mut RngRequest) {
     }
 }
 
-fn get_dir_entries(dir: &Dir, files: &mut [Option<DirEntry>]) {
-    let mut files = files.iter_mut();
-
+fn get_dir_entries(dir: &Dir, files: &mut [Option<DirEntry>]) -> usize {
+    let mut i = 0;
     dir.iterate_dir(|entry| {
-        if let Some(f) = files.next() {
-            *f = Some(entry.clone())
+        if i < files.len() {
+            files[i] = Some(entry.clone());
+            i += 1;
         }
     })
-    .unwrap()
+    .unwrap();
+    i
 }
 
-fn recurse_dir(dir: &Dir, dirs: &[&str], files: &mut [Option<DirEntry>]) {
+fn recurse_dir(dir: &Dir, dirs: &[&str], files: &mut [Option<DirEntry>]) -> usize {
     if dirs.is_empty() {
-        get_dir_entries(dir, files);
-        return;
+        return get_dir_entries(dir, files);
     }
 
     let dir = dir.open_dir(dirs[0]).unwrap();
-    recurse_dir(&dir, &dirs[1..], files);
+    recurse_dir(&dir, &dirs[1..], files)
 }
 
 const _: ListDir = list_dir;
@@ -107,7 +107,7 @@ pub extern "C" fn list_dir(
     len: usize,
     files: *mut Option<DirEntry>,
     files_len: usize,
-) {
+) -> usize {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let files = unsafe { core::slice::from_raw_parts_mut(files, files_len) };
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
@@ -116,23 +116,35 @@ pub extern "C" fn list_dir(
 
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
+
+    let mut wrote = 0;
     sd.access_root_dir(|root| {
-        if !dir.is_empty() {
-            if dirs[0].is_empty() {
-                get_dir_entries(&root, files);
+        if dirs[0] == "" && dirs.len() >= 2 {
+            if dir == "/" {
+                wrote = get_dir_entries(&root, files);
             } else {
-                recurse_dir(&root, &dirs[1..], files);
+                wrote = recurse_dir(&root, &dirs[1..], files);
             }
         }
     });
+    wrote
 }
 
 fn recurse_file<T>(dir: &Dir, dirs: &[&str], mut access: impl FnMut(&mut File) -> T) -> T {
     if dirs.len() == 1 {
-        let file_name = ShortFileName::create_from_str(dirs[0]).unwrap();
-
+        let mut b = [0_u8; 50];
+        let mut buf = LfnBuffer::new(&mut b);
+        let mut short_name = None;
+        dir.iterate_dir_lfn(&mut buf, |entry, name| {
+            if let Some(name) = name {
+                if name == dirs[0] {
+                    short_name = Some(entry.name.clone());
+                }
+            }
+        })
+        .unwrap();
         let mut file = dir
-            .open_file_in_dir(file_name, embedded_sdmmc::Mode::ReadWriteAppend)
+            .open_file_in_dir(short_name.unwrap(), embedded_sdmmc::Mode::ReadWriteAppend)
             .unwrap();
         return access(&mut file);
     }
@@ -160,15 +172,28 @@ pub extern "C" fn read_file(
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
-        if file[0].is_empty() {
-        } else {
-            sd.access_root_dir(|root| {
-                res = recurse_file(&root, &file[1..], |file| {
-                    file.seek_from_start(start_from as u32).unwrap();
-                    file.read(&mut buf).unwrap()
-                })
+        sd.access_root_dir(|root| {
+            res = recurse_file(&root, &file[1..], |file| {
+                file.seek_from_start(start_from as u32).unwrap();
+                file.read(&mut buf).unwrap()
             });
-        }
+        });
     }
     res
+}
+
+const _: FileLen = file_len;
+pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
+    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
+    let file = unsafe { core::str::from_raw_parts(str, len) };
+    let file: Vec<&str> = file.split('/').collect();
+
+    let mut res = 0;
+
+    let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
+    let sd = guard.as_mut().unwrap();
+    if !file.is_empty() {
+        sd.access_root_dir(|root| res = recurse_file(&root, &file[1..], |file| file.length()));
+    }
+    res as usize
 }

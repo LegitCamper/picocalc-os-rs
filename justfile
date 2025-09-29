@@ -1,8 +1,12 @@
-binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
-
 kernel:
     cargo run --bin kernel
-calculator:
-    {{binary-args}} cargo build --bin calculator --profile release-binary
-snake:
-     {{binary-args}} cargo build --bin snake --profile release-binary
+
+binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
+
+userapp app:
+     {{binary-args}} cargo build --bin {{app}} --profile release-binary
+
+userapps:
+    just userapp calculator
+    just userapp snake
+    just userapp gallery

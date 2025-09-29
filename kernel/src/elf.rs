@@ -203,6 +203,7 @@ fn patch_abi(
                             CallAbiTable::GenRand => abi::gen_rand as usize,
                             CallAbiTable::ListDir => abi::list_dir as usize,
                             CallAbiTable::ReadFile => abi::read_file as usize,
+                            CallAbiTable::FileLen => abi::file_len as usize,
                         };
                         unsafe {
                             table_base.add(idx as usize).write(ptr);
