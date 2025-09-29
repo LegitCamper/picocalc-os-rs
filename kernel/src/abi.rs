@@ -2,7 +2,7 @@ use abi_sys::{
     DrawIterAbi, FileLen, GenRand, GetKeyAbi, ListDir, LockDisplay, Modifiers, PrintAbi, ReadFile,
     RngRequest, SleepAbi,
 };
-use alloc::{format, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
@@ -130,23 +130,30 @@ pub extern "C" fn list_dir(
     wrote
 }
 
-fn recurse_file<T>(dir: &Dir, dirs: &[&str], mut access: impl FnMut(&mut File) -> T) -> T {
+fn recurse_file<T>(
+    dir: &Dir,
+    dirs: &[&str],
+    mut access: impl FnMut(&mut File) -> T,
+) -> Result<T, ()> {
     if dirs.len() == 1 {
         let mut b = [0_u8; 50];
         let mut buf = LfnBuffer::new(&mut b);
         let mut short_name = None;
         dir.iterate_dir_lfn(&mut buf, |entry, name| {
             if let Some(name) = name {
-                if name == dirs[0] {
+                if name == dirs[0] || entry.name.to_string().as_str() == dirs[0] {
                     short_name = Some(entry.name.clone());
                 }
             }
         })
         .unwrap();
-        let mut file = dir
-            .open_file_in_dir(short_name.unwrap(), embedded_sdmmc::Mode::ReadWriteAppend)
-            .unwrap();
-        return access(&mut file);
+        if let Some(name) = short_name {
+            let mut file = dir
+                .open_file_in_dir(name, embedded_sdmmc::Mode::ReadWriteAppend)
+                .map_err(|_| ())?;
+            return Ok(access(&mut file));
+        }
+        return Err(());
     }
 
     let dir = dir.open_dir(dirs[0]).unwrap();
@@ -162,24 +169,26 @@ pub extern "C" fn read_file(
     buf_len: usize,
 ) -> usize {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
-    let mut buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
-    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let file = unsafe { core::str::from_raw_parts(str, len) };
     let file: Vec<&str> = file.split('/').collect();
+    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
+    let mut buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
 
-    let mut res = 0;
+    let mut read = 0;
 
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
         sd.access_root_dir(|root| {
-            res = recurse_file(&root, &file[1..], |file| {
+            if let Ok(result) = recurse_file(&root, &file[1..], |file| {
                 file.seek_from_start(start_from as u32).unwrap();
                 file.read(&mut buf).unwrap()
-            });
+            }) {
+                read = result
+            };
         });
     }
-    res
+    read
 }
 
 const _: FileLen = file_len;
@@ -188,12 +197,16 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
     let file = unsafe { core::str::from_raw_parts(str, len) };
     let file: Vec<&str> = file.split('/').collect();
 
-    let mut res = 0;
+    let mut len = 0;
 
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
-        sd.access_root_dir(|root| res = recurse_file(&root, &file[1..], |file| file.length()));
+        sd.access_root_dir(|root| {
+            if let Ok(result) = recurse_file(&root, &file[1..], |file| file.length()) {
+                len = result
+            }
+        });
     }
-    res as usize
+    len as usize
 }
