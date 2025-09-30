@@ -4,13 +4,16 @@
 
 extern crate alloc;
 use abi::{
-    KeyCode, KeyState, Rng,
+    KeyCode, KeyState,
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    file_len, get_key, list_dir, lock_display, print, read_file, sleep,
+    get_key, list_dir, lock_display, print, read_file,
 };
-use alloc::{format, vec::Vec};
-use core::{cell::RefCell, panic::PanicInfo};
-use embedded_graphics::{Drawable, image::Image, prelude::*};
+use alloc::{format, string::ToString};
+use core::panic::PanicInfo;
+use embedded_graphics::{
+    Drawable, image::Image, mono_font::MonoTextStyle, mono_font::ascii::FONT_6X10,
+    pixelcolor::Rgb565, prelude::*, text::Text,
+};
 use tinybmp::Bmp;
 
 #[panic_handler]
@@ -36,8 +39,8 @@ pub fn main() {
     // Grid parameters
     let grid_cols = 3;
     let grid_rows = 3;
-    let cell_width = 64;
-    let cell_height = 64;
+    let cell_width = SCREEN_WIDTH as i32 / grid_cols;
+    let cell_height = SCREEN_HEIGHT as i32 / grid_rows;
 
     let mut images_drawn = 0;
 
@@ -60,13 +63,30 @@ pub fn main() {
 
                     let row = images_drawn / grid_cols;
                     let col = images_drawn % grid_cols;
-                    let x = (col * cell_width) as i32 + 10; // 10px margin
-                    let y = (row * cell_height) as i32 + 10;
+                    let cell_x = col * cell_width;
+                    let cell_y = row * cell_height;
+
+                    // Center image inside cell
+                    let bmp_w = bmp.size().width as i32;
+                    let bmp_h = bmp.size().height as i32;
+                    let x = cell_x + (cell_width - bmp_w) / 2;
+                    let y = cell_y + 5; // 5px top margin
 
                     lock_display(true);
                     Image::new(&bmp, Point::new(x, y))
                         .draw(&mut display)
                         .unwrap();
+
+                    let text_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+                    let text_y = y + bmp_h + 2; // 2px gap under image
+                    Text::new(
+                        f.name.to_string().as_str(),
+                        Point::new(cell_x + 2, text_y),
+                        text_style,
+                    )
+                    .draw(&mut display)
+                    .unwrap();
+
                     lock_display(false);
 
                     images_drawn += 1;
