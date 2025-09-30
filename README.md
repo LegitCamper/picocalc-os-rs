@@ -11,8 +11,8 @@ Current focus is on **expanding the ABI syscalls** and **fixing the MSC/USB-SCSI
 ## Project Structure
 
 - **`kernel/`** – The core OS kernel (task scheduling, drivers, memory, etc.)
-- **`abi/`** – Shared application binary interface definitions for kernel ↔ userspace interaction
-- **`abi_sys/`** – System-level ABI helpers
+- **`abi_sys/`** – Shared application binary interface definitions for kernel ↔ userspace interaction
+- **`abi/`** – ABI helpers and abstractions for easier development
 - **`shared/`** – Shared utilities and common code across kernel and user applications
 - **`user-apps/`** – Collection of userspace programs (calculator, snake, etc.)
 
