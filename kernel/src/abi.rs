@@ -1,16 +1,17 @@
 use abi_sys::{
-    DrawIterAbi, FileLen, GenRand, GetKeyAbi, ListDir, LockDisplay, Modifiers, PrintAbi, ReadFile,
-    RngRequest, SleepAbi,
+    AUDIO_BUFFER_LEN, AudioBufferReady, DrawIterAbi, FileLen, GenRand, GetKeyAbi, ListDir,
+    LockDisplay, Modifiers, PrintAbi, ReadFile, RngRequest, SendAudioBuffer, SleepAbi,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
-use embedded_sdmmc::{DirEntry, LfnBuffer, ShortFileName};
+use embedded_sdmmc::{DirEntry, LfnBuffer};
 use heapless::spsc::Queue;
 use shared::keyboard::KeyEvent;
 
 use crate::{
+    audio::{AUDIO_BUFFER, AUDIO_BUFFER_READY},
     display::{FB_PAUSED, FRAMEBUFFER},
     storage::{Dir, File, SDCARD},
 };
@@ -181,7 +182,9 @@ pub extern "C" fn read_file(
     if !file.is_empty() {
         sd.access_root_dir(|root| {
             if let Ok(result) = recurse_file(&root, &file[1..], |file| {
-                file.seek_from_start(start_from as u32).unwrap();
+                if file.offset() as usize != start_from {
+                    file.seek_from_start(start_from as u32).unwrap();
+                }
                 file.read(&mut buf).unwrap()
             }) {
                 read = result
@@ -209,4 +212,22 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
         });
     }
     len as usize
+}
+
+const _: AudioBufferReady = audio_buffer_ready;
+pub extern "C" fn audio_buffer_ready() -> bool {
+    AUDIO_BUFFER_READY.load(Ordering::Acquire)
+}
+
+const _: SendAudioBuffer = send_audio_buffer;
+pub extern "C" fn send_audio_buffer(ptr: *const u8, len: usize) {
+    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
+    let buf = unsafe { core::slice::from_raw_parts(ptr, len) };
+
+    while !AUDIO_BUFFER_READY.load(Ordering::Acquire) {}
+
+    if buf.len() == AUDIO_BUFFER_LEN {
+        unsafe { AUDIO_BUFFER.copy_from_slice(buf) };
+        AUDIO_BUFFER_READY.store(false, Ordering::Release)
+    }
 }

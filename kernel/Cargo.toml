@@ -94,3 +94,4 @@ bumpalo = "3.19.0"
 
 shared = { path = "../shared" }
 abi_sys = { path = "../abi_sys" }
+micromath = "2.1.0"

@@ -13,3 +13,4 @@ userapps:
     just userapp calculator
     just userapp snake
     just userapp gallery
+    just userapp wav_player

@@ -204,6 +204,8 @@ fn patch_abi(
                             CallAbiTable::ListDir => abi::list_dir as usize,
                             CallAbiTable::ReadFile => abi::read_file as usize,
                             CallAbiTable::FileLen => abi::file_len as usize,
+                            CallAbiTable::AudioBufferReady => abi::audio_buffer_ready as usize,
+                            CallAbiTable::SendAudioBuffer => abi::send_audio_buffer as usize,
                         };
                         unsafe {
                             table_base.add(idx as usize).write(ptr);

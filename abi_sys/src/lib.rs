@@ -31,6 +31,8 @@ pub enum CallAbiTable {
     ListDir = 6,
     ReadFile = 7,
     FileLen = 8,
+    AudioBufferReady = 9,
+    SendAudioBuffer = 10,
 }
 
 pub type PrintAbi = extern "C" fn(ptr: *const u8, len: usize);
@@ -143,5 +145,29 @@ pub fn file_len(file: &str) -> usize {
         let ptr = CALL_ABI_TABLE[CallAbiTable::FileLen as usize];
         let f: FileLen = core::mem::transmute(ptr);
         f(file.as_ptr(), file.len())
+    }
+}
+
+pub type AudioBufferReady = extern "C" fn() -> bool;
+
+#[allow(unused)]
+pub fn audio_buffer_ready() -> bool {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::AudioBufferReady as usize];
+        let f: AudioBufferReady = core::mem::transmute(ptr);
+        f()
+    }
+}
+
+pub const AUDIO_BUFFER_LEN: usize = 1024;
+
+pub type SendAudioBuffer = extern "C" fn(ptr: *const u8, len: usize);
+
+#[allow(unused)]
+pub fn send_audio_buffer(buf: &[u8; AUDIO_BUFFER_LEN]) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallAbiTable::SendAudioBuffer as usize];
+        let f: SendAudioBuffer = core::mem::transmute(ptr);
+        f(buf.as_ptr(), buf.len())
     }
 }
