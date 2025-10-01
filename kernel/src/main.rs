@@ -49,11 +49,10 @@ use embassy_rp::{
     i2c::{self, I2c},
     multicore::{Stack, spawn_core1},
     peripherals::{
-        DMA_CH0, DMA_CH1, I2C1, PIN_6, PIN_7, PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, PIN_15,
-        PIN_16, PIN_17, PIN_18, PIN_19, PIN_22, PIN_26, PIN_27, PIO0, PIO1, PWM_SLICE5, SPI0, SPI1,
-        USB,
+        DMA_CH0, DMA_CH1, DMA_CH3, I2C1, PIN_6, PIN_7, PIN_10, PIN_11, PIN_12, PIN_13, PIN_14,
+        PIN_15, PIN_16, PIN_17, PIN_18, PIN_19, PIN_22, PIN_26, PIN_27, PIO0, SPI0, SPI1, USB,
     },
-    pio,
+    pio::{self, Common, Pio, StateMachine},
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
@@ -110,9 +109,15 @@ async fn main(_spawner: Spawner) {
         data: p.PIN_14,
         reset: p.PIN_15,
     };
+    let Pio {
+        common, sm0, sm1, ..
+    } = Pio::new(p.PIO0, Irqs);
+
     let audio = Audio {
-        pio_left: p.PIO0,
-        pio_right: p.PIO1,
+        dma: p.DMA_CH3,
+        pio: common,
+        sm0,
+        sm1,
         left: p.PIN_26,
         right: p.PIN_27,
     };
@@ -182,8 +187,10 @@ struct Display {
     reset: Peri<'static, PIN_15>,
 }
 struct Audio {
-    pio_left: Peri<'static, PIO0>,
-    pio_right: Peri<'static, PIO1>,
+    dma: Peri<'static, DMA_CH3>,
+    pio: Common<'static, PIO0>,
+    sm0: StateMachine<'static, PIO0, 0>,
+    sm1: StateMachine<'static, PIO0, 1>,
     left: Peri<'static, PIN_26>,
     right: Peri<'static, PIN_27>,
 }
@@ -250,7 +257,6 @@ async fn kernel_task(
     usb: Peri<'static, USB>,
 ) {
     setup_mcu(mcu).await;
-    Timer::after_millis(250).await;
     setup_display(display, spawner).await;
     setup_sd(sd).await;
 

@@ -41,8 +41,16 @@ pub fn main() {
                 wav.restart().unwrap()
             }
 
-            wav.read(&mut buf).unwrap();
+            let read = wav.read(&mut buf).unwrap();
             send_audio_buffer(&buf);
+        }
+
+        let event = get_key();
+        if event.state != KeyState::Idle {
+            match event.key {
+                KeyCode::Esc => return,
+                _ => (),
+            }
         }
     }
 }
@@ -64,6 +72,7 @@ impl File {
 impl PlatformFile for File {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, PlatformFileError> {
         let read = read_file(&self.file, self.current_pos, buf);
+        self.current_pos += read;
         Ok(read)
     }
 
