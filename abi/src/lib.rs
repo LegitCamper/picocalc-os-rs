@@ -1,9 +1,8 @@
 #![no_std]
 
-use abi_sys::{RngRequest, draw_iter, gen_rand};
-pub use abi_sys::{file_len, list_dir, lock_display, print, read_file, sleep};
+pub use abi_sys::keyboard;
+use abi_sys::{RngRequest, keyboard::KeyEvent};
 use rand_core::RngCore;
-pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use talc::*;
 
 static mut ARENA: [u8; 10000] = [0; 10000];
@@ -13,12 +12,19 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
 
+pub fn print(msg: &str) {
+    abi_sys::print(msg.as_ptr(), msg.len());
+}
+
+pub fn sleep(ms: u64) {
+    abi_sys::sleep(ms);
+}
+
 pub fn get_key() -> KeyEvent {
-    abi_sys::get_key().into()
+    abi_sys::keyboard::get_key().into()
 }
 
 pub mod display {
-    use crate::draw_iter;
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
@@ -31,6 +37,14 @@ pub mod display {
     pub const SCREEN_HEIGHT: usize = 320;
 
     pub type Pixel565 = Pixel<Rgb565>;
+
+    pub fn lock_display(lock: bool) {
+        abi_sys::lock_display(lock);
+    }
+
+    fn draw_iter(pixels: &[Pixel<Rgb565>]) {
+        abi_sys::draw_iter(pixels.as_ptr(), pixels.len())
+    }
 
     pub struct Display;
 
@@ -77,6 +91,10 @@ pub mod display {
     }
 }
 
+fn gen_rand(req: &mut RngRequest) {
+    abi_sys::gen_rand(req);
+}
+
 pub struct Rng;
 
 impl RngCore for Rng {
@@ -103,5 +121,27 @@ impl RngCore for Rng {
             len: dst.len(),
         };
         gen_rand(&mut req);
+    }
+}
+
+pub mod fs {
+    use embedded_sdmmc::DirEntry;
+
+    pub fn read_file(file: &str, read_from: usize, buf: &mut [u8]) -> usize {
+        abi_sys::read_file(
+            file.as_ptr(),
+            file.len(),
+            read_from,
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    }
+
+    pub fn list_dir(path: &str, files: &mut [Option<DirEntry>]) -> usize {
+        abi_sys::list_dir(path.as_ptr(), path.len(), files.as_mut_ptr(), files.len())
+    }
+
+    pub fn file_len(str: &str) -> usize {
+        abi_sys::file_len(str.as_ptr(), str.len())
     }
 }

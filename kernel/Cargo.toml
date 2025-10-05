@@ -18,7 +18,6 @@ trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 defmt = [
   "dep:defmt",
   "shared/defmt",
-  "abi_sys/defmt",
   "panic-probe/print-defmt",
   "embassy-executor/defmt",
   "embassy-time/defmt",

@@ -4,9 +4,11 @@
 
 extern crate alloc;
 use abi::{
-    KeyCode, KeyState,
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    get_key, list_dir, lock_display, print, read_file,
+    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH, lock_display},
+    fs::{list_dir, read_file},
+    get_key,
+    keyboard::{KeyCode, KeyState},
+    print,
 };
 use alloc::{format, string::ToString};
 use core::panic::PanicInfo;

@@ -1,14 +1,13 @@
 use abi_sys::{
-    DrawIterAbi, FileLen, GenRand, GetKeyAbi, ListDir, LockDisplay, Modifiers, PrintAbi, ReadFile,
-    RngRequest, SleepAbi,
+    DrawIterAbi, FileLen, GenRand, ListDir, LockDisplay, PrintAbi, ReadFile, RngRequest, SleepAbi,
+    keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
-use embedded_sdmmc::{DirEntry, LfnBuffer, ShortFileName};
+use embedded_sdmmc::{DirEntry, LfnBuffer};
 use heapless::spsc::Queue;
-use shared::keyboard::{KeyEvent, KeyEventC};
 
 use crate::{
     display::{FB_PAUSED, FRAMEBUFFER},
@@ -58,8 +57,8 @@ pub extern "C" fn get_key() -> KeyEventC {
         event.into()
     } else {
         KeyEvent {
-            key: abi_sys::KeyCode::Unknown(0),
-            state: abi_sys::KeyState::Idle,
+            key: KeyCode::Unknown(0),
+            state: KeyState::Idle,
             mods: Modifiers::empty(),
         }
         .into()

@@ -2,7 +2,12 @@
 #![no_main]
 
 extern crate alloc;
-use abi::{KeyCode, KeyState, display::Display, get_key, lock_display, print};
+use abi::{
+    display::{Display, lock_display},
+    get_key,
+    keyboard::{KeyCode, KeyState},
+    print,
+};
 use alloc::{format, string::String, vec, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{

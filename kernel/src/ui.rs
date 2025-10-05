@@ -5,6 +5,7 @@ use crate::{
     peripherals::keyboard,
     storage::FileName,
 };
+use abi_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -22,7 +23,6 @@ use embedded_layout::{
     prelude::*,
 };
 use embedded_text::TextBox;
-use shared::keyboard::{KeyCode, KeyState};
 
 pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
     Mutex::new(SelectionList::new());
