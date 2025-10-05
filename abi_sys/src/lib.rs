@@ -9,6 +9,7 @@ use embedded_graphics::{
     pixelcolor::{Rgb565, RgbColor},
 };
 use embedded_sdmmc::DirEntry;
+use shared::keyboard::KeyEventC;
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use strum::{EnumCount, EnumIter};
 
@@ -69,10 +70,10 @@ pub fn draw_iter(pixels: &[Pixel<Rgb565>]) {
     f(pixels.as_ptr(), pixels.len());
 }
 
-pub type GetKeyAbi = extern "C" fn() -> KeyEvent;
+pub type GetKeyAbi = extern "C" fn() -> KeyEventC;
 
 #[allow(unused)]
-pub fn get_key() -> KeyEvent {
+pub fn get_key() -> KeyEventC {
     let f: GetKeyAbi =
         unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::GetKey as usize]) };
     f()

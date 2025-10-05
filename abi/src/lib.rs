@@ -1,7 +1,7 @@
 #![no_std]
 
 use abi_sys::{RngRequest, draw_iter, gen_rand};
-pub use abi_sys::{file_len, get_key, list_dir, lock_display, print, read_file, sleep};
+pub use abi_sys::{file_len, list_dir, lock_display, print, read_file, sleep};
 use rand_core::RngCore;
 pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 use talc::*;
@@ -12,6 +12,10 @@ static mut ARENA: [u8; 10000] = [0; 10000];
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
+
+pub fn get_key() -> KeyEvent {
+    abi_sys::get_key().into()
+}
 
 pub mod display {
     use crate::draw_iter;

@@ -8,7 +8,7 @@ use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
 use embedded_sdmmc::{DirEntry, LfnBuffer, ShortFileName};
 use heapless::spsc::Queue;
-use shared::keyboard::KeyEvent;
+use shared::keyboard::{KeyEvent, KeyEventC};
 
 use crate::{
     display::{FB_PAUSED, FRAMEBUFFER},
@@ -53,15 +53,16 @@ pub extern "C" fn draw_iter(pixels: *const Pixel<Rgb565>, len: usize) {
 pub static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
 
 const _: GetKeyAbi = get_key;
-pub extern "C" fn get_key() -> KeyEvent {
+pub extern "C" fn get_key() -> KeyEventC {
     if let Some(event) = unsafe { KEY_CACHE.dequeue() } {
-        event
+        event.into()
     } else {
         KeyEvent {
             key: abi_sys::KeyCode::Unknown(0),
             state: abi_sys::KeyState::Idle,
             mods: Modifiers::empty(),
         }
+        .into()
     }
 }
 

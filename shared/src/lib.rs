@@ -3,6 +3,7 @@
 pub mod keyboard {
     bitflags::bitflags! {
         #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
+        #[repr(C)]
         pub struct Modifiers: u8 {
             const NONE = 0;
             const CTRL = 1;
@@ -13,17 +14,43 @@ pub mod keyboard {
         }
     }
 
-    #[derive(Debug)]
     #[repr(C)]
+    pub struct KeyEventC {
+        pub key: u8,
+        pub state: KeyState,
+        pub mods: Modifiers,
+    }
+
+    impl Into<KeyEvent> for KeyEventC {
+        fn into(self) -> KeyEvent {
+            KeyEvent {
+                key: self.key.into(),
+                state: self.state,
+                mods: self.mods,
+            }
+        }
+    }
+
+    #[derive(Debug)]
     pub struct KeyEvent {
         pub key: KeyCode,
         pub state: KeyState,
         pub mods: Modifiers,
     }
 
+    impl Into<KeyEventC> for KeyEvent {
+        fn into(self) -> KeyEventC {
+            KeyEventC {
+                key: self.key.into(),
+                state: self.state,
+                mods: self.mods,
+            }
+        }
+    }
+
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[repr(u8)]
+    #[repr(C)]
     pub enum KeyState {
         Idle = 0,
         Pressed = 1,
@@ -44,7 +71,6 @@ pub mod keyboard {
 
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[repr(C)]
     #[repr(u8)]
     pub enum KeyCode {
         JoyUp = 0x01,
@@ -89,6 +115,55 @@ pub mod keyboard {
         F10 = 0x90,
         Char(char),
         Unknown(u8),
+    }
+
+    impl Into<u8> for KeyCode {
+        fn into(self) -> u8 {
+            match self {
+                KeyCode::JoyUp => 0x01,
+                KeyCode::JoyDown => 0x02,
+                KeyCode::JoyLeft => 0x03,
+                KeyCode::JoyRight => 0x04,
+                KeyCode::JoyCenter => 0x05,
+                KeyCode::BtnLeft1 => 0x06,
+                KeyCode::BtnRight1 => 0x07,
+                KeyCode::BtnLeft2 => 0x11,
+                KeyCode::BtnRight2 => 0x12,
+                KeyCode::Backspace => 0x08,
+                KeyCode::Tab => 0x09,
+                KeyCode::Enter => 0x0A,
+                KeyCode::ModAlt => 0xA1,
+                KeyCode::ModShiftLeft => 0xA2,
+                KeyCode::ModShiftRight => 0xA3,
+                KeyCode::ModSym => 0xA4,
+                KeyCode::ModCtrl => 0xA5,
+                KeyCode::Esc => 0xB1,
+                KeyCode::Left => 0xB4,
+                KeyCode::Up => 0xB5,
+                KeyCode::Down => 0xB6,
+                KeyCode::Right => 0xB7,
+                KeyCode::Break => 0xD0,
+                KeyCode::Insert => 0xD1,
+                KeyCode::Home => 0xD2,
+                KeyCode::Del => 0xD4,
+                KeyCode::End => 0xD5,
+                KeyCode::PageUp => 0xD6,
+                KeyCode::PageDown => 0xD7,
+                KeyCode::CapsLock => 0xC1,
+                KeyCode::F1 => 0x81,
+                KeyCode::F2 => 0x82,
+                KeyCode::F3 => 0x83,
+                KeyCode::F4 => 0x84,
+                KeyCode::F5 => 0x85,
+                KeyCode::F6 => 0x86,
+                KeyCode::F7 => 0x87,
+                KeyCode::F8 => 0x88,
+                KeyCode::F9 => 0x89,
+                KeyCode::F10 => 0x90,
+                KeyCode::Char(char) => char as u8,
+                KeyCode::Unknown(i) => i,
+            }
+        }
     }
 
     impl From<u8> for KeyCode {
