@@ -20,7 +20,6 @@ dependencies = [
  "embedded-graphics",
  "embedded-sdmmc",
  "rand_core 0.9.3",
- "shared",
  "spin",
  "talc",
 ]
@@ -1469,7 +1468,6 @@ dependencies = [
  "panic-probe",
  "portable-atomic",
  "rand",
- "shared",
  "spin",
  "st7365p-lcd",
  "static_cell",
@@ -2206,15 +2204,6 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest",
  "keccak",
-]
-
-[[package]]
-name = "shared"
-version = "0.1.0"
-dependencies = [
- "abi_sys",
- "bitflags 2.9.4",
- "defmt 0.3.100",
 ]
 
 [[package]]

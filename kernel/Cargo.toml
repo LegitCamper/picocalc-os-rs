@@ -17,7 +17,6 @@ rp235x = ["embassy-rp/rp235xb"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 defmt = [
   "dep:defmt",
-  "shared/defmt",
   "panic-probe/print-defmt",
   "embassy-executor/defmt",
   "embassy-time/defmt",
@@ -91,5 +90,4 @@ goblin = { version = "0.10.1", default-features = false, features = ["elf32"] }
 talc = "4.4.3"
 bumpalo = "3.19.0"
 
-shared = { path = "../shared" }
 abi_sys = { path = "../abi_sys" }
