@@ -25,11 +25,12 @@ pub fn get_key() -> KeyEvent {
 }
 
 pub mod display {
+    use abi_sys::CPixel;
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
         pixelcolor::{Rgb565, RgbColor},
-        prelude::{DrawTarget, Size},
+        prelude::{DrawTarget, IntoStorage, Size},
         primitives::Rectangle,
     };
 
@@ -42,8 +43,27 @@ pub mod display {
         abi_sys::lock_display(lock);
     }
 
+    const BUF_SIZE: usize = 1024; // tune this for performance
+
     fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-        abi_sys::draw_iter(pixels.as_ptr(), pixels.len())
+        let mut cpixels: [CPixel; BUF_SIZE] = [const {
+            CPixel {
+                x: 0,
+                y: 0,
+                color: 0,
+            }
+        }; BUF_SIZE];
+        for (px, cpx) in pixels.iter().zip(cpixels.iter_mut()) {
+            let Pixel(pos, color) = px;
+            let color: u16 = color.into_storage(); // convert Rgb565 -> u16
+            *cpx = CPixel {
+                x: pos.x,
+                y: pos.y,
+                color,
+            };
+        }
+
+        abi_sys::draw_iter(cpixels.as_ptr(), cpixels.len())
     }
 
     pub struct Display;
@@ -68,7 +88,6 @@ pub mod display {
         where
             I: IntoIterator<Item = Pixel<Self::Color>>,
         {
-            const BUF_SIZE: usize = 1024; // tune this for performance
             let mut buf: [Pixel565; BUF_SIZE] = [Pixel(Point::new(0, 0), Rgb565::BLACK); BUF_SIZE];
 
             let mut count = 0;

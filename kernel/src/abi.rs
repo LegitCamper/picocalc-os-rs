@@ -1,6 +1,6 @@
 use abi_sys::{
-    DrawIterAbi, FileLen, GenRand, ListDir, LockDisplay, PrintAbi, ReadFile, RngRequest, SleepAbi,
-    keyboard::*,
+    CPixel, DrawIterAbi, FileLen, GenRand, ListDir, LockDisplay, PrintAbi, ReadFile, RngRequest,
+    SleepAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
@@ -43,10 +43,12 @@ pub extern "C" fn lock_display(lock: bool) {
 
 const _: DrawIterAbi = draw_iter;
 // TODO: maybe return result
-pub extern "C" fn draw_iter(pixels: *const Pixel<Rgb565>, len: usize) {
+pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
-    let pixels = unsafe { core::slice::from_raw_parts(pixels, len) };
-    unsafe { FRAMEBUFFER.draw_iter(pixels.iter().copied()).unwrap() }
+    let cpixels = unsafe { core::slice::from_raw_parts(cpixels, len) };
+
+    let iter = cpixels.iter().copied().map(|c: CPixel| c.into());
+    unsafe { FRAMEBUFFER.draw_iter(iter).unwrap() }
 }
 
 pub static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();

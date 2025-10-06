@@ -1,10 +1,16 @@
 #![no_std]
 
-use embedded_graphics::{Pixel, pixelcolor::Rgb565};
+use embedded_graphics::{
+    Pixel,
+    pixelcolor::Rgb565,
+    prelude::{IntoStorage, Point},
+};
 use embedded_sdmmc::DirEntry;
-use strum::{EnumCount, EnumIter};
+use strum::EnumIter;
 
-#[derive(Clone, Copy, EnumIter, EnumCount)]
+pub const ABI_CALL_TABLE_COUNT: usize = 9;
+
+#[derive(Clone, Copy, EnumIter)]
 #[repr(u8)]
 pub enum CallAbiTable {
     PrintString = 0,
@@ -17,11 +23,12 @@ pub enum CallAbiTable {
     ReadFile = 7,
     FileLen = 8,
 }
+
 pub type EntryFn = fn();
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".syscall_table")]
-pub static mut CALL_ABI_TABLE: [usize; CallAbiTable::COUNT] = [0; CallAbiTable::COUNT];
+pub static mut CALL_ABI_TABLE: [usize; ABI_CALL_TABLE_COUNT] = [0; ABI_CALL_TABLE_COUNT];
 
 pub type PrintAbi = extern "C" fn(ptr: *const u8, len: usize);
 
@@ -50,10 +57,37 @@ pub extern "C" fn lock_display(lock: bool) {
     f(lock);
 }
 
-pub type DrawIterAbi = extern "C" fn(ptr: *const Pixel<Rgb565>, len: usize);
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CPixel {
+    pub x: i32,
+    pub y: i32,
+    pub color: u16,
+}
+
+impl Into<CPixel> for Pixel<Rgb565> {
+    fn into(self) -> CPixel {
+        CPixel {
+            x: self.0.x,
+            y: self.0.y,
+            color: self.1.into_storage(),
+        }
+    }
+}
+
+impl Into<Pixel<Rgb565>> for CPixel {
+    fn into(self) -> Pixel<Rgb565> {
+        let r5 = ((self.color >> 11) & 0x1F) as u8;
+        let g6 = ((self.color >> 5) & 0x3F) as u8;
+        let b5 = (self.color & 0x1F) as u8;
+        Pixel(Point::new(self.x, self.y), Rgb565::new(r5, g6, b5))
+    }
+}
+
+pub type DrawIterAbi = extern "C" fn(ptr: *const CPixel, len: usize);
 
 #[unsafe(no_mangle)]
-pub extern "C" fn draw_iter(ptr: *const Pixel<Rgb565>, len: usize) {
+pub extern "C" fn draw_iter(ptr: *const CPixel, len: usize) {
     let f: DrawIterAbi =
         unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::DrawIter as usize]) };
     f(ptr, len);
