@@ -2,7 +2,7 @@
 
 use embedded_graphics::{
     Pixel,
-    pixelcolor::Rgb565,
+    pixelcolor::{Rgb565, raw::RawU16},
     prelude::{IntoStorage, Point},
 };
 use embedded_sdmmc::DirEntry;
@@ -65,6 +65,16 @@ pub struct CPixel {
     pub color: u16,
 }
 
+impl CPixel {
+    pub fn new() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            color: 0,
+        }
+    }
+}
+
 impl Into<CPixel> for Pixel<Rgb565> {
     fn into(self) -> CPixel {
         CPixel {
@@ -77,10 +87,7 @@ impl Into<CPixel> for Pixel<Rgb565> {
 
 impl Into<Pixel<Rgb565>> for CPixel {
     fn into(self) -> Pixel<Rgb565> {
-        let r5 = ((self.color >> 11) & 0x1F) as u8;
-        let g6 = ((self.color >> 5) & 0x3F) as u8;
-        let b5 = (self.color & 0x1F) as u8;
-        Pixel(Point::new(self.x, self.y), Rgb565::new(r5, g6, b5))
+        Pixel(Point::new(self.x, self.y), RawU16::new(self.color).into())
     }
 }
 

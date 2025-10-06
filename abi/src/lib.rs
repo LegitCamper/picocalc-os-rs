@@ -5,6 +5,8 @@ use abi_sys::{RngRequest, keyboard::KeyEvent};
 use rand_core::RngCore;
 use talc::*;
 
+extern crate alloc;
+
 static mut ARENA: [u8; 10000] = [0; 10000];
 
 #[global_allocator]
@@ -29,8 +31,8 @@ pub mod display {
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
-        pixelcolor::{Rgb565, RgbColor},
-        prelude::{DrawTarget, IntoStorage, Size},
+        pixelcolor::Rgb565,
+        prelude::{DrawTarget, Size},
         primitives::Rectangle,
     };
 
@@ -44,27 +46,6 @@ pub mod display {
     }
 
     const BUF_SIZE: usize = 1024; // tune this for performance
-
-    fn draw_iter(pixels: &[Pixel<Rgb565>]) {
-        let mut cpixels: [CPixel; BUF_SIZE] = [const {
-            CPixel {
-                x: 0,
-                y: 0,
-                color: 0,
-            }
-        }; BUF_SIZE];
-        for (px, cpx) in pixels.iter().zip(cpixels.iter_mut()) {
-            let Pixel(pos, color) = px;
-            let color: u16 = color.into_storage(); // convert Rgb565 -> u16
-            *cpx = CPixel {
-                x: pos.x,
-                y: pos.y,
-                color,
-            };
-        }
-
-        abi_sys::draw_iter(cpixels.as_ptr(), cpixels.len())
-    }
 
     pub struct Display;
 
@@ -88,21 +69,21 @@ pub mod display {
         where
             I: IntoIterator<Item = Pixel<Self::Color>>,
         {
-            let mut buf: [Pixel565; BUF_SIZE] = [Pixel(Point::new(0, 0), Rgb565::BLACK); BUF_SIZE];
+            let mut buf: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
 
             let mut count = 0;
             for p in pixels {
-                buf[count] = p;
+                buf[count] = p.into();
                 count += 1;
 
                 if count == BUF_SIZE {
-                    draw_iter(&buf[..count]);
+                    abi_sys::draw_iter(buf.as_ptr(), count);
                     count = 0;
                 }
             }
 
             if count > 0 {
-                draw_iter(&buf[..count]);
+                abi_sys::draw_iter(buf.as_ptr(), count);
             }
 
             Ok(())

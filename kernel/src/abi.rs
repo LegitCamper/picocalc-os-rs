@@ -5,7 +5,7 @@ use abi_sys::{
 use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
-use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_sdmmc::{DirEntry, LfnBuffer};
 use heapless::spsc::Queue;
 
