@@ -1,10 +1,11 @@
 use abi_sys::{
-    CPixel, DrawIterAbi, FileLen, GenRand, ListDir, LockDisplay, PrintAbi, ReadFile, RngRequest,
-    SleepAbi, keyboard::*,
+    CPixel, DrawIterAbi, FileLen, GenRand, GetMsAbi, ListDir, LockDisplay, PrintAbi, ReadFile,
+    RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
+use embassy_time::Instant;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_sdmmc::{DirEntry, LfnBuffer};
 use heapless::spsc::Queue;
@@ -26,7 +27,7 @@ pub extern "C" fn print(ptr: *const u8, len: usize) {
     }
 }
 
-const _: SleepAbi = sleep;
+const _: SleepMsAbi = sleep;
 pub extern "C" fn sleep(ms: u64) {
     let cycles_per_ms = clk_sys_freq() / 1000;
     let total_cycles = ms * cycles_per_ms as u64;
@@ -34,6 +35,15 @@ pub extern "C" fn sleep(ms: u64) {
     for _ in 0..total_cycles {
         cortex_m::asm::nop();
     }
+}
+
+pub static mut MS_SINCE_LAUNCH: Option<Instant> = None;
+
+const _: GetMsAbi = get_ms;
+pub extern "C" fn get_ms() -> u64 {
+    Instant::now()
+        .duration_since(unsafe { MS_SINCE_LAUNCH.unwrap() })
+        .as_millis()
 }
 
 const _: LockDisplay = lock_display;

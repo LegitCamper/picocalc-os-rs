@@ -8,20 +8,21 @@ use embedded_graphics::{
 use embedded_sdmmc::DirEntry;
 use strum::EnumIter;
 
-pub const ABI_CALL_TABLE_COUNT: usize = 9;
+pub const ABI_CALL_TABLE_COUNT: usize = 10;
 
 #[derive(Clone, Copy, EnumIter)]
 #[repr(u8)]
 pub enum CallAbiTable {
     PrintString = 0,
     SleepMs = 1,
-    LockDisplay = 2,
-    DrawIter = 3,
-    GetKey = 4,
-    GenRand = 5,
-    ListDir = 6,
-    ReadFile = 7,
-    FileLen = 8,
+    GetMs = 2,
+    LockDisplay = 3,
+    DrawIter = 4,
+    GetKey = 5,
+    GenRand = 6,
+    ListDir = 7,
+    ReadFile = 8,
+    FileLen = 9,
 }
 
 pub type EntryFn = fn();
@@ -39,13 +40,21 @@ pub extern "C" fn print(ptr: *const u8, len: usize) {
     f(ptr, len);
 }
 
-pub type SleepAbi = extern "C" fn(ms: u64);
+pub type SleepMsAbi = extern "C" fn(ms: u64);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sleep(ms: u64) {
-    let f: SleepAbi =
+    let f: SleepMsAbi =
         unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::SleepMs as usize]) };
     f(ms);
+}
+
+pub type GetMsAbi = extern "C" fn() -> u64;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_ms() -> u64 {
+    let f: GetMsAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::GetMs as usize]) };
+    f()
 }
 
 pub type LockDisplay = extern "C" fn(lock: bool);

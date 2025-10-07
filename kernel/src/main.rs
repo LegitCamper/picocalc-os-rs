@@ -18,7 +18,7 @@ mod usb;
 mod utils;
 
 use crate::{
-    abi::KEY_CACHE,
+    abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{
         conf_peripherals,
@@ -56,7 +56,7 @@ use embassy_rp::{
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Instant, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
 use static_cell::StaticCell;
@@ -142,6 +142,7 @@ async fn userland_task() {
             MSC_SHUTDOWN.signal(());
         }
 
+        unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
         defmt::info!("Executing Binary");
         entry();
 

@@ -198,6 +198,7 @@ fn patch_abi(
                         let ptr = match call {
                             CallAbiTable::PrintString => abi::print as usize,
                             CallAbiTable::SleepMs => abi::sleep as usize,
+                            CallAbiTable::GetMs => abi::get_ms as usize,
                             CallAbiTable::LockDisplay => abi::lock_display as usize,
                             CallAbiTable::DrawIter => abi::draw_iter as usize,
                             CallAbiTable::GetKey => abi::get_key as usize,
