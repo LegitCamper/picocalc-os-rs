@@ -11,6 +11,7 @@ mod display;
 mod elf;
 mod framebuffer;
 mod peripherals;
+mod psram;
 mod scsi;
 mod storage;
 mod ui;
@@ -24,6 +25,7 @@ use crate::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
     },
+    psram::init_psram,
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},
@@ -47,9 +49,11 @@ use embassy_rp::{
     i2c::{self, I2c},
     multicore::{Stack, spawn_core1},
     peripherals::{
-        DMA_CH0, DMA_CH1, I2C1, PIN_6, PIN_7, PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, PIN_15,
-        PIN_16, PIN_17, PIN_18, PIN_19, PIN_22, SPI0, SPI1, USB,
+        DMA_CH0, DMA_CH1, DMA_CH3, DMA_CH4, I2C1, PIN_2, PIN_3, PIN_6, PIN_7, PIN_10, PIN_11,
+        PIN_12, PIN_13, PIN_14, PIN_15, PIN_16, PIN_17, PIN_18, PIN_19, PIN_20, PIN_21, PIN_22,
+        PIO0, SPI0, SPI1, USB,
     },
+    pio,
     spi::{self, Spi},
     usb as embassy_rp_usb,
 };
@@ -65,6 +69,7 @@ use talc::*;
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
     USBCTRL_IRQ => embassy_rp_usb::InterruptHandler<USB>;
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
 
 static mut CORE1_STACK: Stack<16384> = Stack::new();
@@ -113,13 +118,24 @@ async fn main(_spawner: Spawner) {
         cs: p.PIN_17,
         det: p.PIN_22,
     };
+    let psram = Psram {
+        pio: p.PIO0,
+        sclk: p.PIN_21,
+        mosi: p.PIN_2,
+        miso: p.PIN_3,
+        cs: p.PIN_20,
+        dma1: p.DMA_CH3,
+        dma2: p.DMA_CH4,
+    };
     let mcu = Mcu {
         i2c: p.I2C1,
         clk: p.PIN_7,
         data: p.PIN_6,
     };
     let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(|spawner| unwrap!(spawner.spawn(kernel_task(spawner, display, sd, mcu, p.USB))));
+    executor0.run(|spawner| {
+        unwrap!(spawner.spawn(kernel_task(spawner, display, sd, psram, mcu, p.USB)))
+    });
 }
 
 // One-slot channel to pass EntryFn from core1
@@ -177,6 +193,15 @@ struct Sd {
     cs: Peri<'static, PIN_17>,
     det: Peri<'static, PIN_22>,
 }
+struct Psram {
+    pio: Peri<'static, PIO0>,
+    sclk: Peri<'static, PIN_21>,
+    mosi: Peri<'static, PIN_2>,
+    miso: Peri<'static, PIN_3>,
+    cs: Peri<'static, PIN_20>,
+    dma1: Peri<'static, DMA_CH3>,
+    dma2: Peri<'static, DMA_CH4>,
+}
 struct Mcu {
     i2c: Peri<'static, I2C1>,
     clk: Peri<'static, PIN_7>,
@@ -207,6 +232,19 @@ async fn setup_display(display: Display, spawner: Spawner) {
     spawner.spawn(display_handler(display)).unwrap();
 }
 
+async fn setup_psram(psram: Psram) {
+    let psram = init_psram(
+        psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
+    )
+    .await;
+
+    defmt::info!("psram size: {}", psram.size);
+
+    if psram.size == 0 {
+        defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
+    }
+}
+
 async fn setup_sd(sd: Sd) {
     let mut config = spi::Config::default();
     config.frequency = 400_000;
@@ -227,12 +265,14 @@ async fn kernel_task(
     spawner: Spawner,
     display: Display,
     sd: Sd,
+    psram: Psram,
     mcu: Mcu,
     usb: Peri<'static, USB>,
 ) {
     setup_mcu(mcu).await;
     Timer::after_millis(250).await;
     setup_display(display, spawner).await;
+    setup_psram(psram).await;
     setup_sd(sd).await;
 
     let _usb = embassy_rp_usb::Driver::new(usb, Irqs);

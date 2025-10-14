@@ -3,15 +3,13 @@
 //
 use crate::Irqs;
 use embassy_futures::yield_now;
-use embassy_rp::PeripheralRef;
-use embassy_rp::clocks::clk_peri_freq;
-use embassy_rp::gpio::Drive;
-use embassy_rp::peripherals::{DMA_CH1, DMA_CH2, PIN_2, PIN_3, PIN_20, PIN_21, PIO1};
+use embassy_rp::Peri;
+use embassy_rp::gpio::{Drive, SlewRate};
+use embassy_rp::peripherals::{DMA_CH3, DMA_CH4, PIN_2, PIN_3, PIN_20, PIN_21, PIO0};
 use embassy_rp::pio::program::pio_asm;
 use embassy_rp::pio::{Config, Direction, Pio, ShiftDirection};
+use embassy_rp::pio_programs::clock_divider::calculate_pio_clock_divider;
 use embassy_time::{Duration, Instant, Timer};
-use fixed::FixedU32;
-use fixed::types::extra::U8;
 
 // The physical connections in the picocalc schematic are:
 // LABEL     PICO      ESP-PSRAM64H
@@ -23,28 +21,22 @@ use fixed::types::extra::U8;
 // RAM_IO3 - PIN_5     SIO3     (QPI Mode)
 
 #[allow(unused)]
-const PSRAM_CMD_QUAD_END: u8 = 0xf5;
-#[allow(unused)]
-const PSRAM_CMD_QUAD_ENABLE: u8 = 0x35;
-#[allow(unused)]
 const PSRAM_CMD_READ_ID: u8 = 0x9F;
 const PSRAM_CMD_RSTEN: u8 = 0x66;
 const PSRAM_CMD_RST: u8 = 0x99;
 const PSRAM_CMD_WRITE: u8 = 0x02;
 const PSRAM_CMD_FAST_READ: u8 = 0x0B;
 #[allow(unused)]
-const PSRAM_CMD_QUAD_READ: u8 = 0xEB;
-#[allow(unused)]
-const PSRAM_CMD_QUAD_WRITE: u8 = 0x38;
-#[allow(unused)]
 const PSRAM_CMD_NOOP: u8 = 0xFF;
 #[allow(unused)]
 const PSRAM_KNOWN_GOOD_DIE_PASS: u8 = 0x5d;
 
+const SPEED: u32 = 133_000_000;
+
 pub struct PsRam {
-    sm: embassy_rp::pio::StateMachine<'static, PIO1, 0>,
-    tx_ch: PeripheralRef<'static, DMA_CH1>,
-    rx_ch: PeripheralRef<'static, DMA_CH2>,
+    sm: embassy_rp::pio::StateMachine<'static, PIO0, 0>,
+    tx_ch: Peri<'static, DMA_CH3>,
+    rx_ch: Peri<'static, DMA_CH4>,
     pub size: u32,
 }
 
@@ -177,32 +169,17 @@ impl PsRam {
 }
 
 pub async fn init_psram(
-    pio_1: PIO1,
-    sclk: PIN_21,
-    mosi: PIN_2,
-    miso: PIN_3,
-    cs: PIN_20,
-    dma_ch1: DMA_CH1,
-    dma_ch2: DMA_CH2,
+    pio: Peri<'static, PIO0>,
+    sclk: Peri<'static, PIN_21>,
+    mosi: Peri<'static, PIN_2>,
+    miso: Peri<'static, PIN_3>,
+    cs: Peri<'static, PIN_20>,
+    dma1: Peri<'static, DMA_CH3>,
+    dma2: Peri<'static, DMA_CH4>,
 ) -> PsRam {
-    let mut pio = Pio::new(pio_1, Irqs);
+    let mut pio = Pio::new(pio, Irqs);
 
-    let clock_hz = FixedU32::from_num(embassy_rp::clocks::clk_sys_freq());
-    let max_psram_freq: FixedU32<U8> = FixedU32::from_num(100_000_000);
-
-    let divider = if clock_hz <= max_psram_freq {
-        FixedU32::from_num(1)
-    } else {
-        clock_hz / max_psram_freq
-    };
-    let effective_clock = clock_hz / divider;
-    use embassy_rp::clocks::*;
-    defmt::info!(
-        "pll_sys_freq={} rosc_freq={} xosc_freq={}",
-        pll_sys_freq(),
-        rosc_freq(),
-        xosc_freq()
-    );
+    let divider = calculate_pio_clock_divider(SPEED);
 
     // This pio program was taken from
     // <https://github.com/polpo/rp2040-psram/blob/7786c93ec8d02dbb4f94a2e99645b25fb4abc2db/psram_spi.pio>
@@ -238,6 +215,9 @@ done:
     let mut mosi = pio.common.make_pio_pin(mosi);
     let mut miso = pio.common.make_pio_pin(miso);
 
+    sclk.set_slew_rate(SlewRate::Fast);
+    mosi.set_slew_rate(SlewRate::Fast);
+
     cs.set_drive_strength(Drive::_4mA);
     sclk.set_drive_strength(Drive::_4mA);
     mosi.set_drive_strength(Drive::_4mA);
@@ -255,6 +235,7 @@ done:
     cfg.clock_divider = divider;
 
     let mut sm = pio.sm0;
+    sm.restart();
     sm.set_pin_dirs(Direction::Out, &[&cs, &sclk]);
     sm.set_pin_dirs(Direction::Out, &[&mosi]);
     sm.set_pin_dirs(Direction::In, &[&miso]);
@@ -263,13 +244,10 @@ done:
     sm.set_config(&cfg);
     sm.set_enable(true);
 
-    let dma_ch1 = PeripheralRef::new(dma_ch1);
-    let dma_ch2 = PeripheralRef::new(dma_ch2);
-
     let mut psram = PsRam {
         sm,
-        tx_ch: dma_ch1,
-        rx_ch: dma_ch2,
+        tx_ch: dma1,
+        rx_ch: dma2,
         size: 0,
     };
 
@@ -291,7 +269,9 @@ done:
     let mut got = [0u8; 8];
     psram.read(0, &mut got).await;
     const EXPECT: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7];
-    if got != EXPECT {}
+    if got != EXPECT {
+        defmt::warn!("Got Read error");
+    }
 
     const DEADBEEF: &[u8] = &[0xd, 0xe, 0xa, 0xd, 0xb, 0xe, 0xe, 0xf];
     defmt::info!("testing write of deadbeef at 0");
@@ -304,6 +284,7 @@ done:
             let bad = got[addr];
             if bad != DEADBEEF[addr] {
                 let x = psram.read8(addr as u32).await;
+                defmt::info!("read addr: {}, got: {:X}", addr, x);
             }
         }
     }
@@ -321,6 +302,7 @@ done:
     defmt::info!("PSRAM test complete");
 
     let id = psram.read_id().await;
+    defmt::info!("psram id: {}", id);
     // id: [d, 5d, 53, 15, 49, e3, 7c, 7b]
     // id[0] -- manufacturer id
     // id[1] -- "known good die" status
@@ -341,7 +323,7 @@ done:
 }
 
 #[allow(unused)]
-async fn test_psram(psram: &mut PsRam) -> bool {
+pub async fn test_psram(psram: &mut PsRam) -> bool {
     const REPORT_CHUNK: u32 = 256 * 1024;
     const BLOCK_SIZE: usize = 8;
     let limit = psram.size; //.min(4 * 1024 * 1024);
@@ -400,216 +382,4 @@ async fn test_psram(psram: &mut PsRam) -> bool {
     let reads_took = start.elapsed();
 
     bad_count == 0
-}
-
-// The origin of the code in this file is:
-// <https://github.com/Altaflux/rp2350-psram-test/blob/ae50a819fef96486f6d962a609984cde4b4dd4cc/src/psram.rs#L1>
-// which is MIT/Apache-2 licensed.
-#[unsafe(link_section = ".data")]
-#[inline(never)]
-pub fn detect_psram_qmi(qmi: &embassy_rp::pac::qmi::Qmi) -> u32 {
-    const GPIO_FUNC_XIP_CS1: u8 = 9;
-    const XIP_CS_PIN: usize = 47;
-    embassy_rp::pac::PADS_BANK0.gpio(XIP_CS_PIN).modify(|w| {
-        w.set_iso(true);
-    });
-    embassy_rp::pac::PADS_BANK0.gpio(XIP_CS_PIN).modify(|w| {
-        w.set_ie(true);
-        w.set_od(false);
-    });
-    embassy_rp::pac::IO_BANK0
-        .gpio(XIP_CS_PIN)
-        .ctrl()
-        .write(|w| w.set_funcsel(GPIO_FUNC_XIP_CS1));
-    embassy_rp::pac::PADS_BANK0.gpio(XIP_CS_PIN).modify(|w| {
-        w.set_iso(false);
-    });
-
-    critical_section::with(|_cs| {
-        // Try and read the PSRAM ID via direct_csr.
-        qmi.direct_csr().write(|w| {
-            w.set_clkdiv(30);
-            w.set_en(true);
-        });
-
-        // Need to poll for the cooldown on the last XIP transfer to expire
-        // (via direct-mode BUSY flag) before it is safe to perform the first
-        // direct-mode operation
-        while qmi.direct_csr().read().busy() {
-            // rp235x_hal::arch::nop();
-        }
-
-        // Exit out of QMI in case we've inited already
-        qmi.direct_csr().modify(|w| w.set_assert_cs1n(true));
-
-        // Transmit the command to exit QPI quad mode - read ID as standard SPI
-        // Transmit as quad.
-        qmi.direct_tx().write(|w| {
-            w.set_oe(true);
-            w.set_iwidth(embassy_rp::pac::qmi::vals::Iwidth::Q);
-            w.set_data(PSRAM_CMD_QUAD_END.into());
-        });
-
-        while qmi.direct_csr().read().busy() {
-            // rp235x_hal::arch::nop();
-        }
-
-        let _ = qmi.direct_rx().read();
-
-        qmi.direct_csr().modify(|w| {
-            w.set_assert_cs1n(false);
-        });
-
-        // Read the id
-        qmi.direct_csr().modify(|w| {
-            w.set_assert_cs1n(true);
-        });
-
-        // kgd is "known good die"
-        let mut kgd: u16 = 0;
-        let mut eid: u16 = 0;
-        for i in 0usize..7 {
-            qmi.direct_tx().write(|w| {
-                w.set_data(if i == 0 {
-                    PSRAM_CMD_READ_ID.into()
-                } else {
-                    PSRAM_CMD_NOOP.into()
-                })
-            });
-
-            while !qmi.direct_csr().read().txempty() {
-                // rp235x_hal::arch::nop();
-            }
-
-            while qmi.direct_csr().read().busy() {
-                // rp235x_hal::arch::nop();
-            }
-
-            let value = qmi.direct_rx().read().direct_rx();
-            match i {
-                5 => {
-                    kgd = value;
-                }
-                6 => {
-                    eid = value;
-                }
-                _ => {}
-            }
-        }
-
-        qmi.direct_csr().modify(|w| {
-            w.set_assert_cs1n(false);
-            w.set_en(false);
-        });
-        let mut param_size: u32 = 0;
-        if kgd == PSRAM_KNOWN_GOOD_DIE_PASS as u16 {
-            param_size = 1024 * 1024;
-            let size_id = eid >> 5;
-            if eid == 0x26 || size_id == 2 {
-                param_size *= 8;
-            } else if size_id == 0 {
-                param_size *= 2;
-            } else if size_id == 1 {
-                param_size *= 4;
-            }
-        }
-        param_size
-    })
-}
-
-#[unsafe(link_section = ".data")]
-#[inline(never)]
-pub fn init_psram_qmi(
-    qmi: &embassy_rp::pac::qmi::Qmi,
-    xip: &embassy_rp::pac::xip_ctrl::XipCtrl,
-) -> u32 {
-    let psram_size = detect_psram_qmi(qmi);
-
-    if psram_size == 0 {
-        return 0;
-    }
-
-    // Set PSRAM timing for APS6404
-    //
-    // Using an rxdelay equal to the divisor isn't enough when running the APS6404 close to 133MHz.
-    // So: don't allow running at divisor 1 above 100MHz (because delay of 2 would be too late),
-    // and add an extra 1 to the rxdelay if the divided clock is > 100MHz (i.e. sys clock > 200MHz).
-    const MAX_PSRAM_FREQ: u32 = 133_000_000;
-
-    let clock_hz = clk_peri_freq();
-
-    let mut divisor: u32 = (clock_hz + MAX_PSRAM_FREQ - 1) / MAX_PSRAM_FREQ;
-    if divisor == 1 && clock_hz > 100_000_000 {
-        divisor = 2;
-    }
-    let mut rxdelay: u32 = divisor;
-    if clock_hz / divisor > 100_000_000 {
-        rxdelay += 1;
-    }
-
-    // - Max select must be <= 8us.  The value is given in multiples of 64 system clocks.
-    // - Min deselect must be >= 18ns.  The value is given in system clock cycles - ceil(divisor / 2).
-    let clock_period_fs: u64 = 1_000_000_000_000_000_u64 / u64::from(clock_hz);
-    let max_select: u8 = ((125 * 1_000_000) / clock_period_fs) as u8;
-    let min_deselect: u32 = ((18 * 1_000_000 + (clock_period_fs - 1)) / clock_period_fs
-        - u64::from(divisor + 1) / 2) as u32;
-
-    qmi.direct_csr().write(|w| {
-        w.set_clkdiv(10);
-        w.set_en(true);
-        w.set_auto_cs1n(true);
-    });
-
-    while qmi.direct_csr().read().busy() {
-        // rp235x_hal::arch::nop();
-    }
-
-    qmi.direct_tx().write(|w| {
-        w.set_nopush(true);
-        w.0 = 0x35;
-    });
-
-    while qmi.direct_csr().read().busy() {
-        // rp235x_hal::arch::nop();
-    }
-
-    qmi.mem(1).timing().write(|w| {
-        w.set_cooldown(1);
-        w.set_pagebreak(embassy_rp::pac::qmi::vals::Pagebreak::_1024);
-        w.set_max_select(max_select as u8);
-        w.set_min_deselect(min_deselect as u8);
-        w.set_rxdelay(rxdelay as u8);
-        w.set_clkdiv(divisor as u8);
-    });
-
-    // // Set PSRAM commands and formats
-    qmi.mem(1).rfmt().write(|w| {
-        w.set_prefix_width(embassy_rp::pac::qmi::vals::PrefixWidth::Q);
-        w.set_addr_width(embassy_rp::pac::qmi::vals::AddrWidth::Q);
-        w.set_suffix_width(embassy_rp::pac::qmi::vals::SuffixWidth::Q);
-        w.set_dummy_width(embassy_rp::pac::qmi::vals::DummyWidth::Q);
-        w.set_data_width(embassy_rp::pac::qmi::vals::DataWidth::Q);
-        w.set_prefix_len(embassy_rp::pac::qmi::vals::PrefixLen::_8);
-        w.set_dummy_len(embassy_rp::pac::qmi::vals::DummyLen::_24);
-    });
-
-    qmi.mem(1).rcmd().write(|w| w.0 = 0xEB);
-
-    qmi.mem(1).wfmt().write(|w| {
-        w.set_prefix_width(embassy_rp::pac::qmi::vals::PrefixWidth::Q);
-        w.set_addr_width(embassy_rp::pac::qmi::vals::AddrWidth::Q);
-        w.set_suffix_width(embassy_rp::pac::qmi::vals::SuffixWidth::Q);
-        w.set_dummy_width(embassy_rp::pac::qmi::vals::DummyWidth::Q);
-        w.set_data_width(embassy_rp::pac::qmi::vals::DataWidth::Q);
-        w.set_prefix_len(embassy_rp::pac::qmi::vals::PrefixLen::_8);
-    });
-
-    qmi.mem(1).wcmd().write(|w| w.0 = 0x38);
-
-    // Disable direct mode
-    qmi.direct_csr().write(|w| w.0 = 0);
-
-    // Enable writes to PSRAM
-    xip.ctrl().modify(|w| w.set_writable_m1(true));
-    psram_size
 }
