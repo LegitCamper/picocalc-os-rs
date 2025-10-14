@@ -1,0 +1,9 @@
+[package]
+name = "calculator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+abi = { path = "../../abi" }
+embedded-graphics = "0.8.1"
+embedded-layout = "0.4.2"

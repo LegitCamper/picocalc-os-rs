@@ -6,42 +6,36 @@ use embassy_rp::{
     peripherals::I2C1,
 };
 use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex, channel::Sender, lazy_lock::LazyLock, mutex::Mutex,
+    blocking_mutex::raw::CriticalSectionRawMutex, lazy_lock::LazyLock, mutex::Mutex,
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 
 pub mod keyboard;
-use keyboard::{KeyCode, KeyEvent, KeyState};
 
 use crate::peripherals::keyboard::{configure_keyboard, read_keyboard_fifo};
 
 const MCU_ADDR: u8 = 0x1F;
 
 type I2CBUS = I2c<'static, I2C1, Async>;
-pub static PERIPHERAL_BUS: LazyLock<Mutex<NoopRawMutex, Option<I2CBUS>>> =
+pub static PERIPHERAL_BUS: LazyLock<Mutex<CriticalSectionRawMutex, Option<I2CBUS>>> =
     LazyLock::new(|| Mutex::new(None));
 
 const REG_ID_VER: u8 = 0x01;
 const REG_ID_RST: u8 = 0x08;
 const REG_ID_INT: u8 = 0x03;
 
-#[embassy_executor::task]
-pub async fn peripherals_task(
-    i2c: I2CBUS,
-    mut keyboard_channel: Sender<'static, NoopRawMutex, KeyEvent, 10>,
-) {
+pub async fn conf_peripherals(i2c: I2CBUS) {
     Timer::after(embassy_time::Duration::from_millis(100)).await;
 
     PERIPHERAL_BUS.get().lock().await.replace(i2c);
 
     configure_keyboard(200, 100).await;
-    set_lcd_backlight(255).await;
-    set_key_backlight(0).await;
 
-    loop {
-        Timer::after(Duration::from_millis(200)).await;
-        read_keyboard_fifo(&mut keyboard_channel).await;
-    }
+    // empty keys
+    while read_keyboard_fifo().await.is_some() {}
+
+    // set_lcd_backlight(255).await;
+    set_key_backlight(0).await;
 }
 
 /// return major & minor mcu version
