@@ -22,6 +22,10 @@ pub fn sleep(ms: u64) {
     abi_sys::sleep(ms);
 }
 
+pub fn get_ms() -> u64 {
+    abi_sys::get_ms()
+}
+
 pub fn get_key() -> KeyEvent {
     abi_sys::keyboard::get_key().into()
 }

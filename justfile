@@ -16,3 +16,4 @@ userapps: cbindgen
     just userapp calculator
     just userapp snake
     just userapp gallery
+    just userapp gif
