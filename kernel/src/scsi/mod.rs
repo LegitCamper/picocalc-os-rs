@@ -54,6 +54,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 select(self.handle_cbw(), MSC_SHUTDOWN.wait()).await;
 
                 if MSC_SHUTDOWN.signaled() {
+                    #[cfg(feature = "defmt")]
                     defmt::info!("MSC shutting down");
 
                     if self.temp_sd.is_some() {
@@ -80,6 +81,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         if let Some(sd) = guard.take() {
                             self.temp_sd = Some(sd);
                         } else {
+                            #[cfg(feature = "defmt")]
                             defmt::warn!("Tried to take SDCARD but it was already taken");
                             return;
                         }
@@ -363,6 +365,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
     }
 
     pub async fn send_csw_fail(&mut self, tag: u32) {
+        #[cfg(feature = "defmt")]
         defmt::error!("Command Failed: {}", tag);
         self.send_csw(tag, 0x01, 0).await; // 0x01 = Command Failed
     }

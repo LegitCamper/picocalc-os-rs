@@ -20,9 +20,11 @@ pub extern "C" fn print(ptr: *const u8, len: usize) {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let slice = unsafe { core::slice::from_raw_parts(ptr, len) };
 
-    if let Ok(msg) = core::str::from_utf8(slice) {
-        defmt::info!("print: {}", msg);
+    if let Ok(_msg) = core::str::from_utf8(slice) {
+        #[cfg(feature = "defmt")]
+        defmt::info!("print: {}", _msg);
     } else {
+        #[cfg(feature = "defmt")]
         defmt::warn!("print: <invalid utf8>");
     }
 }
