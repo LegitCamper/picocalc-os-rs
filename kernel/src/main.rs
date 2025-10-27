@@ -10,6 +10,8 @@ mod abi;
 mod display;
 mod elf;
 mod framebuffer;
+#[cfg(feature = "pimoroni2w")]
+mod heap;
 mod peripherals;
 mod psram;
 mod scsi;
@@ -17,6 +19,9 @@ mod storage;
 mod ui;
 mod usb;
 mod utils;
+
+#[cfg(feature = "pimoroni2w")]
+use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
@@ -40,7 +45,6 @@ use embedded_graphics::{
 use {defmt_rtt as _, panic_probe as _};
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use defmt::unwrap;
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::{join::join, select::select};
 use embassy_rp::{
@@ -76,8 +80,10 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
+#[cfg(not(feature = "pimoroni2w"))]
 static mut ARENA: [u8; 200 * 1024] = [0; 200 * 1024];
 
+#[cfg(not(feature = "pimoroni2w"))]
 #[global_allocator]
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
@@ -95,7 +101,7 @@ async fn main(_spawner: Spawner) {
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
-            executor1.run(|spawner| unwrap!(spawner.spawn(userland_task())));
+            executor1.run(|spawner| spawner.spawn(userland_task()).unwrap());
         },
     );
 
@@ -134,7 +140,9 @@ async fn main(_spawner: Spawner) {
     };
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| {
-        unwrap!(spawner.spawn(kernel_task(spawner, display, sd, psram, mcu, p.USB)))
+        spawner
+            .spawn(kernel_task(spawner, display, sd, psram, mcu, p.USB))
+            .unwrap()
     });
 }
 
@@ -159,6 +167,7 @@ async fn userland_task() {
         }
 
         unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
+        #[cfg(feature = "defmt")]
         defmt::info!("Executing Binary");
         entry();
 
@@ -238,10 +247,20 @@ async fn setup_psram(psram: Psram) {
     )
     .await;
 
+    #[cfg(feature = "defmt")]
     defmt::info!("psram size: {}", psram.size);
 
     if psram.size == 0 {
+        #[cfg(feature = "defmt")]
         defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
+    }
+
+    #[cfg(feature = "pimoroni2w")]
+    {
+        let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
+        if psram_qmi_size > 0 {
+            init_qmi_psram_heap(psram_qmi_size);
+        }
     }
 }
 

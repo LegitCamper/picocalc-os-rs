@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
   "kernel",
+  "abi_sys",
   "abi",
   "user-apps/calculator",
   "user-apps/snake",

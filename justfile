@@ -1,7 +1,7 @@
-kernel-dev:
-    cargo run --bin kernel
-kernel-release:
-    cargo build --bin kernel --release 
+kernel-dev board:
+    cargo run --bin kernel --features {{board}}
+kernel-release board:
+    cargo build --bin kernel --release --no-default-features --features {{board}}
     elf2uf2-rs -d target/thumbv8m.main-none-eabihf/release/kernel
 
 binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""

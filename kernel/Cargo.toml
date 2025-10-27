@@ -12,6 +12,7 @@ bench = false
 
 [features]
 default = ["rp235x", "defmt"]
+pimoroni2w = ["rp235x"]
 rp2040 = ["embassy-rp/rp2040"]
 rp235x = ["embassy-rp/rp235xb"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
@@ -89,6 +90,7 @@ spin = "0.10.0"
 num_enum = { version = "0.7.4", default-features = false }
 goblin = { version = "0.10.1", default-features = false, features = ["elf32"] }
 talc = "4.4.3"
+embedded-alloc = "0.6.0"
 bumpalo = "3.19.0"
 
 abi_sys = { path = "../abi_sys" }
