@@ -4,15 +4,15 @@
 extern crate alloc;
 use abi::{
     display::{Display, lock_display},
-    fs::read_file,
+    fs::{file_len, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
     print, sleep,
 };
-use alloc::format;
+use alloc::{format, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{image::ImageDrawable, pixelcolor::Rgb565};
-use tinygif::{Gif, Header};
+use tinygif::Gif;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -33,19 +33,20 @@ pub fn main() {
     print("Starting Gif app");
     let mut display = Display;
 
-    static mut BUF: [u8; 256] = [0_u8; 256];
+    let size = file_len("/gifs/bad_apple.gif");
+    let mut buf = Vec::with_capacity(size);
+    let read = read_file("/gifs/bad_apple.gif", 0, &mut buf);
+    assert!(read == size);
 
-    read_file("/gif/bad_apple.gif", 0, unsafe { &mut BUF[0..6] });
-
-    let gif_header = Header::parse(unsafe { &BUF[0..6] });
-
-    let image = Gif::<Rgb565>::from_slice().unwrap();
+    let gif = Gif::<Rgb565>::from_slice(&buf).unwrap();
 
     loop {
-        for frame in image.frames() {
+        for frame in gif.frames() {
             let start = get_ms();
 
+            lock_display(true);
             frame.draw(&mut display).unwrap();
+            lock_display(false);
 
             sleep(((frame.delay_centis as u64) * 10).saturating_sub(start));
 
@@ -56,9 +57,6 @@ pub fn main() {
                     _ => (),
                 };
             };
-
-            lock_display(true);
-            lock_display(false);
         }
     }
 }

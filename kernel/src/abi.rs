@@ -1,6 +1,6 @@
 use abi_sys::{
-    CPixel, DrawIterAbi, FileLen, GenRand, GetMsAbi, ListDir, LockDisplay, PrintAbi, ReadFile,
-    RngRequest, SleepMsAbi, keyboard::*,
+    AllocAbi, CLayout, CPixel, DeallocAbi, DrawIterAbi, FileLen, GenRand, GetMsAbi, ListDir,
+    LockDisplay, PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::sync::atomic::Ordering;
@@ -14,6 +14,18 @@ use crate::{
     display::{FB_PAUSED, FRAMEBUFFER},
     storage::{Dir, File, SDCARD},
 };
+
+const _: AllocAbi = alloc;
+pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
+    // SAFETY: caller guarantees layout is valid
+    unsafe { alloc::alloc::alloc(layout.into()) }
+}
+
+const _: DeallocAbi = dealloc;
+pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
+    // SAFETY: caller guarantees ptr and layout are valid
+    unsafe { alloc::alloc::dealloc(ptr, layout.into()) };
+}
 
 const _: PrintAbi = print;
 pub extern "C" fn print(ptr: *const u8, len: usize) {

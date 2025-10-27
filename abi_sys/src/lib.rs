@@ -1,42 +1,89 @@
 #![no_std]
 
+#[cfg(feature = "alloc")]
+use core::alloc::Layout;
+
 use embedded_graphics::{
     Pixel,
     pixelcolor::{Rgb565, raw::RawU16},
     prelude::{IntoStorage, Point},
 };
 use embedded_sdmmc::DirEntry;
-use strum::EnumIter;
-
-pub const ABI_CALL_TABLE_COUNT: usize = 10;
-
-#[derive(Clone, Copy, EnumIter)]
-#[repr(u8)]
-pub enum CallAbiTable {
-    PrintString = 0,
-    SleepMs = 1,
-    GetMs = 2,
-    LockDisplay = 3,
-    DrawIter = 4,
-    GetKey = 5,
-    GenRand = 6,
-    ListDir = 7,
-    ReadFile = 8,
-    FileLen = 9,
-}
+use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
+
+pub const ABI_CALL_TABLE_COUNT: usize = 12;
+const _: () = assert!(ABI_CALL_TABLE_COUNT == CallTable::COUNT);
+
+#[derive(Clone, Copy, EnumIter, EnumCount)]
+#[repr(u8)]
+pub enum CallTable {
+    Alloc = 0,
+    Dealloc = 1,
+    PrintString = 2,
+    SleepMs = 3,
+    GetMs = 4,
+    LockDisplay = 5,
+    DrawIter = 6,
+    GetKey = 7,
+    GenRand = 8,
+    ListDir = 9,
+    ReadFile = 10,
+    FileLen = 11,
+}
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".syscall_table")]
 pub static mut CALL_ABI_TABLE: [usize; ABI_CALL_TABLE_COUNT] = [0; ABI_CALL_TABLE_COUNT];
+
+#[cfg(feature = "alloc")]
+#[repr(C)]
+pub struct CLayout {
+    size: usize,
+    alignment: usize,
+}
+
+#[cfg(feature = "alloc")]
+impl Into<Layout> for CLayout {
+    fn into(self) -> Layout {
+        unsafe { Layout::from_size_align_unchecked(self.size, self.alignment) }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<Layout> for CLayout {
+    fn from(value: Layout) -> Self {
+        Self {
+            size: value.size(),
+            alignment: value.align(),
+        }
+    }
+}
+
+pub type AllocAbi = extern "C" fn(layout: CLayout) -> *mut u8;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
+    let f: AllocAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::Alloc as usize]) };
+    f(layout)
+}
+
+pub type DeallocAbi = extern "C" fn(ptr: *mut u8, layout: CLayout);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
+    let f: DeallocAbi =
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::Dealloc as usize]) };
+    f(ptr, layout)
+}
 
 pub type PrintAbi = extern "C" fn(ptr: *const u8, len: usize);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn print(ptr: *const u8, len: usize) {
     let f: PrintAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::PrintString as usize]) };
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::PrintString as usize]) };
     f(ptr, len);
 }
 
@@ -45,7 +92,7 @@ pub type SleepMsAbi = extern "C" fn(ms: u64);
 #[unsafe(no_mangle)]
 pub extern "C" fn sleep(ms: u64) {
     let f: SleepMsAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::SleepMs as usize]) };
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::SleepMs as usize]) };
     f(ms);
 }
 
@@ -53,7 +100,7 @@ pub type GetMsAbi = extern "C" fn() -> u64;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn get_ms() -> u64 {
-    let f: GetMsAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::GetMs as usize]) };
+    let f: GetMsAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::GetMs as usize]) };
     f()
 }
 
@@ -62,7 +109,7 @@ pub type LockDisplay = extern "C" fn(lock: bool);
 #[unsafe(no_mangle)]
 pub extern "C" fn lock_display(lock: bool) {
     let f: LockDisplay =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::LockDisplay as usize]) };
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::LockDisplay as usize]) };
     f(lock);
 }
 
@@ -105,12 +152,12 @@ pub type DrawIterAbi = extern "C" fn(ptr: *const CPixel, len: usize);
 #[unsafe(no_mangle)]
 pub extern "C" fn draw_iter(ptr: *const CPixel, len: usize) {
     let f: DrawIterAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::DrawIter as usize]) };
+        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::DrawIter as usize]) };
     f(ptr, len);
 }
 
 pub mod keyboard {
-    use crate::{CALL_ABI_TABLE, CallAbiTable};
+    use crate::{CALL_ABI_TABLE, CallTable};
 
     bitflags::bitflags! {
         #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
@@ -333,7 +380,7 @@ pub mod keyboard {
     #[unsafe(no_mangle)]
     pub extern "C" fn get_key() -> KeyEventC {
         let f: GetKeyAbi =
-            unsafe { core::mem::transmute(CALL_ABI_TABLE[CallAbiTable::GetKey as usize]) };
+            unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::GetKey as usize]) };
         f()
     }
 }
@@ -350,7 +397,7 @@ pub type GenRand = extern "C" fn(req: &mut RngRequest);
 #[unsafe(no_mangle)]
 pub extern "C" fn gen_rand(req: &mut RngRequest) {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::GenRand as usize];
+        let ptr = CALL_ABI_TABLE[CallTable::GenRand as usize];
         let f: GenRand = core::mem::transmute(ptr);
         f(req)
     }
@@ -371,7 +418,7 @@ pub extern "C" fn list_dir(
     file_len: usize,
 ) -> usize {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::ListDir as usize];
+        let ptr = CALL_ABI_TABLE[CallTable::ListDir as usize];
         let f: ListDir = core::mem::transmute(ptr);
         f(str, len, files, file_len)
     }
@@ -394,7 +441,7 @@ pub extern "C" fn read_file(
     buf_len: usize,
 ) -> usize {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::ReadFile as usize];
+        let ptr = CALL_ABI_TABLE[CallTable::ReadFile as usize];
         let f: ReadFile = core::mem::transmute(ptr);
         f(str, len, read_from, buf, buf_len)
     }
@@ -405,7 +452,7 @@ pub type FileLen = extern "C" fn(str: *const u8, len: usize) -> usize;
 #[unsafe(no_mangle)]
 pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallAbiTable::FileLen as usize];
+        let ptr = CALL_ABI_TABLE[CallTable::FileLen as usize];
         let f: FileLen = core::mem::transmute(ptr);
         f(str, len)
     }

@@ -6,5 +6,5 @@ edition = "2024"
 [dependencies]
 abi = { path = "../../abi" }
 embedded-graphics = "0.8.1"
-embedded-snake = { path = "../../../embedded-snake-rs" }
+embedded-snake = { git = "https://github.com/LegitCamper/embedded-snake-rs" }
 rand = { version = "0.9.0", default-features = false }

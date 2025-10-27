@@ -20,8 +20,6 @@ dependencies = [
  "embedded-graphics",
  "embedded-sdmmc",
  "rand_core 0.9.3",
- "spin 0.10.0",
- "talc",
 ]
 
 [[package]]
@@ -1039,6 +1037,7 @@ dependencies = [
 [[package]]
 name = "embedded-snake"
 version = "0.0.3"
+source = "git+https://github.com/LegitCamper/embedded-snake-rs#3986819c55819283dc5c1e89717d2a2f52e9b161"
 dependencies = [
  "embedded-graphics",
  "rand_core 0.9.3",

@@ -1,18 +1,26 @@
 #![no_std]
 
-pub use abi_sys::keyboard;
-use abi_sys::{RngRequest, keyboard::KeyEvent};
-use rand_core::RngCore;
-use talc::*;
-
 extern crate alloc;
 
-static mut ARENA: [u8; 10000] = [0; 10000];
+pub use abi_sys::keyboard;
+use abi_sys::{RngRequest, alloc, dealloc, keyboard::KeyEvent};
+use core::alloc::{GlobalAlloc, Layout};
+use rand_core::RngCore;
 
 #[global_allocator]
-static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
-    Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
-        .lock();
+static ALLOC: Alloc = Alloc;
+
+struct Alloc;
+
+unsafe impl GlobalAlloc for Alloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        alloc(layout.into())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        dealloc(ptr, layout.into());
+    }
+}
 
 pub fn print(msg: &str) {
     abi_sys::print(msg.as_ptr(), msg.len());

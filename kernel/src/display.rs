@@ -21,7 +21,7 @@ type DISPLAY = ST7365P<
 pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
 
-pub static mut FRAMEBUFFER: AtomicFrameBuffer = AtomicFrameBuffer::new();
+pub static mut FRAMEBUFFER: AtomicFrameBuffer = AtomicFrameBuffer;
 pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub async fn init_display(

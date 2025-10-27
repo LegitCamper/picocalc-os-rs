@@ -2,7 +2,7 @@ use crate::{
     abi,
     storage::{File, SDCARD},
 };
-use abi_sys::CallAbiTable;
+use abi_sys::CallTable;
 use abi_sys::EntryFn;
 use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
@@ -194,18 +194,20 @@ fn patch_abi(
                         unsafe { base.add((sym.st_value as usize) - min_vaddr as usize) }
                             as *mut usize;
 
-                    for (idx, call) in CallAbiTable::iter().enumerate() {
+                    for (idx, call) in CallTable::iter().enumerate() {
                         let ptr = match call {
-                            CallAbiTable::PrintString => abi::print as usize,
-                            CallAbiTable::SleepMs => abi::sleep as usize,
-                            CallAbiTable::GetMs => abi::get_ms as usize,
-                            CallAbiTable::LockDisplay => abi::lock_display as usize,
-                            CallAbiTable::DrawIter => abi::draw_iter as usize,
-                            CallAbiTable::GetKey => abi::get_key as usize,
-                            CallAbiTable::GenRand => abi::gen_rand as usize,
-                            CallAbiTable::ListDir => abi::list_dir as usize,
-                            CallAbiTable::ReadFile => abi::read_file as usize,
-                            CallAbiTable::FileLen => abi::file_len as usize,
+                            CallTable::Alloc => abi::alloc as usize,
+                            CallTable::Dealloc => abi::dealloc as usize,
+                            CallTable::PrintString => abi::print as usize,
+                            CallTable::SleepMs => abi::sleep as usize,
+                            CallTable::GetMs => abi::get_ms as usize,
+                            CallTable::LockDisplay => abi::lock_display as usize,
+                            CallTable::DrawIter => abi::draw_iter as usize,
+                            CallTable::GetKey => abi::get_key as usize,
+                            CallTable::GenRand => abi::gen_rand as usize,
+                            CallTable::ListDir => abi::list_dir as usize,
+                            CallTable::ReadFile => abi::read_file as usize,
+                            CallTable::FileLen => abi::file_len as usize,
                         };
                         unsafe {
                             table_base.add(idx as usize).write(ptr);

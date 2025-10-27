@@ -241,19 +241,21 @@ async fn setup_display(display: Display, spawner: Spawner) {
     spawner.spawn(display_handler(display)).unwrap();
 }
 
+// psram is kind of useless on the pico calc
+// ive opted to use the pimoroni with on onboard xip psram instead
 async fn setup_psram(psram: Psram) {
-    let psram = init_psram(
-        psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
-    )
-    .await;
+    // let psram = init_psram(
+    //     psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
+    // )
+    // .await;
 
-    #[cfg(feature = "defmt")]
-    defmt::info!("psram size: {}", psram.size);
+    // #[cfg(feature = "defmt")]
+    // defmt::info!("psram size: {}", psram.size);
 
-    if psram.size == 0 {
-        #[cfg(feature = "defmt")]
-        defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
-    }
+    // if psram.size == 0 {
+    //     #[cfg(feature = "defmt")]
+    //     defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
+    // }
 
     #[cfg(feature = "pimoroni2w")]
     {
@@ -291,6 +293,7 @@ async fn kernel_task(
     setup_mcu(mcu).await;
     Timer::after_millis(250).await;
     setup_display(display, spawner).await;
+    #[cfg(feature = "pimoroni2w")]
     setup_psram(psram).await;
     setup_sd(sd).await;
 
