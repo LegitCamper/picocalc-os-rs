@@ -38,10 +38,6 @@ static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLo
 pub struct AtomicFrameBuffer;
 
 impl AtomicFrameBuffer {
-    pub const fn new() -> Self {
-        Self
-    }
-
     fn mark_tiles_dirty(&mut self, rect: Rectangle) {
         let tiles_x = (SCREEN_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
         let start_tx = (rect.top_left.x as usize) / TILE_SIZE;
@@ -55,12 +51,6 @@ impl AtomicFrameBuffer {
                 unsafe { DIRTY_TILES.get_mut()[tile_idx].store(true, Ordering::Relaxed) };
             }
         }
-    }
-
-    fn set_pixel(&mut self, x: u16, y: u16, color: u16) -> Result<(), ()> {
-        unsafe { BUFFER[(y as usize * SCREEN_WIDTH) + x as usize] = color };
-
-        Ok(())
     }
 
     fn set_pixels_buffered<P: IntoIterator<Item = u16>>(
@@ -262,6 +252,7 @@ impl DrawTarget for AtomicFrameBuffer {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         let mut dirty_rect: Option<Rectangle> = None;
+        let mut changed = false;
 
         for Pixel(coord, color) in pixels {
             if coord.x >= 0 && coord.y >= 0 {
@@ -269,10 +260,14 @@ impl DrawTarget for AtomicFrameBuffer {
                 let y = coord.y as i32;
 
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
+                    let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
+                    let raw_color = RawU16::from(color).into_inner();
                     unsafe {
-                        BUFFER[(y as usize) * SCREEN_WIDTH + (x as usize)] =
-                            RawU16::from(color).into_inner()
-                    };
+                        if BUFFER[idx] != raw_color {
+                            BUFFER[idx] = raw_color;
+                            changed = true;
+                        }
+                    }
 
                     if let Some(ref mut rect) = dirty_rect {
                         rect.top_left.x = rect.top_left.x.min(x);
@@ -288,8 +283,10 @@ impl DrawTarget for AtomicFrameBuffer {
             }
         }
 
-        if let Some(rect) = dirty_rect {
-            self.mark_tiles_dirty(rect);
+        if changed {
+            if let Some(rect) = dirty_rect {
+                self.mark_tiles_dirty(rect);
+            }
         }
 
         Ok(())
@@ -307,6 +304,7 @@ impl DrawTarget for AtomicFrameBuffer {
             let area_width = area.size.width;
             let area_height = area.size.height;
             let mut colors = colors.into_iter();
+            let mut changed = false;
 
             for y in 0..area_height {
                 for x in 0..area_width {
@@ -314,11 +312,14 @@ impl DrawTarget for AtomicFrameBuffer {
 
                     if drawable_area.contains(p) {
                         if let Some(color) = colors.next() {
-                            self.set_pixel(
-                                p.x as u16,
-                                p.y as u16,
-                                RawU16::from(color).into_inner(),
-                            )?;
+                            let idx = (p.y as usize * SCREEN_WIDTH) + (p.x as usize);
+                            let raw_color = RawU16::from(color).into_inner();
+                            unsafe {
+                                if BUFFER[idx] != raw_color {
+                                    BUFFER[idx] = raw_color;
+                                    changed = true;
+                                }
+                            }
                         } else {
                             break;
                         }
@@ -329,7 +330,9 @@ impl DrawTarget for AtomicFrameBuffer {
                 }
             }
 
-            self.mark_tiles_dirty(*area);
+            if changed {
+                self.mark_tiles_dirty(*area);
+            }
         }
 
         Ok(())
