@@ -1,4 +1,4 @@
-use crate::framebuffer::{self, AtomicFrameBuffer};
+use crate::framebuffer::{self, AtomicFrameBuffer, FB_PAUSED};
 use alloc::vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_rp::{
@@ -53,7 +53,9 @@ pub async fn init_display(
 #[embassy_executor::task]
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
-        unsafe { FRAMEBUFFER.safe_draw(&mut display).await.unwrap() };
+        if !FB_PAUSED.load(Ordering::Acquire) {
+            unsafe { FRAMEBUFFER.safe_draw(&mut display).await.unwrap() };
+        }
 
         // small yield to allow other tasks to run
         Timer::after_nanos(100).await;
