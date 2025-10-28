@@ -65,10 +65,10 @@ pub mod display {
         abi_sys::lock_display(lock);
     }
 
-    // const BUF_SIZE: usize = 15 * 1024; // tune this for performance
-    // static mut BUF: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
-    const BUF_SIZE: usize = 250 * 1024; // tune this for performance
-    static mut BUF: Lazy<Vec<CPixel>> = Lazy::new(|| vec![const { CPixel::new() }; BUF_SIZE]);
+    const BUF_SIZE: usize = 15 * 1024; // tune this for performance
+    static mut BUF: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
+    // const BUF_SIZE: usize = 250 * 1024; // tune this for performance
+    // static mut BUF: Lazy<Vec<CPixel>> = Lazy::new(|| vec![const { CPixel::new() }; BUF_SIZE]);
 
     pub struct Display;
 
@@ -97,7 +97,7 @@ pub mod display {
                 unsafe { BUF[count] = p.into() };
                 count += 1;
 
-                if count == BUF_SIZE {
+                if count == BUF_SIZE - 1 {
                     abi_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
                     count = 0;
                 }

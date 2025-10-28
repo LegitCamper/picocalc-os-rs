@@ -18,10 +18,12 @@ pub const TILE_SIZE: usize = 16; // 16x16 tile
 pub const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE_SIZE); // 400 tiles
 
 // Group of tiles for batching
-pub const MAX_META_TILES: usize = SCREEN_WIDTH / TILE_SIZE; // max number of meta tiles in buffer
+pub const MAX_META_TILES: usize = (SCREEN_WIDTH / TILE_SIZE) * 2; // max number of meta tiles in buffer
 type MetaTileVec = heapless::Vec<Rectangle, { TILE_COUNT / MAX_META_TILES }>;
 
 pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
+
+pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 
 static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
     let mut tiles = heapless::Vec::new();
@@ -50,7 +52,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         for ty in start_ty..=end_ty {
             for tx in start_tx..=end_tx {
                 let tile_idx = ty * tiles_x + tx;
-                unsafe { DIRTY_TILES.get_mut()[tile_idx].store(true, Ordering::Relaxed) };
+                unsafe { DIRTY_TILES.get_mut()[tile_idx].store(true, Ordering::Release) };
             }
         }
     }
@@ -111,7 +113,7 @@ impl<'a> AtomicFrameBuffer<'a> {
                 // Grow horizontally, but keep under MAX_TILES_PER_METATILE
                 while tx + width_tiles < tiles_x
                     && unsafe {
-                        DIRTY_TILES.get()[ty * tiles_x + tx + width_tiles].load(Ordering::Relaxed)
+                        DIRTY_TILES.get()[ty * tiles_x + tx + width_tiles].load(Ordering::Acquire)
                     }
                     && (width_tiles + height_tiles) <= MAX_META_TILES
                 {
@@ -172,6 +174,57 @@ impl<'a> AtomicFrameBuffer<'a> {
                 tile.store(false, Ordering::Release);
             }
         };
+
+        Ok(())
+    }
+
+    pub async fn safe_draw<SPI, DC, RST, DELAY>(
+        &mut self,
+        display: &mut ST7365P<SPI, DC, RST, DELAY>,
+    ) -> Result<(), ()>
+    where
+        SPI: SpiDevice,
+        DC: OutputPin,
+        RST: OutputPin,
+        DELAY: DelayNs,
+    {
+        let tiles_x = SCREEN_WIDTH / TILE_SIZE;
+        let _tiles_y = SCREEN_HEIGHT / TILE_SIZE;
+
+        let tiles = unsafe { DIRTY_TILES.get_mut() };
+        let mut pixel_buffer: heapless::Vec<u16, { TILE_SIZE * TILE_SIZE }> = heapless::Vec::new();
+
+        for tile_idx in 0..TILE_COUNT {
+            if tiles[tile_idx].swap(false, Ordering::AcqRel) {
+                let tx = tile_idx % tiles_x;
+                let ty = tile_idx / tiles_x;
+
+                let x_start = tx * TILE_SIZE;
+                let y_start = ty * TILE_SIZE;
+
+                let x_end = (x_start + TILE_SIZE).min(SCREEN_WIDTH);
+                let y_end = (y_start + TILE_SIZE).min(SCREEN_HEIGHT);
+
+                pixel_buffer.clear();
+
+                for y in y_start..y_end {
+                    let start = y * SCREEN_WIDTH + x_start;
+                    let end = y * SCREEN_WIDTH + x_end;
+                    pixel_buffer.extend_from_slice(&self.0[start..end]).unwrap();
+                }
+
+                display
+                    .set_pixels_buffered(
+                        x_start as u16,
+                        y_start as u16,
+                        (x_end - 1) as u16,
+                        (y_end - 1) as u16,
+                        &pixel_buffer,
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
 
         Ok(())
     }

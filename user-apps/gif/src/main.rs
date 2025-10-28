@@ -42,9 +42,9 @@ pub fn main() {
         for frame in gif.frames() {
             let start = get_ms();
 
-            lock_display(true);
+            // lock_display(true);
             frame.draw(&mut display).unwrap();
-            lock_display(false);
+            // lock_display(false);
 
             // frame_num += 1;
 

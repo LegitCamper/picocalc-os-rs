@@ -11,7 +11,8 @@ use embedded_sdmmc::{DirEntry, LfnBuffer};
 use heapless::spsc::Queue;
 
 use crate::{
-    display::{FB_PAUSED, FRAMEBUFFER},
+    display::FRAMEBUFFER,
+    framebuffer::FB_PAUSED,
     storage::{Dir, File, SDCARD},
 };
 
@@ -74,7 +75,7 @@ pub extern "C" fn get_ms() -> u64 {
 
 const _: LockDisplay = lock_display;
 pub extern "C" fn lock_display(lock: bool) {
-    FB_PAUSED.store(lock, Ordering::Relaxed);
+    FB_PAUSED.store(lock, Ordering::Release);
 }
 
 const _: DrawIterAbi = draw_iter;
@@ -83,7 +84,10 @@ pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
     let cpixels = unsafe { core::slice::from_raw_parts(cpixels, len) };
 
     let iter = cpixels.iter().copied().map(|c: CPixel| c.into());
+
+    FB_PAUSED.store(true, Ordering::Release);
     unsafe { FRAMEBUFFER.draw_iter(iter).unwrap() }
+    FB_PAUSED.store(false, Ordering::Release);
 }
 
 pub static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();

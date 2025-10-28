@@ -26,7 +26,6 @@ pub static mut FRAMEBUFFER: Lazy<AtomicFrameBuffer> = Lazy::new(|| {
     static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
     AtomicFrameBuffer::new(unsafe { &mut BUF })
 });
-pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub async fn init_display(
     spi: Spi<'static, SPI1, Async>,
@@ -54,9 +53,7 @@ pub async fn init_display(
 #[embassy_executor::task]
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
-        if !FB_PAUSED.load(Ordering::Acquire) {
-            unsafe { FRAMEBUFFER.partial_draw(&mut display).await.unwrap() }
-        }
+        unsafe { FRAMEBUFFER.safe_draw(&mut display).await.unwrap() };
 
         // small yield to allow other tasks to run
         Timer::after_nanos(100).await;
