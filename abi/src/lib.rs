@@ -61,10 +61,6 @@ pub mod display {
 
     pub type Pixel565 = Pixel<Rgb565>;
 
-    pub fn lock_display(lock: bool) {
-        abi_sys::lock_display(lock);
-    }
-
     const BUF_SIZE: usize = 15 * 1024; // tune this for performance
     static mut BUF: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
     // const BUF_SIZE: usize = 250 * 1024; // tune this for performance

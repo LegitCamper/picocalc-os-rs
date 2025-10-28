@@ -13,7 +13,7 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const ABI_CALL_TABLE_COUNT: usize = 12;
+pub const ABI_CALL_TABLE_COUNT: usize = 11;
 const _: () = assert!(ABI_CALL_TABLE_COUNT == CallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
@@ -24,13 +24,12 @@ pub enum CallTable {
     PrintString = 2,
     SleepMs = 3,
     GetMs = 4,
-    LockDisplay = 5,
-    DrawIter = 6,
-    GetKey = 7,
-    GenRand = 8,
-    ListDir = 9,
-    ReadFile = 10,
-    FileLen = 11,
+    DrawIter = 5,
+    GetKey = 6,
+    GenRand = 7,
+    ListDir = 8,
+    ReadFile = 9,
+    FileLen = 10,
 }
 
 #[unsafe(no_mangle)]
@@ -102,15 +101,6 @@ pub type GetMsAbi = extern "C" fn() -> u64;
 pub extern "C" fn get_ms() -> u64 {
     let f: GetMsAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::GetMs as usize]) };
     f()
-}
-
-pub type LockDisplay = extern "C" fn(lock: bool);
-
-#[unsafe(no_mangle)]
-pub extern "C" fn lock_display(lock: bool) {
-    let f: LockDisplay =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::LockDisplay as usize]) };
-    f(lock);
 }
 
 #[repr(C)]

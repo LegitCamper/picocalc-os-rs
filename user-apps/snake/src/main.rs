@@ -4,7 +4,7 @@
 extern crate alloc;
 use abi::{
     Rng,
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH, lock_display},
+    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
     get_key,
     keyboard::{KeyCode, KeyState},
     print, sleep,
@@ -57,10 +57,8 @@ pub fn main() {
         };
 
         // ensure all draws show up at once
-        lock_display(true);
         game.pre_draw(&mut display);
         game.draw(&mut display);
-        lock_display(false);
 
         sleep(15);
     }

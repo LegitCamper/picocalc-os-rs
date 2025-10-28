@@ -1,6 +1,6 @@
 use abi_sys::{
     AllocAbi, CLayout, CPixel, DeallocAbi, DrawIterAbi, FileLen, GenRand, GetMsAbi, ListDir,
-    LockDisplay, PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
+    PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::{alloc::GlobalAlloc, sync::atomic::Ordering};
@@ -71,11 +71,6 @@ pub extern "C" fn get_ms() -> u64 {
     Instant::now()
         .duration_since(unsafe { MS_SINCE_LAUNCH.unwrap() })
         .as_millis()
-}
-
-const _: LockDisplay = lock_display;
-pub extern "C" fn lock_display(lock: bool) {
-    FB_PAUSED.store(lock, Ordering::Release);
 }
 
 const _: DrawIterAbi = draw_iter;

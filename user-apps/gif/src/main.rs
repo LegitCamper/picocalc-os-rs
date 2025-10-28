@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use abi::{
-    display::{Display, lock_display},
+    display::Display,
     fs::{file_len, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
@@ -37,28 +37,24 @@ pub fn main() {
 
     let gif = Gif::<Rgb565>::from_slice(&buf).unwrap();
 
-    // let mut frame_num = 0;
+    let mut frame_num = 0;
     loop {
         for frame in gif.frames() {
             let start = get_ms();
 
-            // lock_display(true);
             frame.draw(&mut display).unwrap();
-            // lock_display(false);
+            frame_num += 1;
 
-            // frame_num += 1;
-
+            if frame_num % 100 == 0 {
+                let event = get_key();
+                if event.state != KeyState::Idle {
+                    match event.key {
+                        KeyCode::Esc => return,
+                        _ => (),
+                    };
+                };
+            }
             sleep(((frame.delay_centis as u64) * 10).saturating_sub(start));
-
-            // if frame_num % 100 == 0 {
-            //     let event = get_key();
-            //     if event.state != KeyState::Idle {
-            //         match event.key {
-            //             KeyCode::Esc => return,
-            //             _ => (),
-            //         };
-            //     };
-            // }
         }
     }
 }

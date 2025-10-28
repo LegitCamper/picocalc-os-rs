@@ -201,7 +201,6 @@ fn patch_abi(
                             CallTable::PrintString => abi::print as usize,
                             CallTable::SleepMs => abi::sleep as usize,
                             CallTable::GetMs => abi::get_ms as usize,
-                            CallTable::LockDisplay => abi::lock_display as usize,
                             CallTable::DrawIter => abi::draw_iter as usize,
                             CallTable::GetKey => abi::get_key as usize,
                             CallTable::GenRand => abi::gen_rand as usize,

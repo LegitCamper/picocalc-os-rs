@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use abi::{
-    display::{Display, lock_display},
+    display::Display,
     get_key,
     keyboard::{KeyCode, KeyState},
     print,
@@ -58,8 +58,6 @@ pub fn main() {
 
     loop {
         if dirty {
-            lock_display(true);
-
             let style = PrimitiveStyle::with_fill(Rgb565::BLACK);
             if let Some(area) = last_area {
                 Rectangle::new(area.0.top_left, area.0.size)
@@ -103,7 +101,6 @@ pub fn main() {
             eq_layout.draw(&mut display).unwrap();
 
             dirty = false;
-            lock_display(false);
         }
 
         let event = get_key();

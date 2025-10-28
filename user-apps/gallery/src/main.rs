@@ -4,7 +4,7 @@
 
 extern crate alloc;
 use abi::{
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH, lock_display},
+    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
     fs::{list_dir, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
@@ -70,7 +70,6 @@ pub fn main() {
                     let x = cell_x + (cell_width - bmp_w) / 2;
                     let y = cell_y + 5; // 5px top margin
 
-                    lock_display(true);
                     Image::new(&bmp, Point::new(x, y))
                         .draw(&mut display)
                         .unwrap();
@@ -84,8 +83,6 @@ pub fn main() {
                     )
                     .draw(&mut display)
                     .unwrap();
-
-                    lock_display(false);
 
                     images_drawn += 1;
                 }
