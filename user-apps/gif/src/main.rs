@@ -37,7 +37,7 @@ pub fn main() {
 
     let gif = Gif::<Rgb565>::from_slice(&buf).unwrap();
 
-    let mut frame_num = 0;
+    // let mut frame_num = 0;
     loop {
         for frame in gif.frames() {
             let start = get_ms();
@@ -46,18 +46,19 @@ pub fn main() {
             frame.draw(&mut display).unwrap();
             lock_display(false);
 
-            frame_num += 1;
-            print!("drew {}", frame_num);
+            // frame_num += 1;
 
             sleep(((frame.delay_centis as u64) * 10).saturating_sub(start));
 
-            let event = get_key();
-            if event.state != KeyState::Idle {
-                match event.key {
-                    KeyCode::Esc => return,
-                    _ => (),
-                };
-            };
+            // if frame_num % 100 == 0 {
+            //     let event = get_key();
+            //     if event.state != KeyState::Idle {
+            //         match event.key {
+            //             KeyCode::Esc => return,
+            //             _ => (),
+            //         };
+            //     };
+            // }
         }
     }
 }

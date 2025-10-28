@@ -26,6 +26,24 @@ const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 
 static mut BUFFER: [u16; SIZE] = [0; SIZE];
 
+#[cfg(feature = "pimoroni2w")]
+static mut DOUBLE_BUFFER: Option<alloc::vec::Vec<u16>> = None;
+
+#[cfg(feature = "pimoroni2w")]
+pub fn init_double_buffer() {
+    unsafe { DOUBLE_BUFFER = Some(alloc::vec![0_u16; SIZE]) };
+}
+
+#[cfg(feature = "pimoroni2w")]
+pub fn swap_buffers() {
+    unsafe {
+        core::mem::swap(
+            &mut BUFFER[..].as_mut_ptr(),
+            &mut DOUBLE_BUFFER.as_mut().unwrap().as_mut_slice().as_mut_ptr(),
+        );
+    }
+}
+
 static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
     let mut tiles = Vec::new();
     for _ in 0..TILE_COUNT {

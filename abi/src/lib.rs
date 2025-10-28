@@ -65,8 +65,9 @@ pub mod display {
         abi_sys::lock_display(lock);
     }
 
-    const BUF_SIZE: usize = 250 * 1024; // tune this for performance
+    // const BUF_SIZE: usize = 15 * 1024; // tune this for performance
     // static mut BUF: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
+    const BUF_SIZE: usize = 250 * 1024; // tune this for performance
     static mut BUF: Lazy<Vec<CPixel>> = Lazy::new(|| vec![const { CPixel::new() }; BUF_SIZE]);
 
     pub struct Display;

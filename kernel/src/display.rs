@@ -1,6 +1,6 @@
+use crate::framebuffer::{self, AtomicFrameBuffer};
+use alloc::vec;
 use core::sync::atomic::{AtomicBool, Ordering};
-
-use crate::framebuffer::AtomicFrameBuffer;
 use embassy_rp::{
     Peri,
     gpio::{Level, Output},
@@ -44,6 +44,10 @@ pub async fn init_display(
     unsafe { FRAMEBUFFER.draw(&mut display).await.unwrap() }
     display.set_on().await.unwrap();
 
+    // create double buffer if board has psram
+    #[cfg(feature = "pimoroni2w")]
+    framebuffer::init_double_buffer();
+
     display
 }
 
@@ -59,6 +63,13 @@ pub async fn display_handler(mut display: DISPLAY) {
             }
         }
 
-        Timer::after_millis(10).await;
+        // Only do swap if feature enabled
+        #[cfg(feature = "pimoroni2w")]
+        {
+            framebuffer::swap_buffers();
+        }
+
+        // small yield to allow other tasks to run
+        Timer::after_nanos(100).await;
     }
 }
