@@ -526,15 +526,9 @@ pub fn init_psram_qmi(
     let psram_size = detect_psram_qmi(qmi);
 
     if psram_size == 0 {
+        defmt::error!("qmi psram size 0");
         return 0;
     }
-
-    // Set PSRAM timing for APS6404
-    //
-    // Using an rxdelay equal to the divisor isn't enough when running the APS6404 close to 133MHz.
-    // So: don't allow running at divisor 1 above 100MHz (because delay of 2 would be too late),
-    // and add an extra 1 to the rxdelay if the divided clock is > 100MHz (i.e. sys clock > 200MHz).
-    const MAX_PSRAM_FREQ: u32 = 133_000_000;
 
     let clock_hz = clk_peri_freq();
 

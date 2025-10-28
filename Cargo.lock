@@ -19,6 +19,7 @@ dependencies = [
  "abi_sys",
  "embedded-graphics",
  "embedded-sdmmc",
+ "once_cell",
  "rand_core 0.9.3",
 ]
 

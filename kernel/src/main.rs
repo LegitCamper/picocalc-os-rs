@@ -10,7 +10,6 @@ mod abi;
 mod display;
 mod elf;
 mod framebuffer;
-#[cfg(feature = "pimoroni2w")]
 mod heap;
 mod peripherals;
 mod psram;
@@ -37,13 +36,6 @@ use crate::{
 };
 use abi_sys::EntryFn;
 use bumpalo::Bump;
-use embedded_graphics::{
-    pixelcolor::Rgb565,
-    prelude::{DrawTarget, RgbColor},
-};
-
-use {defmt_rtt as _, panic_probe as _};
-
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::{join::join, select::select};
@@ -55,20 +47,26 @@ use embassy_rp::{
     peripherals::{
         DMA_CH0, DMA_CH1, DMA_CH3, DMA_CH4, I2C1, PIN_2, PIN_3, PIN_6, PIN_7, PIN_10, PIN_11,
         PIN_12, PIN_13, PIN_14, PIN_15, PIN_16, PIN_17, PIN_18, PIN_19, PIN_20, PIN_21, PIN_22,
-        PIO0, SPI0, SPI1, USB,
+        PIO0, SPI0, SPI1, USB, WATCHDOG,
     },
     pio,
     spi::{self, Spi},
     usb as embassy_rp_usb,
+    watchdog::{ResetReason, Watchdog},
 };
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
-use embassy_time::{Delay, Instant, Timer};
+use embassy_time::{Delay, Duration, Instant, Ticker, Timer};
+use embedded_graphics::{
+    pixelcolor::Rgb565,
+    prelude::{DrawTarget, RgbColor},
+};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
 use static_cell::StaticCell;
 use talc::*;
+use {defmt_rtt as _, panic_probe as _};
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
@@ -80,14 +78,31 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
-#[cfg(not(feature = "pimoroni2w"))]
-static mut ARENA: [u8; 200 * 1024] = [0; 200 * 1024];
+static mut ARENA: [u8; 250 * 1024] = [0; 250 * 1024];
 
-#[cfg(not(feature = "pimoroni2w"))]
 #[global_allocator]
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
+
+#[embassy_executor::task]
+async fn watchdog_task(mut watchdog: Watchdog) {
+    if let Some(reason) = watchdog.reset_reason() {
+        let reason = match reason {
+            ResetReason::Forced => "forced",
+            ResetReason::TimedOut => "timed out",
+        };
+        defmt::error!("Watchdog reset reason: {}", reason);
+    }
+
+    watchdog.start(Duration::from_secs(3));
+
+    let mut ticker = Ticker::every(Duration::from_secs(2));
+    loop {
+        watchdog.feed();
+        ticker.next().await;
+    }
+}
 
 static ENABLE_UI: AtomicBool = AtomicBool::new(true);
 static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
@@ -141,7 +156,9 @@ async fn main(_spawner: Spawner) {
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| {
         spawner
-            .spawn(kernel_task(spawner, display, sd, psram, mcu, p.USB))
+            .spawn(kernel_task(
+                spawner, p.WATCHDOG, display, sd, psram, mcu, p.USB,
+            ))
             .unwrap()
     });
 }
@@ -244,26 +261,36 @@ async fn setup_display(display: Display, spawner: Spawner) {
 // psram is kind of useless on the pico calc
 // ive opted to use the pimoroni with on onboard xip psram instead
 async fn setup_psram(psram: Psram) {
-    // let psram = init_psram(
-    //     psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
-    // )
-    // .await;
+    let psram = init_psram(
+        psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
+    )
+    .await;
 
-    // #[cfg(feature = "defmt")]
-    // defmt::info!("psram size: {}", psram.size);
+    #[cfg(feature = "defmt")]
+    defmt::info!("psram size: {}", psram.size);
 
-    // if psram.size == 0 {
-    //     #[cfg(feature = "defmt")]
-    //     defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
-    // }
+    if psram.size == 0 {
+        #[cfg(feature = "defmt")]
+        defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
+    }
+}
 
-    #[cfg(feature = "pimoroni2w")]
-    {
+#[cfg(feature = "pimoroni2w")]
+async fn setup_qmi_psram() {
+    let mut tries = 5;
+    Timer::after_millis(250).await;
+    while tries > 1 {
         let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
+        defmt::info!("size:  {}", psram_qmi_size);
+        Timer::after_millis(100).await;
         if psram_qmi_size > 0 {
             init_qmi_psram_heap(psram_qmi_size);
+            return;
         }
+        defmt::info!("failed to init qmi psram... trying again");
+        tries -= 1;
     }
+    panic!("qmi psram not initialized");
 }
 
 async fn setup_sd(sd: Sd) {
@@ -284,21 +311,26 @@ async fn setup_sd(sd: Sd) {
 #[embassy_executor::task]
 async fn kernel_task(
     spawner: Spawner,
+    watchdog: Peri<'static, WATCHDOG>,
     display: Display,
     sd: Sd,
     psram: Psram,
     mcu: Mcu,
     usb: Peri<'static, USB>,
 ) {
+    spawner
+        .spawn(watchdog_task(Watchdog::new(watchdog)))
+        .unwrap();
     setup_mcu(mcu).await;
-    Timer::after_millis(250).await;
     setup_display(display, spawner).await;
-    #[cfg(feature = "pimoroni2w")]
-    setup_psram(psram).await;
     setup_sd(sd).await;
 
     let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
     // spawner.spawn(usb_handler(usb)).unwrap();
+
+    // setup_psram(psram).await;
+    #[cfg(feature = "pimoroni2w")]
+    setup_qmi_psram().await;
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);

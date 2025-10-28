@@ -6,7 +6,6 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use embedded_alloc::LlffHeap as Heap;
 
-#[global_allocator]
 pub static HEAP: DualHeap = DualHeap::empty();
 const HEAP_SIZE: usize = 64 * 1024;
 static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];

@@ -122,7 +122,7 @@ pub struct CPixel {
 }
 
 impl CPixel {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             x: 0,
             y: 0,

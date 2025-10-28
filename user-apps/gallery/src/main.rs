@@ -10,7 +10,7 @@ use abi::{
     keyboard::{KeyCode, KeyState},
     print,
 };
-use alloc::{format, string::ToString};
+use alloc::{format, string::ToString, vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{
     Drawable, image::Image, mono_font::MonoTextStyle, mono_font::ascii::FONT_6X10,
@@ -20,11 +20,7 @@ use tinybmp::Bmp;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print(&format!(
-        "user panic: {} @ {:?}",
-        info.message(),
-        info.location(),
-    ));
+    print!("user panic: {} @ {:?}", info.message(), info.location());
     loop {}
 }
 
@@ -34,8 +30,8 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print("Starting Gallery app");
-    static mut BMP_BUF: [u8; 100_000] = [0_u8; 100_000];
+    print!("Starting Gallery app");
+    let mut bmp_buf = vec![0_u8; 100_000];
     let mut display = Display;
 
     // Grid parameters
@@ -55,13 +51,13 @@ pub fn main() {
         }
 
         if let Some(f) = file {
-            print(&format!("file: {}", f.name));
+            print!("file: {}", f.name);
             if f.name.extension() == b"bmp" || f.name.extension() == b"BMP" {
                 let file = format!("/images/{}", f.name);
 
-                let read = read_file(&file, 0, &mut unsafe { &mut BMP_BUF[..] });
+                let read = read_file(&file, 0, &mut &mut bmp_buf[..]);
                 if read > 0 {
-                    let bmp = Bmp::from_slice(unsafe { &BMP_BUF }).expect("failed to parse bmp");
+                    let bmp = Bmp::from_slice(&bmp_buf).expect("failed to parse bmp");
 
                     let row = images_drawn / grid_cols;
                     let col = images_drawn % grid_cols;

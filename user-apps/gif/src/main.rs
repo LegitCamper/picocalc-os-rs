@@ -9,18 +9,14 @@ use abi::{
     keyboard::{KeyCode, KeyState},
     print, sleep,
 };
-use alloc::{format, vec::Vec};
+use alloc::vec;
 use core::panic::PanicInfo;
 use embedded_graphics::{image::ImageDrawable, pixelcolor::Rgb565};
 use tinygif::Gif;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print(&format!(
-        "user panic: {} @ {:?}",
-        info.message(),
-        info.location(),
-    ));
+    print!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -30,16 +26,18 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print("Starting Gif app");
+    print!("Starting Gif app");
     let mut display = Display;
 
     let size = file_len("/gifs/bad_apple.gif");
-    let mut buf = Vec::with_capacity(size);
+    let mut buf = vec![0_u8; size];
     let read = read_file("/gifs/bad_apple.gif", 0, &mut buf);
+    print!("read: {}, file size: {}", read, size);
     assert!(read == size);
 
     let gif = Gif::<Rgb565>::from_slice(&buf).unwrap();
 
+    let mut frame_num = 0;
     loop {
         for frame in gif.frames() {
             let start = get_ms();
@@ -47,6 +45,9 @@ pub fn main() {
             lock_display(true);
             frame.draw(&mut display).unwrap();
             lock_display(false);
+
+            frame_num += 1;
+            print!("drew {}", frame_num);
 
             sleep(((frame.delay_centis as u64) * 10).saturating_sub(start));
 

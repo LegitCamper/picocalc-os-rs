@@ -3,7 +3,7 @@ use abi_sys::{
     LockDisplay, PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
-use core::sync::atomic::Ordering;
+use core::{alloc::GlobalAlloc, sync::atomic::Ordering};
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
 use embedded_graphics::draw_target::DrawTarget;
@@ -18,13 +18,25 @@ use crate::{
 const _: AllocAbi = alloc;
 pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
     // SAFETY: caller guarantees layout is valid
-    unsafe { alloc::alloc::alloc(layout.into()) }
+    unsafe {
+        if cfg!(feature = "pimoroni2w") {
+            crate::heap::HEAP.alloc(layout.into())
+        } else {
+            alloc::alloc::alloc(layout.into())
+        }
+    }
 }
 
 const _: DeallocAbi = dealloc;
 pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
     // SAFETY: caller guarantees ptr and layout are valid
-    unsafe { alloc::alloc::dealloc(ptr, layout.into()) };
+    unsafe {
+        if cfg!(feature = "pimoroni2w") {
+            crate::heap::HEAP.dealloc(ptr, layout.into())
+        } else {
+            alloc::alloc::dealloc(ptr, layout.into())
+        }
+    }
 }
 
 const _: PrintAbi = print;
@@ -66,7 +78,6 @@ pub extern "C" fn lock_display(lock: bool) {
 }
 
 const _: DrawIterAbi = draw_iter;
-// TODO: maybe return result
 pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let cpixels = unsafe { core::slice::from_raw_parts(cpixels, len) };

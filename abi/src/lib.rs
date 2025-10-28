@@ -1,9 +1,11 @@
 #![no_std]
+#![allow(static_mut_refs)]
 
 extern crate alloc;
 
-pub use abi_sys::keyboard;
+pub use abi_sys::{self, keyboard};
 use abi_sys::{RngRequest, alloc, dealloc, keyboard::KeyEvent};
+pub use alloc::format;
 use core::alloc::{GlobalAlloc, Layout};
 use rand_core::RngCore;
 
@@ -22,8 +24,12 @@ unsafe impl GlobalAlloc for Alloc {
     }
 }
 
-pub fn print(msg: &str) {
-    abi_sys::print(msg.as_ptr(), msg.len());
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        let s = $crate::format!($($arg)*);
+        $crate::abi_sys::print(s.as_ptr(), s.len());
+    }};
 }
 
 pub fn sleep(ms: u64) {
@@ -40,6 +46,7 @@ pub fn get_key() -> KeyEvent {
 
 pub mod display {
     use abi_sys::CPixel;
+    use alloc::{vec, vec::Vec};
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
@@ -47,6 +54,7 @@ pub mod display {
         prelude::{DrawTarget, Size},
         primitives::Rectangle,
     };
+    use once_cell::unsync::Lazy;
 
     pub const SCREEN_WIDTH: usize = 320;
     pub const SCREEN_HEIGHT: usize = 320;
@@ -57,7 +65,9 @@ pub mod display {
         abi_sys::lock_display(lock);
     }
 
-    const BUF_SIZE: usize = 1024; // tune this for performance
+    const BUF_SIZE: usize = 250 * 1024; // tune this for performance
+    // static mut BUF: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
+    static mut BUF: Lazy<Vec<CPixel>> = Lazy::new(|| vec![const { CPixel::new() }; BUF_SIZE]);
 
     pub struct Display;
 
@@ -81,21 +91,19 @@ pub mod display {
         where
             I: IntoIterator<Item = Pixel<Self::Color>>,
         {
-            let mut buf: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
-
             let mut count = 0;
             for p in pixels {
-                buf[count] = p.into();
+                unsafe { BUF[count] = p.into() };
                 count += 1;
 
                 if count == BUF_SIZE {
-                    abi_sys::draw_iter(buf.as_ptr(), count);
+                    abi_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
                     count = 0;
                 }
             }
 
             if count > 0 {
-                abi_sys::draw_iter(buf.as_ptr(), count);
+                abi_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
             }
 
             Ok(())

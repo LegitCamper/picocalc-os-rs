@@ -28,11 +28,7 @@ use embedded_layout::{
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print(&format!(
-        "user panic: {} @ {:?}",
-        info.message(),
-        info.location(),
-    ));
+    print!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -42,7 +38,7 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print("Starting Calculator app");
+    print!("Starting Calculator app");
     let mut display = Display;
 
     let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];
