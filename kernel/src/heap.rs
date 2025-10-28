@@ -2,13 +2,10 @@
 // https://github.com/wezterm/picocalc-wezterm/blob/main/src/heap.rs
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use embedded_alloc::LlffHeap as Heap;
 
-pub static HEAP: DualHeap = DualHeap::empty();
-const HEAP_SIZE: usize = 64 * 1024;
-static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+pub static mut HEAP: PsramHeap = PsramHeap::empty();
 
 struct Region {
     start: AtomicUsize,
@@ -37,95 +34,62 @@ impl Region {
     }
 }
 
-/// This is an allocator that combines two regions of memory.
-/// The intent is to use some of the directly connected RAM
-/// for this, and if we find some XIP capable PSRAM, add that
-/// as a secondary region.
-/// Allocation from the primary region is always preferred,
-/// as it is expected to be a bit faster than PSRAM.
 /// FIXME: PSRAM-allocated memory isn't compatible with
 /// CAS atomics, so we might need a bit of a think about this!
-pub struct DualHeap {
-    primary: Heap,
-    primary_region: Region,
-    secondary: Heap,
+pub struct PsramHeap {
+    heap: Heap,
+    region: Region,
 }
 
-impl DualHeap {
+impl PsramHeap {
     pub const fn empty() -> Self {
         Self {
-            primary: Heap::empty(),
-            primary_region: Region::default(),
-            secondary: Heap::empty(),
+            heap: Heap::empty(),
+            region: Region::default(),
         }
     }
 
-    unsafe fn add_primary(&self, region: Region) {
+    unsafe fn add_psram(&self, region: Region) {
         let start = region.start.load(Ordering::SeqCst);
         let size = region.size.load(Ordering::SeqCst);
         unsafe {
-            self.primary.init(start, size);
+            self.heap.init(start, size);
         }
-        self.primary_region.start.store(start, Ordering::SeqCst);
-        self.primary_region.size.store(size, Ordering::SeqCst);
-    }
-
-    unsafe fn add_secondary(&self, region: Region) {
-        let start = region.start.load(Ordering::SeqCst);
-        let size = region.size.load(Ordering::SeqCst);
-        unsafe {
-            self.secondary.init(start, size);
-        }
+        self.region.start.store(start, Ordering::SeqCst);
+        self.region.size.store(size, Ordering::SeqCst);
     }
 
     pub fn used(&self) -> usize {
-        self.primary.used() + self.secondary.used()
+        self.heap.used()
     }
 
     pub fn free(&self) -> usize {
-        self.primary.free() + self.secondary.free()
+        self.heap.free()
     }
 }
 
-unsafe impl GlobalAlloc for DualHeap {
+unsafe impl GlobalAlloc for PsramHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         unsafe {
-            let ptr = self.primary.alloc(layout);
+            let ptr = self.heap.alloc(layout);
             if !ptr.is_null() {
                 return ptr;
+            } else {
+                panic!("HEAP FULL");
             }
-            // start using secondary area when primary heap is full
-            self.secondary.alloc(layout)
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe {
             let ptr_usize = ptr as usize;
-            if self.primary_region.contains(ptr_usize) {
-                self.primary.dealloc(ptr, layout);
-            } else {
-                self.secondary.dealloc(ptr, layout);
+            if self.region.contains(ptr_usize) {
+                self.heap.dealloc(ptr, layout);
             }
         }
     }
 }
 
-pub fn init_heap() {
-    let primary_start = &raw mut HEAP_MEM as usize;
-    unsafe { HEAP.add_primary(Region::new(primary_start, HEAP_SIZE)) }
-}
-
 pub fn init_qmi_psram_heap(size: u32) {
-    unsafe { HEAP.add_secondary(Region::new(0x11000000, size as usize)) }
-}
-
-pub async fn free_command(_args: &[&str]) {
-    let ram_used = HEAP.primary.used();
-    let ram_free = HEAP.primary.free();
-    let ram_total = ram_used + ram_free;
-
-    let qmi_used = HEAP.secondary.used();
-    let qmi_free = HEAP.secondary.free();
-    let qmi_total = qmi_used + qmi_free;
+    unsafe { HEAP.add_psram(Region::new(0x11000000, size as usize)) }
 }

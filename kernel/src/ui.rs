@@ -71,7 +71,7 @@ pub async fn clear_selection() {
     if let Some(area) = sel.last_bounds {
         Rectangle::new(area.top_left, area.size)
             .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-            .draw(unsafe { &mut FRAMEBUFFER })
+            .draw(unsafe { &mut *FRAMEBUFFER })
             .unwrap();
     }
 }
@@ -97,7 +97,7 @@ async fn draw_selection() {
             ),
             text_style,
         )
-        .draw(unsafe { &mut FRAMEBUFFER })
+        .draw(unsafe { &mut *FRAMEBUFFER })
         .unwrap();
     } else {
         let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
@@ -122,12 +122,12 @@ async fn draw_selection() {
             .bounding_box();
         Rectangle::new(selected_bounds.top_left, selected_bounds.size)
             .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-            .draw(unsafe { &mut FRAMEBUFFER })
+            .draw(unsafe { &mut *FRAMEBUFFER })
             .unwrap();
 
         guard.last_bounds = Some(layout.bounds());
 
-        layout.draw(unsafe { &mut FRAMEBUFFER }).unwrap();
+        layout.draw(unsafe { &mut *FRAMEBUFFER }).unwrap();
     }
 
     guard.changed = false;

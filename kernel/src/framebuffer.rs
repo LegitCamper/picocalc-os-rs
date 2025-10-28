@@ -12,7 +12,6 @@ use embedded_graphics::{
 };
 use embedded_hal_2::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
-use heapless::Vec;
 use st7365p_lcd::ST7365P;
 
 pub const TILE_SIZE: usize = 16; // 16x16 tile
@@ -22,30 +21,10 @@ pub const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE
 pub const MAX_META_TILES: usize = SCREEN_WIDTH / TILE_SIZE; // max number of meta tiles in buffer
 type MetaTileVec = heapless::Vec<Rectangle, { TILE_COUNT / MAX_META_TILES }>;
 
-const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
-
-static mut BUFFER: [u16; SIZE] = [0; SIZE];
-
-#[cfg(feature = "pimoroni2w")]
-static mut DOUBLE_BUFFER: Option<alloc::vec::Vec<u16>> = None;
-
-#[cfg(feature = "pimoroni2w")]
-pub fn init_double_buffer() {
-    unsafe { DOUBLE_BUFFER = Some(alloc::vec![0_u16; SIZE]) };
-}
-
-#[cfg(feature = "pimoroni2w")]
-pub fn swap_buffers() {
-    unsafe {
-        core::mem::swap(
-            &mut BUFFER[..].as_mut_ptr(),
-            &mut DOUBLE_BUFFER.as_mut().unwrap().as_mut_slice().as_mut_ptr(),
-        );
-    }
-}
+pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 
 static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
-    let mut tiles = Vec::new();
+    let mut tiles = heapless::Vec::new();
     for _ in 0..TILE_COUNT {
         tiles.push(AtomicBool::new(true)).unwrap();
     }
@@ -53,9 +32,14 @@ static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLo
 });
 
 #[allow(dead_code)]
-pub struct AtomicFrameBuffer;
+pub struct AtomicFrameBuffer<'a>(&'a mut [u16]);
 
-impl AtomicFrameBuffer {
+impl<'a> AtomicFrameBuffer<'a> {
+    pub fn new(buffer: &'a mut [u16]) -> Self {
+        assert!(buffer.len() == SIZE);
+        Self(buffer)
+    }
+
     fn mark_tiles_dirty(&mut self, rect: Rectangle) {
         let tiles_x = (SCREEN_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
         let start_tx = (rect.top_left.x as usize) / TILE_SIZE;
@@ -71,7 +55,7 @@ impl AtomicFrameBuffer {
         }
     }
 
-    fn set_pixels_buffered<P: IntoIterator<Item = u16>>(
+    fn set_pixels<P: IntoIterator<Item = u16>>(
         &mut self,
         sx: u16,
         sy: u16,
@@ -92,7 +76,7 @@ impl AtomicFrameBuffer {
         for y in sy..=ey {
             for x in sx..=ex {
                 if let Some(color) = color_iter.next() {
-                    unsafe { BUFFER[(y as usize * SCREEN_WIDTH) + x as usize] = color };
+                    self.0[(y as usize * SCREEN_WIDTH) + x as usize] = color;
                 } else {
                     return Err(()); // Not enough data
                 }
@@ -179,7 +163,7 @@ impl AtomicFrameBuffer {
                 0,
                 self.size().width as u16 - 1,
                 self.size().height as u16 - 1,
-                unsafe { &BUFFER },
+                &self.0[..],
             )
             .await?;
 
@@ -193,7 +177,7 @@ impl AtomicFrameBuffer {
     }
 
     /// Sends only dirty tiles (16x16px) in batches to the display
-    pub async fn partial_draw_batched<SPI, DC, RST, DELAY>(
+    pub async fn partial_draw<SPI, DC, RST, DELAY>(
         &mut self,
         display: &mut ST7365P<SPI, DC, RST, DELAY>,
     ) -> Result<(), ()>
@@ -211,7 +195,7 @@ impl AtomicFrameBuffer {
 
             // buffer for copying meta tiles before sending to display
             let mut pixel_buffer: heapless::Vec<u16, { MAX_META_TILES * TILE_SIZE * TILE_SIZE }> =
-                Vec::new();
+                heapless::Vec::new();
 
             for rect in meta_tiles {
                 let rect_width = rect.size.width as usize;
@@ -227,9 +211,7 @@ impl AtomicFrameBuffer {
                     let end = start + rect_width;
 
                     // Safe: we guarantee buffer will not exceed MAX_META_TILE_PIXELS
-                    pixel_buffer
-                        .extend_from_slice(unsafe { &BUFFER[start..end] })
-                        .unwrap();
+                    pixel_buffer.extend_from_slice(&self.0[start..end]).unwrap();
                 }
 
                 display
@@ -261,7 +243,7 @@ impl AtomicFrameBuffer {
     }
 }
 
-impl DrawTarget for AtomicFrameBuffer {
+impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
     type Error = ();
     type Color = Rgb565;
 
@@ -280,11 +262,9 @@ impl DrawTarget for AtomicFrameBuffer {
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
                     let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
                     let raw_color = RawU16::from(color).into_inner();
-                    unsafe {
-                        if BUFFER[idx] != raw_color {
-                            BUFFER[idx] = raw_color;
-                            changed = true;
-                        }
+                    if self.0[idx] != raw_color {
+                        self.0[idx] = raw_color;
+                        changed = true;
                     }
 
                     if let Some(ref mut rect) = dirty_rect {
@@ -332,11 +312,9 @@ impl DrawTarget for AtomicFrameBuffer {
                         if let Some(color) = colors.next() {
                             let idx = (p.y as usize * SCREEN_WIDTH) + (p.x as usize);
                             let raw_color = RawU16::from(color).into_inner();
-                            unsafe {
-                                if BUFFER[idx] != raw_color {
-                                    BUFFER[idx] = raw_color;
-                                    changed = true;
-                                }
+                            if self.0[idx] != raw_color {
+                                self.0[idx] = raw_color;
+                                changed = true;
                             }
                         } else {
                             break;
@@ -364,7 +342,7 @@ impl DrawTarget for AtomicFrameBuffer {
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.set_pixels_buffered(
+        self.set_pixels(
             0,
             0,
             self.size().width as u16 - 1,
@@ -381,7 +359,7 @@ impl DrawTarget for AtomicFrameBuffer {
     }
 }
 
-impl OriginDimensions for AtomicFrameBuffer {
+impl<'a> OriginDimensions for AtomicFrameBuffer<'a> {
     fn size(&self) -> Size {
         Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
     }

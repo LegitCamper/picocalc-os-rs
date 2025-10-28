@@ -9,6 +9,7 @@ use embassy_rp::{
 };
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
+use once_cell::unsync::Lazy;
 use st7365p_lcd::ST7365P;
 
 type DISPLAY = ST7365P<
@@ -21,7 +22,10 @@ type DISPLAY = ST7365P<
 pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
 
-pub static mut FRAMEBUFFER: AtomicFrameBuffer = AtomicFrameBuffer;
+pub static mut FRAMEBUFFER: Lazy<AtomicFrameBuffer> = Lazy::new(|| {
+    static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
+    AtomicFrameBuffer::new(unsafe { &mut BUF })
+});
 pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub async fn init_display(
@@ -44,10 +48,6 @@ pub async fn init_display(
     unsafe { FRAMEBUFFER.draw(&mut display).await.unwrap() }
     display.set_on().await.unwrap();
 
-    // create double buffer if board has psram
-    #[cfg(feature = "pimoroni2w")]
-    framebuffer::init_double_buffer();
-
     display
 }
 
@@ -55,18 +55,7 @@ pub async fn init_display(
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
         if !FB_PAUSED.load(Ordering::Acquire) {
-            unsafe {
-                FRAMEBUFFER
-                    .partial_draw_batched(&mut display)
-                    .await
-                    .unwrap()
-            }
-        }
-
-        // Only do swap if feature enabled
-        #[cfg(feature = "pimoroni2w")]
-        {
-            framebuffer::swap_buffers();
+            unsafe { FRAMEBUFFER.partial_draw(&mut display).await.unwrap() }
         }
 
         // small yield to allow other tasks to run

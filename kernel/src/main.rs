@@ -3,6 +3,8 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![allow(static_mut_refs)]
+#![feature(allocator_api)]
+#![feature(slice_ptr_get)]
 
 extern crate alloc;
 
