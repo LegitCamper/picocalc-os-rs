@@ -46,7 +46,7 @@ pub struct CLayout {
 #[cfg(feature = "alloc")]
 impl Into<Layout> for CLayout {
     fn into(self) -> Layout {
-        unsafe { Layout::from_size_align_unchecked(self.size, self.alignment) }
+        Layout::from_size_align(self.size, self.alignment).unwrap()
     }
 }
 

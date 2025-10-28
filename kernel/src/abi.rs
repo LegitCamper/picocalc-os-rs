@@ -3,7 +3,7 @@ use abi_sys::{
     PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
-use core::{alloc::GlobalAlloc, sync::atomic::Ordering};
+use core::{alloc::GlobalAlloc, ops::DerefMut, sync::atomic::Ordering};
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
 use embedded_graphics::draw_target::DrawTarget;
@@ -11,8 +11,7 @@ use embedded_sdmmc::{DirEntry, LfnBuffer};
 use heapless::spsc::Queue;
 
 use crate::{
-    display::FRAMEBUFFER,
-    framebuffer::FB_PAUSED,
+    display::{FRAMEBUFFER, FRAMEBUFFER2, WRITE_FRAMEBUFFER2},
     storage::{Dir, File, SDCARD},
 };
 
@@ -80,9 +79,19 @@ pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
 
     let iter = cpixels.iter().copied().map(|c: CPixel| c.into());
 
-    FB_PAUSED.store(true, Ordering::Release);
-    unsafe { FRAMEBUFFER.draw_iter(iter).unwrap() }
-    FB_PAUSED.store(false, Ordering::Release);
+    let fb = if cfg!(feature = "pimoroni2w") {
+        if WRITE_FRAMEBUFFER2.load(Ordering::Acquire) {
+            unsafe { FRAMEBUFFER2.deref_mut() }
+        } else {
+            unsafe { &mut FRAMEBUFFER }
+        }
+    } else {
+        unsafe { &mut FRAMEBUFFER }
+    };
+
+    fb.draw_iter(iter).unwrap();
+
+    WRITE_FRAMEBUFFER2.fetch_not(Ordering::AcqRel);
 }
 
 pub static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();

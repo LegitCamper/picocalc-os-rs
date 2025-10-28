@@ -23,23 +23,29 @@ type MetaTileVec = heapless::Vec<Rectangle, { TILE_COUNT / MAX_META_TILES }>;
 
 pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 
-pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
-
-static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
-    let mut tiles = heapless::Vec::new();
-    for _ in 0..TILE_COUNT {
-        tiles.push(AtomicBool::new(true)).unwrap();
-    }
-    tiles
-});
-
 #[allow(dead_code)]
-pub struct AtomicFrameBuffer<'a>(&'a mut [u16]);
+pub struct AtomicFrameBuffer<'a> {
+    fb: &'a mut [u16],
+    dirty_tiles: heapless::Vec<AtomicBool, TILE_COUNT>,
+}
 
 impl<'a> AtomicFrameBuffer<'a> {
     pub fn new(buffer: &'a mut [u16]) -> Self {
         assert!(buffer.len() == SIZE);
-        Self(buffer)
+        let mut dirty_tiles = heapless::Vec::new();
+        for _ in 0..TILE_COUNT {
+            dirty_tiles.push(AtomicBool::new(true)).unwrap()
+        }
+        Self {
+            fb: buffer,
+            dirty_tiles,
+        }
+    }
+
+    pub fn set_all_tiles(&mut self, set: bool) {
+        for t in self.dirty_tiles.iter_mut() {
+            t.store(set, Ordering::Release);
+        }
     }
 
     fn mark_tiles_dirty(&mut self, rect: Rectangle) {
@@ -52,7 +58,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         for ty in start_ty..=end_ty {
             for tx in start_tx..=end_tx {
                 let tile_idx = ty * tiles_x + tx;
-                unsafe { DIRTY_TILES.get_mut()[tile_idx].store(true, Ordering::Release) };
+                self.dirty_tiles[tile_idx].store(true, Ordering::Release);
             }
         }
     }
@@ -78,7 +84,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         for y in sy..=ey {
             for x in sx..=ex {
                 if let Some(color) = color_iter.next() {
-                    self.0[(y as usize * SCREEN_WIDTH) + x as usize] = color;
+                    self.fb[(y as usize * SCREEN_WIDTH) + x as usize] = color;
                 } else {
                     return Err(()); // Not enough data
                 }
@@ -101,7 +107,7 @@ impl<'a> AtomicFrameBuffer<'a> {
             let mut tx = 0;
             while tx < tiles_x {
                 let idx = ty * tiles_x + tx;
-                if !unsafe { DIRTY_TILES.get()[idx].load(Ordering::Acquire) } {
+                if !self.dirty_tiles[idx].load(Ordering::Acquire) {
                     tx += 1;
                     continue;
                 }
@@ -113,7 +119,7 @@ impl<'a> AtomicFrameBuffer<'a> {
                 // Grow horizontally, but keep under MAX_TILES_PER_METATILE
                 while tx + width_tiles < tiles_x
                     && unsafe {
-                        DIRTY_TILES.get()[ty * tiles_x + tx + width_tiles].load(Ordering::Acquire)
+                        self.dirty_tiles[ty * tiles_x + tx + width_tiles].load(Ordering::Acquire)
                     }
                     && (width_tiles + height_tiles) <= MAX_META_TILES
                 {
@@ -124,8 +130,7 @@ impl<'a> AtomicFrameBuffer<'a> {
 
                 for x_off in 0..width_tiles {
                     unsafe {
-                        DIRTY_TILES.get()[ty * tiles_x + tx + x_off]
-                            .store(false, Ordering::Release);
+                        self.dirty_tiles[ty * tiles_x + tx + x_off].store(false, Ordering::Release);
                     };
                 }
 
@@ -165,12 +170,12 @@ impl<'a> AtomicFrameBuffer<'a> {
                 0,
                 self.size().width as u16 - 1,
                 self.size().height as u16 - 1,
-                &self.0[..],
+                &self.fb[..],
             )
             .await?;
 
         unsafe {
-            for tile in DIRTY_TILES.get_mut().iter() {
+            for tile in self.dirty_tiles.iter() {
                 tile.store(false, Ordering::Release);
             }
         };
@@ -191,11 +196,10 @@ impl<'a> AtomicFrameBuffer<'a> {
         let tiles_x = SCREEN_WIDTH / TILE_SIZE;
         let _tiles_y = SCREEN_HEIGHT / TILE_SIZE;
 
-        let tiles = unsafe { DIRTY_TILES.get_mut() };
         let mut pixel_buffer: heapless::Vec<u16, { TILE_SIZE * TILE_SIZE }> = heapless::Vec::new();
 
         for tile_idx in 0..TILE_COUNT {
-            if tiles[tile_idx].swap(false, Ordering::AcqRel) {
+            if self.dirty_tiles[tile_idx].swap(false, Ordering::AcqRel) {
                 let tx = tile_idx % tiles_x;
                 let ty = tile_idx / tiles_x;
 
@@ -210,7 +214,9 @@ impl<'a> AtomicFrameBuffer<'a> {
                 for y in y_start..y_end {
                     let start = y * SCREEN_WIDTH + x_start;
                     let end = y * SCREEN_WIDTH + x_end;
-                    pixel_buffer.extend_from_slice(&self.0[start..end]).unwrap();
+                    pixel_buffer
+                        .extend_from_slice(&self.fb[start..end])
+                        .unwrap();
                 }
 
                 display
@@ -240,7 +246,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         RST: OutputPin,
         DELAY: DelayNs,
     {
-        if unsafe { DIRTY_TILES.get().iter().any(|p| p.load(Ordering::Acquire)) } {
+        if unsafe { self.dirty_tiles.iter().any(|p| p.load(Ordering::Acquire)) } {
             let tiles_x = (SCREEN_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
             let tiles_y = (SCREEN_HEIGHT + TILE_SIZE - 1) / TILE_SIZE;
 
@@ -264,7 +270,9 @@ impl<'a> AtomicFrameBuffer<'a> {
                     let end = start + rect_width;
 
                     // Safe: we guarantee buffer will not exceed MAX_META_TILE_PIXELS
-                    pixel_buffer.extend_from_slice(&self.0[start..end]).unwrap();
+                    pixel_buffer
+                        .extend_from_slice(&self.fb[start..end])
+                        .unwrap();
                 }
 
                 display
@@ -286,7 +294,7 @@ impl<'a> AtomicFrameBuffer<'a> {
                 for ty in start_ty..=end_ty {
                     for tx in start_tx..=end_tx {
                         let tile_idx = ty * tiles_x + tx;
-                        unsafe { DIRTY_TILES.get_mut()[tile_idx].store(false, Ordering::Release) };
+                        self.dirty_tiles[tile_idx].store(false, Ordering::Release);
                     }
                 }
             }
@@ -315,8 +323,8 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
                     let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
                     let raw_color = RawU16::from(color).into_inner();
-                    if self.0[idx] != raw_color {
-                        self.0[idx] = raw_color;
+                    if self.fb[idx] != raw_color {
+                        self.fb[idx] = raw_color;
                         changed = true;
                     }
 
@@ -365,8 +373,8 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                         if let Some(color) = colors.next() {
                             let idx = (p.y as usize * SCREEN_WIDTH) + (p.x as usize);
                             let raw_color = RawU16::from(color).into_inner();
-                            if self.0[idx] != raw_color {
-                                self.0[idx] = raw_color;
+                            if self.fb[idx] != raw_color {
+                                self.fb[idx] = raw_color;
                                 changed = true;
                             }
                         } else {
@@ -404,7 +412,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                 .take((self.size().width * self.size().height) as usize),
         )?;
 
-        for tile in unsafe { DIRTY_TILES.get_mut() }.iter() {
+        for tile in self.dirty_tiles.iter() {
             tile.store(true, Ordering::Release);
         }
 

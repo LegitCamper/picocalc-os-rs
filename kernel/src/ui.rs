@@ -1,10 +1,13 @@
 use crate::{
-    BINARY_CH, display::FRAMEBUFFER, elf::load_binary, framebuffer::FB_PAUSED,
-    peripherals::keyboard, storage::FileName,
+    BINARY_CH,
+    display::{FRAMEBUFFER, FRAMEBUFFER2, WRITE_FRAMEBUFFER2},
+    elf::load_binary,
+    peripherals::keyboard,
+    storage::FileName,
 };
 use abi_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
-use core::sync::atomic::Ordering;
+use core::{ops::DerefMut, sync::atomic::Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embedded_graphics::{
     Drawable,
@@ -83,7 +86,15 @@ async fn draw_selection() {
     const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
     let no_bins = String::from_str(NO_BINS).unwrap();
 
-    FB_PAUSED.store(true, Ordering::Release); // ensure all elements show up at once
+    let mut fb = if cfg!(feature = "pimoroni2w") {
+        if WRITE_FRAMEBUFFER2.load(Ordering::Acquire) {
+            unsafe { FRAMEBUFFER2.deref_mut() }
+        } else {
+            unsafe { &mut FRAMEBUFFER }
+        }
+    } else {
+        unsafe { &mut FRAMEBUFFER }
+    };
 
     if file_names.is_empty() {
         TextBox::new(
@@ -94,7 +105,7 @@ async fn draw_selection() {
             ),
             text_style,
         )
-        .draw(unsafe { &mut *FRAMEBUFFER })
+        .draw(fb.deref_mut())
         .unwrap();
     } else {
         let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
@@ -119,16 +130,17 @@ async fn draw_selection() {
             .bounding_box();
         Rectangle::new(selected_bounds.top_left, selected_bounds.size)
             .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-            .draw(unsafe { &mut *FRAMEBUFFER })
+            .draw(fb.deref_mut())
             .unwrap();
 
         guard.last_bounds = Some(layout.bounds());
 
-        layout.draw(unsafe { &mut *FRAMEBUFFER }).unwrap();
+        layout.draw(fb.deref_mut()).unwrap();
     }
 
     guard.changed = false;
-    FB_PAUSED.store(false, Ordering::Release); // ensure all elements show up at once
+
+    WRITE_FRAMEBUFFER2.fetch_not(Ordering::AcqRel);
 }
 
 #[derive(Clone)]

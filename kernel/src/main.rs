@@ -323,16 +323,17 @@ async fn kernel_task(
     spawner
         .spawn(watchdog_task(Watchdog::new(watchdog)))
         .unwrap();
+
+    // setup_psram(psram).await;
+    #[cfg(feature = "pimoroni2w")]
+    setup_qmi_psram().await;
+
     setup_mcu(mcu).await;
     setup_display(display, spawner).await;
     setup_sd(sd).await;
 
     let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
     // spawner.spawn(usb_handler(usb)).unwrap();
-
-    // setup_psram(psram).await;
-    #[cfg(feature = "pimoroni2w")]
-    setup_qmi_psram().await;
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
