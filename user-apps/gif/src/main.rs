@@ -11,7 +11,9 @@ use abi::{
 };
 use alloc::vec;
 use core::panic::PanicInfo;
-use embedded_graphics::{image::ImageDrawable, pixelcolor::Rgb565};
+use embedded_graphics::{
+    image::ImageDrawable, pixelcolor::Rgb565, prelude::Point, transform::Transform,
+};
 use tinygif::Gif;
 
 #[panic_handler]
@@ -36,13 +38,17 @@ pub fn main() {
     assert!(read == size);
 
     let gif = Gif::<Rgb565>::from_slice(&buf).unwrap();
+    let height = gif.height();
 
     let mut frame_num = 0;
     loop {
-        for frame in gif.frames() {
+        for mut frame in gif.frames() {
             let start = get_ms();
 
-            frame.draw(&mut display).unwrap();
+            frame
+                .translate_mut(Point::new(0, (320 - height as i32) / 2))
+                .draw(&mut display)
+                .unwrap();
             frame_num += 1;
 
             if frame_num % 100 == 0 {

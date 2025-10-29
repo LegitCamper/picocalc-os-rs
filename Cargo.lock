@@ -124,7 +124,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5deb64efa5bd81e31fcd1938615a6d98c82eafcbcd787162b6f63b91d6bac5b3"
 dependencies = [
- "rustc_version 0.2.3",
+ "rustc_version",
 ]
 
 [[package]]
@@ -225,7 +225,7 @@ dependencies = [
  "embedded-io",
  "embedded-io-async",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless",
  "uuid",
 ]
 
@@ -409,7 +409,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-io-async",
  "futures",
- "heapless 0.8.0",
+ "heapless",
  "num_enum 0.5.11",
 ]
 
@@ -788,7 +788,7 @@ dependencies = [
  "embedded-io-async",
  "futures-sink",
  "futures-util",
- "heapless 0.8.0",
+ "heapless",
 ]
 
 [[package]]
@@ -803,7 +803,7 @@ dependencies = [
  "embedded-io-async",
  "futures-core",
  "futures-sink",
- "heapless 0.8.0",
+ "heapless",
 ]
 
 [[package]]
@@ -856,7 +856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80e2ee86063bd028a420a5fb5898c18c87a8898026da1d4c852af2c443d0a454"
 dependencies = [
  "embassy-executor-timer-queue",
- "heapless 0.8.0",
+ "heapless",
 ]
 
 [[package]]
@@ -870,7 +870,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-usb-driver 0.2.0",
  "embedded-io-async",
- "heapless 0.8.0",
+ "heapless",
  "ssmarshal",
  "usbd-hid",
 ]
@@ -1032,7 +1032,7 @@ dependencies = [
  "defmt 0.3.100",
  "embedded-hal 1.0.0",
  "embedded-io",
- "heapless 0.8.0",
+ "heapless",
 ]
 
 [[package]]
@@ -1314,15 +1314,6 @@ dependencies = [
 
 [[package]]
 name = "hash32"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
-dependencies = [
- "byteorder",
-]
-
-[[package]]
-name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
@@ -1353,24 +1344,11 @@ checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
 
 [[package]]
 name = "heapless"
-version = "0.7.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
-dependencies = [
- "atomic-polyfill",
- "hash32 0.2.1",
- "rustc_version 0.4.1",
- "spin 0.9.8",
- "stable_deref_trait",
-]
-
-[[package]]
-name = "heapless"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
- "hash32 0.3.1",
+ "hash32",
  "serde",
  "stable_deref_trait",
 ]
@@ -1524,14 +1502,14 @@ dependencies = [
  "embedded-sdmmc",
  "embedded-text",
  "goblin",
- "heapless 0.8.0",
+ "heapless",
  "kolibri-embedded-gui",
  "num_enum 0.7.4",
  "once_cell",
  "panic-probe",
  "portable-atomic",
  "rand",
- "spin 0.10.0",
+ "spin",
  "st7365p-lcd",
  "static_cell",
  "strum",
@@ -1548,7 +1526,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-iconoir",
  "foldhash",
- "heapless 0.8.0",
+ "heapless",
 ]
 
 [[package]]
@@ -2164,16 +2142,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
- "semver 0.9.0",
-]
-
-[[package]]
-name = "rustc_version"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
-dependencies = [
- "semver 1.0.27",
+ "semver",
 ]
 
 [[package]]
@@ -2230,12 +2199,6 @@ checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
 dependencies = [
  "semver-parser",
 ]
-
-[[package]]
-name = "semver"
-version = "1.0.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "semver-parser"
@@ -2344,15 +2307,6 @@ dependencies = [
 
 [[package]]
 name = "spin"
-version = "0.9.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
-
-[[package]]
-name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
@@ -2379,7 +2333,7 @@ dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
- "heapless 0.8.0",
+ "heapless",
  "nb 1.1.0",
 ]
 
@@ -2609,11 +2563,10 @@ dependencies = [
 [[package]]
 name = "tinygif"
 version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09f1406b710986188de8d393c810213d4bbf940e327d90d52cff9930d007a248"
+source = "git+https://github.com/LegitCamper/tinygif#083c0efbdbeb21835de30425e234247340f6e370"
 dependencies = [
  "embedded-graphics",
- "heapless 0.7.17",
+ "heapless",
 ]
 
 [[package]]
@@ -2637,7 +2590,7 @@ dependencies = [
  "embassy-time 0.4.0",
  "embedded-io",
  "futures",
- "heapless 0.8.0",
+ "heapless",
  "rand_core 0.6.4",
  "static_cell",
  "trouble-host-macros",
@@ -2688,7 +2641,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98816b1accafbb09085168b90f27e93d790b4bfa19d883466b5e53315b5f06a6"
 dependencies = [
- "heapless 0.8.0",
+ "heapless",
  "portable-atomic",
 ]
 
