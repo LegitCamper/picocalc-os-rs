@@ -246,7 +246,7 @@ async fn setup_mcu(mcu: Mcu) {
 
 async fn setup_display(display: Display, spawner: Spawner) {
     let mut config = spi::Config::default();
-    config.frequency = 16_000_000;
+    config.frequency = 64_000_000;
     let spi = Spi::new(
         display.spi,
         display.clk,

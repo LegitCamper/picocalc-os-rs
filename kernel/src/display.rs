@@ -58,6 +58,6 @@ pub async fn display_handler(mut display: DISPLAY) {
         }
 
         // small yield to allow other tasks to run
-        Timer::after_nanos(100).await;
+        Timer::after_nanos(500).await;
     }
 }
