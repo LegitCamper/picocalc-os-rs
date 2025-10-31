@@ -80,6 +80,9 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
+#[cfg(not(feature = "pimoroni2w"))]
+static mut ARENA: [u8; 250 * 1024] = [0; 250 * 1024];
+#[cfg(feature = "pimoroni2w")]
 static mut ARENA: [u8; 400 * 1024] = [0; 400 * 1024];
 
 #[global_allocator]
