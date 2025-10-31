@@ -1,4 +1,5 @@
 use crate::framebuffer::{self, AtomicFrameBuffer, FB_PAUSED};
+use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::Ordering;
 use embassy_rp::{
     Peri,
@@ -7,16 +8,12 @@ use embassy_rp::{
     spi::{Async, Spi},
 };
 use embassy_time::{Delay, Timer};
-use embedded_hal_bus::spi::ExclusiveDevice;
-use st7365p_lcd::ST7365P;
-
-#[cfg(feature = "pimoroni2w")]
-use core::alloc::{GlobalAlloc, Layout};
-#[cfg(feature = "pimoroni2w")]
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::{DrawTarget, RgbColor},
 };
+use embedded_hal_bus::spi::ExclusiveDevice;
+use st7365p_lcd::ST7365P;
 
 type DISPLAY = ST7365P<
     ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
