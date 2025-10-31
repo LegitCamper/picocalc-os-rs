@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+#![allow(static_mut_refs)]
+#![feature(c_variadic)]
 
 extern crate alloc;
 use abi::{
@@ -12,6 +14,10 @@ use abi::{
 use alloc::vec;
 use core::panic::PanicInfo;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::Point};
+
+mod doom;
+use crate::doom::{DISPLAY, SCREEN_BUFFER, create, tick};
+mod libc;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -26,5 +32,12 @@ pub extern "Rust" fn _start() {
 
 pub fn main() {
     print!("Starting Doom app");
-    let mut display = Display;
+    let display = Display;
+    unsafe { DISPLAY = Some(display) };
+
+    unsafe { create(&SCREEN_BUFFER) };
+
+    loop {
+        tick();
+    }
 }

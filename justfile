@@ -17,3 +17,4 @@ userapps: cbindgen
     just userapp snake
     just userapp gallery
     just userapp gif
+    just userapp doom

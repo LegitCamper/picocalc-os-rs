@@ -46,7 +46,6 @@ pub fn get_key() -> KeyEvent {
 
 pub mod display {
     use abi_sys::CPixel;
-    use alloc::{vec, vec::Vec};
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
@@ -54,7 +53,6 @@ pub mod display {
         prelude::{DrawTarget, Size},
         primitives::Rectangle,
     };
-    use once_cell::unsync::Lazy;
 
     pub const SCREEN_WIDTH: usize = 320;
     pub const SCREEN_HEIGHT: usize = 320;
