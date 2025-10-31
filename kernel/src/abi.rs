@@ -81,7 +81,7 @@ pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
     let iter = cpixels.iter().copied().map(|c: CPixel| c.into());
 
     FB_PAUSED.store(true, Ordering::Release);
-    unsafe { FRAMEBUFFER.draw_iter(iter).unwrap() }
+    unsafe { FRAMEBUFFER.as_mut().unwrap().draw_iter(iter).unwrap() }
     FB_PAUSED.store(false, Ordering::Release);
 }
 

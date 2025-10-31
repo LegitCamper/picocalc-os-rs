@@ -80,7 +80,10 @@ static mut CORE1_STACK: Stack<16384> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
+#[cfg(not(feature = "pimoroni2w"))]
 static mut ARENA: [u8; 250 * 1024] = [0; 250 * 1024];
+#[cfg(feature = "pimoroni2w")]
+static mut ARENA: [u8; 400 * 1024] = [0; 400 * 1024];
 
 #[global_allocator]
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
@@ -90,12 +93,12 @@ static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
 #[embassy_executor::task]
 async fn watchdog_task(mut watchdog: Watchdog) {
     if let Some(reason) = watchdog.reset_reason() {
-        let reason = match reason {
+        let _reason = match reason {
             ResetReason::Forced => "forced",
             ResetReason::TimedOut => "timed out",
         };
         #[cfg(feature = "debug")]
-        defmt::error!("Watchdog reset reason: {}", reason);
+        defmt::error!("Watchdog reset reason: {}", _reason);
     }
 
     watchdog.start(Duration::from_secs(3));
@@ -195,7 +198,7 @@ async fn userland_task() {
         {
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
-            unsafe { FRAMEBUFFER.clear(Rgb565::BLACK).unwrap() };
+            unsafe { FRAMEBUFFER.as_mut().unwrap().clear(Rgb565::BLACK).unwrap() };
 
             let mut selections = SELECTIONS.lock().await;
             selections.set_changed(true);
@@ -280,22 +283,18 @@ async fn setup_psram(psram: Psram) {
 
 #[cfg(feature = "pimoroni2w")]
 async fn setup_qmi_psram() {
-    let mut tries = 5;
     Timer::after_millis(250).await;
-    while tries > 1 {
-        let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
-        #[cfg(feature = "debug")]
-        defmt::info!("size:  {}", psram_qmi_size);
-        Timer::after_millis(100).await;
-        if psram_qmi_size > 0 {
-            init_qmi_psram_heap(psram_qmi_size);
-            return;
-        }
-        #[cfg(feature = "debug")]
-        defmt::info!("failed to init qmi psram... trying again");
-        tries -= 1;
+    let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
+    #[cfg(feature = "debug")]
+    defmt::info!("size:  {}", psram_qmi_size);
+    Timer::after_millis(100).await;
+
+    if psram_qmi_size > 0 {
+        init_qmi_psram_heap(psram_qmi_size);
+        return;
+    } else {
+        panic!("qmi psram not initialized");
     }
-    panic!("qmi psram not initialized");
 }
 
 async fn setup_sd(sd: Sd) {
@@ -326,16 +325,18 @@ async fn kernel_task(
     spawner
         .spawn(watchdog_task(Watchdog::new(watchdog)))
         .unwrap();
+
     setup_mcu(mcu).await;
+
+    // setup_psram(psram).await;
+    #[cfg(feature = "pimoroni2w")]
+    setup_qmi_psram().await;
+
     setup_display(display, spawner).await;
     setup_sd(sd).await;
 
     let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
     // spawner.spawn(usb_handler(usb)).unwrap();
-
-    // setup_psram(psram).await;
-    #[cfg(feature = "pimoroni2w")]
-    setup_qmi_psram().await;
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);

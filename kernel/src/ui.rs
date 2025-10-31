@@ -68,7 +68,7 @@ pub async fn clear_selection() {
     if let Some(area) = sel.last_bounds {
         Rectangle::new(area.top_left, area.size)
             .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-            .draw(unsafe { &mut *FRAMEBUFFER })
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
             .unwrap();
     }
 }
@@ -78,7 +78,7 @@ async fn draw_selection() {
     let file_names = &guard.selections.clone();
 
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-    let display_area = unsafe { FRAMEBUFFER.bounding_box() };
+    let display_area = unsafe { FRAMEBUFFER.as_mut().unwrap().bounding_box() };
 
     const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
     let no_bins = String::from_str(NO_BINS).unwrap();
@@ -94,7 +94,7 @@ async fn draw_selection() {
             ),
             text_style,
         )
-        .draw(unsafe { &mut *FRAMEBUFFER })
+        .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
         .unwrap();
     } else {
         let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
@@ -119,12 +119,14 @@ async fn draw_selection() {
             .bounding_box();
         Rectangle::new(selected_bounds.top_left, selected_bounds.size)
             .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-            .draw(unsafe { &mut *FRAMEBUFFER })
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
             .unwrap();
 
         guard.last_bounds = Some(layout.bounds());
 
-        layout.draw(unsafe { &mut *FRAMEBUFFER }).unwrap();
+        layout
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
+            .unwrap();
     }
 
     guard.changed = false;
