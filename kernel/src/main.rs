@@ -94,6 +94,7 @@ async fn watchdog_task(mut watchdog: Watchdog) {
             ResetReason::Forced => "forced",
             ResetReason::TimedOut => "timed out",
         };
+        #[cfg(feature = "debug")]
         defmt::error!("Watchdog reset reason: {}", reason);
     }
 
@@ -283,12 +284,14 @@ async fn setup_qmi_psram() {
     Timer::after_millis(250).await;
     while tries > 1 {
         let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
+        #[cfg(feature = "debug")]
         defmt::info!("size:  {}", psram_qmi_size);
         Timer::after_millis(100).await;
         if psram_qmi_size > 0 {
             init_qmi_psram_heap(psram_qmi_size);
             return;
         }
+        #[cfg(feature = "debug")]
         defmt::info!("failed to init qmi psram... trying again");
         tries -= 1;
     }

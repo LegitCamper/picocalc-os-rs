@@ -526,6 +526,7 @@ pub fn init_psram_qmi(
     let psram_size = detect_psram_qmi(qmi);
 
     if psram_size == 0 {
+        #[cfg(feature = "debug")]
         defmt::error!("qmi psram size 0");
         return 0;
     }
