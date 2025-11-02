@@ -9,6 +9,26 @@ binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
 cbindgen:
     cbindgen abi_sys --output abi_sys.h -q
 
+newlib:
+    #!/bin/bash
+    cd picolibc
+    mkdir build
+    cd build
+    CONFIG_PICOLIBC=true ../scripts/do-configure thumbv8m_main_fp-none-eabi \
+        --buildtype=minsize \
+        -Dtests=true \
+        -Dtinystdio=false \
+        -Dsingle-thread=true \
+        -Db_pie=true \
+        -Ddefault_library=static \
+        -Dtinystdio=false \
+        -Dnewlib-nano-malloc=true \
+        -Dmultilib=false \
+        -Dpicolib=true \
+        "$@" 
+    DESTDIR=./install meson install
+    ninja
+
 userapp app:
      {{binary-args}} cargo build --bin {{app}} --profile release-binary
 
@@ -17,3 +37,4 @@ userapps: cbindgen
     just userapp snake
     just userapp gallery
     just userapp gif
+    just userapp nes

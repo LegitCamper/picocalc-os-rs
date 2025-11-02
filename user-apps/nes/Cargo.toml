@@ -1,0 +1,12 @@
+[package]
+name = "nes"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+bindgen = "0.71.0"
+cc = "1.2.44"
+
+[dependencies]
+abi = { path = "../../abi" }
+embedded-graphics = "0.8.1"

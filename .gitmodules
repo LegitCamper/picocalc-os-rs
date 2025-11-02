@@ -1,0 +1,6 @@
+[submodule "user-apps/nes/Peanut-GB"]
+	path = user-apps/nes/Peanut-GB
+	url = https://github.com/deltabeard/Peanut-GB
+[submodule "picolibc"]
+	path = picolibc
+	url = https://github.com/picolibc/picolibc
