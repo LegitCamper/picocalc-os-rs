@@ -12,8 +12,10 @@ mod abi;
 mod display;
 mod elf;
 mod framebuffer;
+#[allow(unused)]
 mod heap;
 mod peripherals;
+#[allow(unused)]
 mod psram;
 mod scsi;
 mod storage;
@@ -225,6 +227,7 @@ struct Sd {
     cs: Peri<'static, PIN_17>,
     det: Peri<'static, PIN_22>,
 }
+#[allow(dead_code)]
 struct Psram {
     pio: Peri<'static, PIO0>,
     sclk: Peri<'static, PIN_21>,

@@ -14,32 +14,29 @@ use embedded_hal_2::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
 use st7365p_lcd::ST7365P;
 
-pub const TILE_SIZE: usize = 16; // 16x16 tile
-pub const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE_SIZE); // 400 tiles
+const TILE_SIZE: usize = 16; // 16x16 tile
+const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE_SIZE); // 400 tiles
 
-// Group of tiles for batching
-pub const MAX_META_TILES: usize = (SCREEN_WIDTH / TILE_SIZE) * 2; // max number of meta tiles in buffer
-type MetaTileVec = heapless::Vec<Rectangle, { TILE_COUNT / MAX_META_TILES }>;
+const MAX_BATCH_TILES: usize = (SCREEN_WIDTH / TILE_SIZE) * 2;
+type BatchTileBuf = [u16; MAX_BATCH_TILES];
 
 pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 
 pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 
-static mut DIRTY_TILES: LazyLock<heapless::Vec<AtomicBool, TILE_COUNT>> = LazyLock::new(|| {
-    let mut tiles = heapless::Vec::new();
-    for _ in 0..TILE_COUNT {
-        tiles.push(AtomicBool::new(true)).unwrap();
-    }
-    tiles
-});
-
 #[allow(dead_code)]
-pub struct AtomicFrameBuffer<'a>(&'a mut [u16]);
+pub struct AtomicFrameBuffer<'a> {
+    fb: &'a mut [u16],
+    dirty_tiles: LazyLock<[AtomicBool; TILE_COUNT]>,
+}
 
 impl<'a> AtomicFrameBuffer<'a> {
     pub fn new(buffer: &'a mut [u16]) -> Self {
         assert!(buffer.len() == SIZE);
-        Self(buffer)
+        Self {
+            fb: buffer,
+            dirty_tiles: LazyLock::new(|| [const { AtomicBool::new(true) }; TILE_COUNT]),
+        }
     }
 
     fn mark_tiles_dirty(&mut self, rect: Rectangle) {
@@ -52,7 +49,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         for ty in start_ty..=end_ty {
             for tx in start_tx..=end_tx {
                 let tile_idx = ty * tiles_x + tx;
-                unsafe { DIRTY_TILES.get_mut()[tile_idx].store(true, Ordering::Release) };
+                self.dirty_tiles.get_mut()[tile_idx].store(true, Ordering::Release);
             }
         }
     }
@@ -78,7 +75,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         for y in sy..=ey {
             for x in sx..=ex {
                 if let Some(color) = color_iter.next() {
-                    self.0[(y as usize * SCREEN_WIDTH) + x as usize] = color;
+                    self.fb[(y as usize * SCREEN_WIDTH) + x as usize] = color;
                 } else {
                     return Err(()); // Not enough data
                 }
@@ -91,62 +88,6 @@ impl<'a> AtomicFrameBuffer<'a> {
         }
 
         Ok(())
-    }
-
-    // walk the dirty tiles and mark groups of tiles(meta-tiles) for batched updates
-    fn find_meta_tiles(&mut self, tiles_x: usize, tiles_y: usize) -> MetaTileVec {
-        let mut meta_tiles: MetaTileVec = heapless::Vec::new();
-
-        for ty in 0..tiles_y {
-            let mut tx = 0;
-            while tx < tiles_x {
-                let idx = ty * tiles_x + tx;
-                if !unsafe { DIRTY_TILES.get()[idx].load(Ordering::Acquire) } {
-                    tx += 1;
-                    continue;
-                }
-
-                // Start meta-tile at this tile
-                let mut width_tiles = 1;
-                let height_tiles = 1;
-
-                // Grow horizontally, but keep under MAX_TILES_PER_METATILE
-                while tx + width_tiles < tiles_x
-                    && unsafe {
-                        DIRTY_TILES.get()[ty * tiles_x + tx + width_tiles].load(Ordering::Acquire)
-                    }
-                    && (width_tiles + height_tiles) <= MAX_META_TILES
-                {
-                    width_tiles += 1;
-                }
-
-                // TODO: for simplicity, skipped vertical growth
-
-                for x_off in 0..width_tiles {
-                    unsafe {
-                        DIRTY_TILES.get()[ty * tiles_x + tx + x_off]
-                            .store(false, Ordering::Release);
-                    };
-                }
-
-                // new meta-tile pos
-                let rect = Rectangle::new(
-                    Point::new((tx * TILE_SIZE) as i32, (ty * TILE_SIZE) as i32),
-                    Size::new(
-                        (width_tiles * TILE_SIZE) as u32,
-                        (height_tiles * TILE_SIZE) as u32,
-                    ),
-                );
-
-                if meta_tiles.push(rect).is_err() {
-                    return meta_tiles;
-                };
-
-                tx += width_tiles;
-            }
-        }
-
-        meta_tiles
     }
 
     /// Sends the entire framebuffer to the display
@@ -165,15 +106,13 @@ impl<'a> AtomicFrameBuffer<'a> {
                 0,
                 self.size().width as u16 - 1,
                 self.size().height as u16 - 1,
-                &self.0[..],
+                &self.fb[..],
             )
             .await?;
 
-        unsafe {
-            for tile in DIRTY_TILES.get_mut().iter() {
-                tile.store(false, Ordering::Release);
-            }
-        };
+        for tile in self.dirty_tiles.get_mut().iter() {
+            tile.store(false, Ordering::Release);
+        }
 
         Ok(())
     }
@@ -191,7 +130,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         let tiles_x = SCREEN_WIDTH / TILE_SIZE;
         let _tiles_y = SCREEN_HEIGHT / TILE_SIZE;
 
-        let tiles = unsafe { DIRTY_TILES.get_mut() };
+        let tiles = self.dirty_tiles.get_mut();
         let mut pixel_buffer: heapless::Vec<u16, { TILE_SIZE * TILE_SIZE }> = heapless::Vec::new();
 
         for tile_idx in 0..TILE_COUNT {
@@ -210,7 +149,9 @@ impl<'a> AtomicFrameBuffer<'a> {
                 for y in y_start..y_end {
                     let start = y * SCREEN_WIDTH + x_start;
                     let end = y * SCREEN_WIDTH + x_end;
-                    pixel_buffer.extend_from_slice(&self.0[start..end]).unwrap();
+                    pixel_buffer
+                        .extend_from_slice(&self.fb[start..end])
+                        .unwrap();
                 }
 
                 display
@@ -223,72 +164,6 @@ impl<'a> AtomicFrameBuffer<'a> {
                     )
                     .await
                     .unwrap();
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Sends only dirty tiles (16x16px) in batches to the display
-    pub async fn partial_draw<SPI, DC, RST, DELAY>(
-        &mut self,
-        display: &mut ST7365P<SPI, DC, RST, DELAY>,
-    ) -> Result<(), ()>
-    where
-        SPI: SpiDevice,
-        DC: OutputPin,
-        RST: OutputPin,
-        DELAY: DelayNs,
-    {
-        if unsafe { DIRTY_TILES.get().iter().any(|p| p.load(Ordering::Acquire)) } {
-            let tiles_x = (SCREEN_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
-            let tiles_y = (SCREEN_HEIGHT + TILE_SIZE - 1) / TILE_SIZE;
-
-            let meta_tiles = self.find_meta_tiles(tiles_x, tiles_y);
-
-            // buffer for copying meta tiles before sending to display
-            let mut pixel_buffer: heapless::Vec<u16, { MAX_META_TILES * TILE_SIZE * TILE_SIZE }> =
-                heapless::Vec::new();
-
-            for rect in meta_tiles {
-                let rect_width = rect.size.width as usize;
-                let rect_height = rect.size.height as usize;
-                let rect_x = rect.top_left.x as usize;
-                let rect_y = rect.top_left.y as usize;
-
-                pixel_buffer.clear();
-
-                for row in 0..rect_height {
-                    let y = rect_y + row;
-                    let start = y * SCREEN_WIDTH + rect_x;
-                    let end = start + rect_width;
-
-                    // Safe: we guarantee buffer will not exceed MAX_META_TILE_PIXELS
-                    pixel_buffer.extend_from_slice(&self.0[start..end]).unwrap();
-                }
-
-                display
-                    .set_pixels_buffered(
-                        rect_x as u16,
-                        rect_y as u16,
-                        (rect_x + rect_width - 1) as u16,
-                        (rect_y + rect_height - 1) as u16,
-                        &pixel_buffer,
-                    )
-                    .await?;
-
-                // walk the meta-tile and set as clean
-                let start_tx = rect_x / TILE_SIZE;
-                let start_ty = rect_y / TILE_SIZE;
-                let end_tx = (rect_x + rect_width - 1) / TILE_SIZE;
-                let end_ty = (rect_y + rect_height - 1) / TILE_SIZE;
-
-                for ty in start_ty..=end_ty {
-                    for tx in start_tx..=end_tx {
-                        let tile_idx = ty * tiles_x + tx;
-                        unsafe { DIRTY_TILES.get_mut()[tile_idx].store(false, Ordering::Release) };
-                    }
-                }
             }
         }
 
@@ -315,8 +190,8 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
                     let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
                     let raw_color = RawU16::from(color).into_inner();
-                    if self.0[idx] != raw_color {
-                        self.0[idx] = raw_color;
+                    if self.fb[idx] != raw_color {
+                        self.fb[idx] = raw_color;
                         changed = true;
                     }
 
@@ -365,8 +240,8 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                         if let Some(color) = colors.next() {
                             let idx = (p.y as usize * SCREEN_WIDTH) + (p.x as usize);
                             let raw_color = RawU16::from(color).into_inner();
-                            if self.0[idx] != raw_color {
-                                self.0[idx] = raw_color;
+                            if self.fb[idx] != raw_color {
+                                self.fb[idx] = raw_color;
                                 changed = true;
                             }
                         } else {
@@ -404,7 +279,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                 .take((self.size().width * self.size().height) as usize),
         )?;
 
-        for tile in unsafe { DIRTY_TILES.get_mut() }.iter() {
+        for tile in self.dirty_tiles.get_mut().iter() {
             tile.store(true, Ordering::Release);
         }
 
