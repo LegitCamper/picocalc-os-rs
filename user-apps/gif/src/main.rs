@@ -51,11 +51,14 @@ pub fn main() {
                 .unwrap();
             frame_num += 1;
 
-            if frame_num % 100 == 0 {
+            if frame_num % 5 == 0 {
                 let event = get_key();
                 if event.state != KeyState::Idle {
                     match event.key {
-                        KeyCode::Esc => return,
+                        KeyCode::Esc => {
+                            drop(buf);
+                            return;
+                        }
                         _ => (),
                     };
                 };

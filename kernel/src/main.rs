@@ -197,8 +197,6 @@ async fn userland_task() {
         defmt::info!("Executing Binary");
         entry();
 
-        unsafe { HEAP.free() };
-
         // enable kernel ui
         {
             ENABLE_UI.store(true, Ordering::Release);
