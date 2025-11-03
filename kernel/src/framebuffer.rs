@@ -1,6 +1,5 @@
 use crate::display::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_sync::lazy_lock::LazyLock;
 use embedded_graphics::{
     draw_target::DrawTarget,
     pixelcolor::{
@@ -16,9 +15,11 @@ use st7365p_lcd::ST7365P;
 
 const TILE_SIZE: usize = 16; // 16x16 tile
 const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE_SIZE); // 400 tiles
+const NUM_TILE_ROWS: usize = SCREEN_WIDTH / TILE_SIZE;
+const NUM_TILE_COLS: usize = SCREEN_WIDTH / TILE_SIZE;
 
 const MAX_BATCH_TILES: usize = (SCREEN_WIDTH / TILE_SIZE) * 2;
-type BatchTileBuf = [u16; MAX_BATCH_TILES];
+type BatchTileBuf = [u16; MAX_BATCH_TILES * TILE_SIZE * TILE_SIZE];
 
 pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 
@@ -27,7 +28,8 @@ pub static FB_PAUSED: AtomicBool = AtomicBool::new(false);
 #[allow(dead_code)]
 pub struct AtomicFrameBuffer<'a> {
     fb: &'a mut [u16],
-    dirty_tiles: LazyLock<[AtomicBool; TILE_COUNT]>,
+    dirty_tiles: [AtomicBool; TILE_COUNT],
+    batch_tile_buf: BatchTileBuf,
 }
 
 impl<'a> AtomicFrameBuffer<'a> {
@@ -35,7 +37,8 @@ impl<'a> AtomicFrameBuffer<'a> {
         assert!(buffer.len() == SIZE);
         Self {
             fb: buffer,
-            dirty_tiles: LazyLock::new(|| [const { AtomicBool::new(true) }; TILE_COUNT]),
+            dirty_tiles: core::array::from_fn(|_| AtomicBool::new(true)),
+            batch_tile_buf: [0; MAX_BATCH_TILES * TILE_SIZE * TILE_SIZE],
         }
     }
 
@@ -49,7 +52,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         for ty in start_ty..=end_ty {
             for tx in start_tx..=end_tx {
                 let tile_idx = ty * tiles_x + tx;
-                self.dirty_tiles.get_mut()[tile_idx].store(true, Ordering::Release);
+                self.dirty_tiles[tile_idx].store(true, Ordering::Release);
             }
         }
     }
@@ -90,6 +93,19 @@ impl<'a> AtomicFrameBuffer<'a> {
         Ok(())
     }
 
+    // Checks if a full draw would be faster than individual tile batches
+    fn should_full_draw(&self) -> bool {
+        let threshold_pixels = SIZE * 80 / 100;
+        let mut dirty_pixels = 0;
+
+        self.dirty_tiles.iter().any(|tile| {
+            if tile.load(Ordering::Acquire) {
+                dirty_pixels += TILE_SIZE * TILE_SIZE;
+            }
+            dirty_pixels >= threshold_pixels
+        })
+    }
+
     /// Sends the entire framebuffer to the display
     pub async fn draw<SPI, DC, RST, DELAY: DelayNs>(
         &mut self,
@@ -110,14 +126,37 @@ impl<'a> AtomicFrameBuffer<'a> {
             )
             .await?;
 
-        for tile in self.dirty_tiles.get_mut().iter() {
+        for tile in self.dirty_tiles.iter() {
             tile.store(false, Ordering::Release);
         }
 
         Ok(())
     }
 
-    pub async fn safe_draw<SPI, DC, RST, DELAY>(
+    // copy N tiles horizontally to the right into batch tile buf
+    fn append_tiles_to_batch(
+        &mut self,
+        tile_x: u16,
+        tile_y: u16,
+        total_tiles: u16, // number of tiles being written to buf
+    ) {
+        debug_assert!(total_tiles as usize <= NUM_TILE_COLS);
+        for batch_row_num in 0..TILE_SIZE {
+            let batch_row_offset = batch_row_num * total_tiles as usize * TILE_SIZE;
+            let batch_row = &mut self.batch_tile_buf
+                [batch_row_offset..batch_row_offset + (total_tiles as usize * TILE_SIZE)];
+
+            let fb_row_offset = (tile_y as usize * TILE_SIZE + batch_row_num) * SCREEN_WIDTH
+                + tile_x as usize * TILE_SIZE;
+            let fb_row =
+                &self.fb[fb_row_offset..fb_row_offset + (total_tiles as usize * TILE_SIZE)];
+
+            batch_row.copy_from_slice(fb_row);
+        }
+    }
+
+    // Pushes tiles to the display in batches to avoid full frame pushes (unless needed)
+    pub async fn partial_draw<SPI, DC, RST, DELAY>(
         &mut self,
         display: &mut ST7365P<SPI, DC, RST, DELAY>,
     ) -> Result<(), ()>
@@ -127,43 +166,53 @@ impl<'a> AtomicFrameBuffer<'a> {
         RST: OutputPin,
         DELAY: DelayNs,
     {
-        let tiles_x = SCREEN_WIDTH / TILE_SIZE;
-        let _tiles_y = SCREEN_HEIGHT / TILE_SIZE;
+        if self.should_full_draw() {
+            return self.draw(display).await;
+        }
 
-        let tiles = self.dirty_tiles.get_mut();
-        let mut pixel_buffer: heapless::Vec<u16, { TILE_SIZE * TILE_SIZE }> = heapless::Vec::new();
+        for tile_row in 0..NUM_TILE_ROWS {
+            let row_start_idx = tile_row * NUM_TILE_COLS;
+            let mut col = 0;
 
-        for tile_idx in 0..TILE_COUNT {
-            if tiles[tile_idx].swap(false, Ordering::AcqRel) {
-                let tx = tile_idx % tiles_x;
-                let ty = tile_idx / tiles_x;
+            while col < NUM_TILE_COLS {
+                // Check for dirty tile
+                if self.dirty_tiles[row_start_idx + col].swap(false, Ordering::Acquire) {
+                    let run_start = col;
+                    let mut run_len = 1;
 
-                let x_start = tx * TILE_SIZE;
-                let y_start = ty * TILE_SIZE;
+                    // Extend run while contiguous dirty tiles and within MAX_BATCH_TILES
+                    while col + 1 < NUM_TILE_COLS
+                        && self.dirty_tiles[row_start_idx + col + 1].load(Ordering::Acquire)
+                        && run_len < MAX_BATCH_TILES
+                    {
+                        col += 1;
+                        run_len += 1;
+                    }
 
-                let x_end = (x_start + TILE_SIZE).min(SCREEN_WIDTH);
-                let y_end = (y_start + TILE_SIZE).min(SCREEN_HEIGHT);
+                    // Copy the whole horizontal run into the batch buffer in one call
+                    let tile_x = run_start;
+                    let tile_y = tile_row;
+                    self.append_tiles_to_batch(tile_x as u16, tile_y as u16, run_len as u16);
 
-                pixel_buffer.clear();
+                    // Compute coordinates for display write
+                    let start_x = tile_x * TILE_SIZE;
+                    let end_x = start_x + run_len * TILE_SIZE - 1;
+                    let start_y = tile_y * TILE_SIZE;
+                    let end_y = start_y + TILE_SIZE - 1;
 
-                for y in y_start..y_end {
-                    let start = y * SCREEN_WIDTH + x_start;
-                    let end = y * SCREEN_WIDTH + x_end;
-                    pixel_buffer
-                        .extend_from_slice(&self.fb[start..end])
-                        .unwrap();
+                    // Send batch to display
+                    display
+                        .set_pixels_buffered(
+                            start_x as u16,
+                            start_y as u16,
+                            end_x as u16,
+                            end_y as u16,
+                            &self.batch_tile_buf[..run_len * TILE_SIZE * TILE_SIZE],
+                        )
+                        .await?;
                 }
 
-                display
-                    .set_pixels_buffered(
-                        x_start as u16,
-                        y_start as u16,
-                        (x_end - 1) as u16,
-                        (y_end - 1) as u16,
-                        &pixel_buffer,
-                    )
-                    .await
-                    .unwrap();
+                col += 1;
             }
         }
 
@@ -184,8 +233,8 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
 
         for Pixel(coord, color) in pixels {
             if coord.x >= 0 && coord.y >= 0 {
-                let x = coord.x as i32;
-                let y = coord.y as i32;
+                let x = coord.x;
+                let y = coord.y;
 
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
                     let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
@@ -279,7 +328,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                 .take((self.size().width * self.size().height) as usize),
         )?;
 
-        for tile in self.dirty_tiles.get_mut().iter() {
+        for tile in self.dirty_tiles.iter() {
             tile.store(true, Ordering::Release);
         }
 

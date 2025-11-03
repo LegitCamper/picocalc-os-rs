@@ -84,7 +84,7 @@ pub async fn display_handler(mut display: DISPLAY) {
                 FRAMEBUFFER
                     .as_mut()
                     .unwrap()
-                    .safe_draw(&mut display)
+                    .partial_draw(&mut display)
                     .await
                     .unwrap()
             };
