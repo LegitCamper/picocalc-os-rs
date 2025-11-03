@@ -47,6 +47,15 @@ fn bindgen() {
     cc::Build::new()
         .file("peanut_gb_stub.c")
         .include("Peanut-GB")
+        // optimization flags
+        .flag("-O3") // max optimization
+        .flag("-ffast-math") // faster floating point, if any
+        .flag("-funroll-loops") // unroll small loops
+        // CPU/architecture flags (example for ARM Cortex-M33)
+        .flag("-mcpu=cortex-m33")
+        .flag("-mthumb")
+        // optional: strip debug info
+        .flag("-g0")
         .compile("peanut_gb");
 
     println!("cargo:rustc-link-search=Peanut-GB");

@@ -1,5 +1,7 @@
 kernel-dev board:
     cargo run --bin kernel --features {{board}}
+kernel-release-probe board:
+    cargo run --bin kernel --profile release --features {{board}}
 kernel-release board:
     cargo build --bin kernel --release --no-default-features --features {{board}}
     elf2uf2-rs -d target/thumbv8m.main-none-eabihf/release/kernel
@@ -37,4 +39,4 @@ userapps: cbindgen
     just userapp snake
     just userapp gallery
     just userapp gif
-    just userapp nes
+    just userapp gboy
