@@ -29,6 +29,7 @@ use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     display::{FRAMEBUFFER, display_handler, init_display},
+    heap::HEAP,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
@@ -196,6 +197,8 @@ async fn userland_task() {
         defmt::info!("Executing Binary");
         entry();
 
+        unsafe { HEAP.free() };
+
         // enable kernel ui
         {
             ENABLE_UI.store(true, Ordering::Release);
@@ -334,6 +337,8 @@ async fn kernel_task(
     // setup_psram(psram).await;
     #[cfg(feature = "pimoroni2w")]
     setup_qmi_psram().await;
+    #[cfg(feature = "pimoroni2w")]
+    Timer::after_millis(500).await;
 
     setup_display(display, spawner).await;
     setup_sd(sd).await;
