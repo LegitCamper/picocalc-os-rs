@@ -334,12 +334,14 @@ async fn kernel_task(
 
     setup_mcu(mcu).await;
 
+    defmt::info!("setting up psram");
+    Timer::after_millis(100).await;
+
     // setup_psram(psram).await;
     #[cfg(feature = "pimoroni2w")]
     setup_qmi_psram().await;
-    #[cfg(feature = "pimoroni2w")]
-    Timer::after_millis(500).await;
 
+    Timer::after_millis(100).await;
     setup_display(display, spawner).await;
     setup_sd(sd).await;
 

@@ -549,13 +549,13 @@ pub fn init_psram_qmi(
     let min_deselect: u32 = ((18 * 1_000_000 + (clock_period_fs - 1)) / clock_period_fs
         - u64::from(divisor + 1) / 2) as u32;
 
-    #[cfg(feature = "defmt")]
-    defmt::info!(
-        "clock_period_fs={} max_select={} min_deselect={}",
-        clock_period_fs,
-        max_select,
-        min_deselect
-    );
+    // #[cfg(feature = "defmt")]
+    // defmt::info!(
+    //     "clock_period_fs={} max_select={} min_deselect={}",
+    //     clock_period_fs,
+    //     max_select,
+    //     min_deselect
+    // );
 
     qmi.direct_csr().write(|w| {
         w.set_clkdiv(10);
