@@ -8,27 +8,16 @@ use abi::{
     fs::{list_dir, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
-    print,
+    main, print,
 };
 use alloc::{format, string::ToString, vec};
-use core::panic::PanicInfo;
 use embedded_graphics::{
     Drawable, image::Image, mono_font::MonoTextStyle, mono_font::ascii::FONT_6X10,
     pixelcolor::Rgb565, prelude::*, text::Text,
 };
 use tinybmp::Bmp;
 
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location());
-    loop {}
-}
-
-#[unsafe(no_mangle)]
-pub extern "Rust" fn _start() {
-    main()
-}
-
+#[main]
 pub fn main() {
     print!("Starting Gallery app");
     let mut bmp_buf = vec![0_u8; 100_000];

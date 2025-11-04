@@ -9,7 +9,6 @@ use abi::{
     print,
 };
 use alloc::{format, string::String, vec, vec::Vec};
-use core::panic::PanicInfo;
 use embedded_graphics::{
     Drawable,
     geometry::{Dimensions, Point},
@@ -25,12 +24,6 @@ use embedded_layout::{
     layout::linear::LinearLayout,
     prelude::Chain,
 };
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
-}
 
 #[unsafe(no_mangle)]
 pub extern "Rust" fn _start() {

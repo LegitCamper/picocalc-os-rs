@@ -29,7 +29,6 @@ use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     display::{FRAMEBUFFER, display_handler, init_display},
-    heap::HEAP,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
@@ -322,7 +321,7 @@ async fn kernel_task(
     watchdog: Peri<'static, WATCHDOG>,
     display: Display,
     sd: Sd,
-    psram: Psram,
+    _psram: Psram,
     mcu: Mcu,
     usb: Peri<'static, USB>,
 ) {

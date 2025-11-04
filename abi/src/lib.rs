@@ -5,9 +5,19 @@ extern crate alloc;
 
 pub use abi_sys::{self, keyboard};
 use abi_sys::{RngRequest, alloc, dealloc, keyboard::KeyEvent};
-pub use alloc::format;
-use core::alloc::{GlobalAlloc, Layout};
+use alloc::format;
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    panic::PanicInfo,
+};
+pub use main_proc_macro::main;
 use rand_core::RngCore;
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    print!("user panic: {} @ {:?}", info.message(), info.location(),);
+    loop {}
+}
 
 #[global_allocator]
 static ALLOC: Alloc = Alloc;
@@ -27,7 +37,7 @@ unsafe impl GlobalAlloc for Alloc {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {{
-        let s = $crate::format!($($arg)*);
+        let s = format!($($arg)*);
         $crate::abi_sys::print(s.as_ptr(), s.len());
     }};
 }

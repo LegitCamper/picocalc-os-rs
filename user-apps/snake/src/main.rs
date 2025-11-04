@@ -9,15 +9,9 @@ use abi::{
     keyboard::{KeyCode, KeyState},
     print, sleep,
 };
-use core::panic::PanicInfo;
+use alloc::format;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
 use embedded_snake::{Direction, SnakeGame};
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
-}
 
 #[unsafe(no_mangle)]
 pub extern "Rust" fn _start() {

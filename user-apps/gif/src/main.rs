@@ -7,26 +7,15 @@ use abi::{
     fs::{file_len, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
-    print, sleep,
+    main, print, sleep,
 };
-use alloc::vec;
-use core::panic::PanicInfo;
+use alloc::{format, vec};
 use embedded_graphics::{
     image::ImageDrawable, pixelcolor::Rgb565, prelude::Point, transform::Transform,
 };
 use tinygif::Gif;
 
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
-}
-
-#[unsafe(no_mangle)]
-pub extern "Rust" fn _start() {
-    main()
-}
-
+#[main]
 pub fn main() {
     print!("Starting Gif app");
     let mut display = Display;
