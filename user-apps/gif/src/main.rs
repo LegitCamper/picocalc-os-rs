@@ -32,11 +32,12 @@ pub fn main() {
     print!("Starting Gif app");
     let mut display = Display;
 
-    let mut gifs = Entries::new();
-    list_dir("/gifs", &mut gifs);
+    let mut entries = Entries::new();
+    list_dir("/gifs", &mut entries);
 
-    gifs.entries()
-        .retain(|e| e.extension().unwrap_or("") == "gif");
+    let mut files = entries.entries();
+    files.retain(|e| e.extension().unwrap_or("") == "gif");
+    let gifs = &files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
 
     let mut selection_ui = SelectionUi::new(&gifs, "No Gif files found in /gifs");
     let selection = selection_ui
@@ -44,9 +45,10 @@ pub fn main() {
         .expect("failed to draw")
         .expect("Failed to get user selection");
 
-    let size = file_len(&format!("/gifs/{}.gif", gifs.entries()[selection]));
+    let file_name = format!("/gifs/{}", gifs[selection]);
+    let size = file_len(&file_name);
     let mut buf = vec![0_u8; size];
-    let read = read_file("/gifs/bad_apple.gif", 0, &mut buf);
+    let read = read_file(&file_name, 0, &mut buf);
     print!("read: {}, file size: {}", read, size);
     assert!(read == size);
 
