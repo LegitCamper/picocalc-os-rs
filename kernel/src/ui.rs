@@ -56,32 +56,43 @@ async fn input_handler() {
         if let KeyState::Pressed = event.state {
             match event.key {
                 KeyCode::Up => {
-                    let mut selections = SELECTIONS.lock().await;
-                    selections.up();
+                    if !USB_ACTIVE.load(Ordering::Acquire) {
+                        let mut selections = SELECTIONS.lock().await;
+                        selections.up();
+                    }
                 }
                 KeyCode::Down => {
-                    let mut selections = SELECTIONS.lock().await;
-                    selections.down();
+                    if !USB_ACTIVE.load(Ordering::Acquire) {
+                        let mut selections = SELECTIONS.lock().await;
+                        selections.down();
+                    }
                 }
                 KeyCode::F1 => {
                     match USB_ACTIVE.load(Ordering::Acquire) {
-                        true => stop_usb(),
+                        true => {
+                            stop_usb();
+                            // wait for sd card to be put back and then reload selections
+                            while USB_ACTIVE.load(Ordering::Acquire) {
+                                Timer::after_millis(100).await
+                            }
+                            update_selections().await
+                        }
                         false => start_usb(),
                     };
-                    update_selections().await;
                 }
                 KeyCode::Enter | KeyCode::Right => {
-                    stop_usb();
-                    let selections = SELECTIONS.lock().await;
-                    let selection =
-                        selections.selections[selections.current_selection as usize].clone();
+                    if !USB_ACTIVE.load(Ordering::Acquire) {
+                        let selections = SELECTIONS.lock().await;
+                        let selection =
+                            selections.selections[selections.current_selection as usize].clone();
 
-                    let entry = unsafe {
-                        load_binary(&selection.short_name)
-                            .await
-                            .expect("unable to load binary")
-                    };
-                    BINARY_CH.send(entry).await;
+                        let entry = unsafe {
+                            load_binary(&selection.short_name)
+                                .await
+                                .expect("unable to load binary")
+                        };
+                        BINARY_CH.send(entry).await;
+                    }
                 }
                 _ => (),
             }

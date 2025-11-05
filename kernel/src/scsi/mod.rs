@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
+use embassy_futures::yield_now;
 use embassy_sync::lazy_lock::LazyLock;
-use embassy_time::Timer;
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
 use embedded_sdmmc::{Block, BlockIdx};
@@ -18,21 +18,24 @@ const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 // NOT safe to disable usb, or acquire sdcard
 pub static SCSI_BUSY: AtomicBool = AtomicBool::new(false);
 
+// start no more transfers, usb is trying to stop
+pub static SCSI_HALT: AtomicBool = AtomicBool::new(false);
+
 // number of blocks to read from sd at once
 // higher is better, but is larger. Size is BLOCKS * 512 bytes
-const BLOCKS: usize = 1;
+const BLOCKS: usize = 5;
 static mut BLOCK_BUF: LazyLock<[Block; BLOCKS]> =
     LazyLock::new(|| core::array::from_fn(|_| Block::new()));
 
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     temp_sd: Option<SdCard>, // temporary owns sdcard when scsi is running
-    pending_eject: bool,
+    pub pending_eject: bool,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
 }
 
 impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
-    pub fn new(builder: &mut Builder<'d, D>, temp_sd: Option<SdCard>) -> Self {
+    pub fn new(builder: &mut Builder<'d, D>) -> Self {
         let mut function = builder.function(0x08, SUBCLASS_SCSI, 0x50); // Mass Storage class
         let mut interface = function.interface();
         let mut alt = interface.alt_setting(0x08, SUBCLASS_SCSI, 0x50, None);
@@ -41,7 +44,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         let bulk_in = alt.endpoint_bulk_in(None, BULK_ENDPOINT_PACKET_SIZE as u16);
 
         Self {
-            temp_sd,
+            temp_sd: None,
             pending_eject: false,
             bulk_out,
             bulk_in,
@@ -61,18 +64,31 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
     }
 
     pub async fn return_sdcard(&mut self) {
-        if self.temp_sd.is_some() {
+        if let Some(card) = self.temp_sd.take() {
             let mut guard = SDCARD.get().lock().await;
-            guard.replace(self.temp_sd.take().unwrap()).unwrap();
+            *guard = Some(card);
         }
     }
 
     pub async fn poll(&mut self) {
         loop {
+            if SCSI_HALT.load(Ordering::Acquire) {
+                break;
+            }
+
+            if self.pending_eject {
+                break;
+            }
             self.handle_cbw().await;
 
-            Timer::after_millis(10).await;
+            if self.pending_eject {
+                break;
+            }
+
+            yield_now().await;
         }
+
+        stop_usb();
     }
 
     async fn handle_cbw(&mut self) {
@@ -90,12 +106,6 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                     }
 
                     SCSI_BUSY.store(false, Ordering::Release);
-
-                    if self.pending_eject {
-                        if let ScsiCommand::Write { lba: _, len: _ } = command {
-                            stop_usb();
-                        }
-                    }
                 }
             }
         }

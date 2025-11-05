@@ -42,7 +42,7 @@ use abi_sys::EntryFn;
 use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::{join::join, select::select};
+use embassy_futures::select::select;
 use embassy_rp::{
     Peri,
     gpio::{Input, Level, Output, Pull},

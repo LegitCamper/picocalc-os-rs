@@ -1,9 +1,5 @@
+use crate::scsi::{MassStorageClass, SCSI_BUSY, SCSI_HALT};
 use core::sync::atomic::{AtomicBool, Ordering};
-
-use crate::{
-    scsi::{MassStorageClass, SCSI_BUSY},
-    storage::SdCard,
-};
 use embassy_futures::{join::join, select::select};
 use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
@@ -39,32 +35,41 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
         &mut control_buf,
     );
 
-    let temp_sd: Option<SdCard> = None;
-    let mut scsi = MassStorageClass::new(&mut builder, temp_sd);
+    let mut scsi = MassStorageClass::new(&mut builder);
     let mut usb = builder.build();
 
     loop {
         START_USB.receiver().receive().await;
-        #[cfg(feature = "defmt")]
+        USB_ACTIVE.store(true, Ordering::Release);
+        SCSI_HALT.store(false, Ordering::Release);
         scsi.take_sdcard().await;
-        defmt::info!("starting usb");
+        scsi.pending_eject = false;
+
+        // waits for cancellation signal, and then waits for
+        // transfers to stop before dropping usb future
         select(
-            // waits for cancellation signal, and then waits for
-            // transfers to stop before dropping usb future
             async {
                 STOP_USB.receiver().receive().await;
+                SCSI_HALT.store(true, Ordering::Release);
+                while SCSI_BUSY.load(Ordering::Acquire) {
+                    Timer::after_millis(100).await;
+                }
             },
-            // runs the usb, until cancelled
-            join(usb.run(), scsi.poll()),
+            async {
+                // runs the usb, until cancelled
+                join(
+                    async {
+                        let _ = usb.remote_wakeup().await;
+                        usb.run().await
+                    },
+                    scsi.poll(),
+                )
+                .await;
+            },
         )
         .await;
-        while SCSI_BUSY.load(Ordering::Acquire) {
-            Timer::after_millis(100).await;
-        }
-        #[cfg(feature = "defmt")]
-        defmt::info!("disabling usb");
-        scsi.return_sdcard().await;
         usb.disable().await;
+        scsi.return_sdcard().await;
         USB_ACTIVE.store(false, Ordering::Release);
     }
 }
@@ -72,11 +77,9 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
 pub fn start_usb() {
     let _ = STOP_USB.receiver().try_receive();
     let _ = START_USB.sender().try_send(());
-    USB_ACTIVE.store(true, Ordering::Release);
 }
 
 pub fn stop_usb() {
     let _ = START_USB.receiver().try_receive();
     let _ = STOP_USB.sender().try_send(());
-    USB_ACTIVE.store(false, Ordering::Release);
 }
