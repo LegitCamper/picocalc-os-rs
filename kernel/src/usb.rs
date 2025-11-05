@@ -1,9 +1,16 @@
-use crate::{scsi::MassStorageClass, storage::SdCard};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::select::select;
+
+use crate::{scsi::MassStorageClass, storage::SdCard};
+use embassy_futures::{join::join, select::select};
 use embassy_rp::{peripherals::USB, usb::Driver};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_usb::{Builder, Config, UsbDevice};
 
+static START_USB: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static STOP_USB: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+// for other tasks to query the status of usb (like ui)
+// this is read only for ALL other tasks
 pub static USB_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[embassy_executor::task]
@@ -30,16 +37,39 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
 
     let temp_sd: Option<SdCard> = None;
     let mut scsi = MassStorageClass::new(&mut builder, temp_sd);
-    let usb = builder.build();
+    let mut usb = builder.build();
 
-    select(run(usb), scsi.poll()).await;
-}
-
-async fn run<'d>(mut usb: UsbDevice<'d, Driver<'d, USB>>) -> ! {
     loop {
-        usb.wait_resume().await;
-        USB_ACTIVE.store(true, Ordering::Release);
-        usb.run_until_suspend().await;
+        START_USB.wait().await;
+        START_USB.reset();
+        #[cfg(feature = "defmt")]
+        defmt::info!("starting usb");
+        select(
+            // waits for cancellation signal, and then waits for
+            // transfers to stop before dropping usb future
+            async {
+                STOP_USB.wait().await;
+                STOP_USB.reset();
+            },
+            // runs the usb, until cancelled
+            join(usb.run(), scsi.poll()),
+        )
+        .await;
+        #[cfg(feature = "defmt")]
+        defmt::info!("disabling usb");
+        usb.disable().await;
         USB_ACTIVE.store(false, Ordering::Release);
     }
+}
+
+pub fn start_usb() {
+    STOP_USB.reset();
+    START_USB.signal(());
+    USB_ACTIVE.store(true, Ordering::Release);
+}
+
+pub fn stop_usb() {
+    START_USB.reset();
+    STOP_USB.signal(());
+    USB_ACTIVE.store(false, Ordering::Release);
 }

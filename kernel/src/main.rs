@@ -24,20 +24,19 @@ mod usb;
 mod utils;
 
 #[cfg(feature = "pimoroni2w")]
-use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
+use crate::{heap::HEAP, heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     display::{FRAMEBUFFER, display_handler, init_display},
-    heap::HEAP,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
     },
     psram::init_psram,
-    scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},
+    usb::usb_handler,
 };
 use abi_sys::EntryFn;
 use bumpalo::Bump;
@@ -188,8 +187,6 @@ async fn userland_task() {
             UI_CHANGE.signal(());
 
             clear_selection().await;
-
-            MSC_SHUTDOWN.signal(());
         }
 
         unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
@@ -270,6 +267,7 @@ async fn setup_display(display: Display, spawner: Spawner) {
 
 // psram is kind of useless on the pico calc
 // ive opted to use the pimoroni with on onboard xip psram instead
+#[allow(unused)]
 async fn setup_psram(psram: Psram) {
     let psram = init_psram(
         psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
@@ -322,7 +320,7 @@ async fn kernel_task(
     watchdog: Peri<'static, WATCHDOG>,
     display: Display,
     sd: Sd,
-    psram: Psram,
+    _psram: Psram,
     mcu: Mcu,
     usb: Peri<'static, USB>,
 ) {
@@ -343,34 +341,16 @@ async fn kernel_task(
     setup_display(display, spawner).await;
     setup_sd(sd).await;
 
-    let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    // spawner.spawn(usb_handler(usb)).unwrap();
+    let usb_driver = embassy_rp_usb::Driver::new(usb, Irqs);
+    spawner.spawn(usb_handler(usb_driver)).unwrap();
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
         if ui_enabled {
-            select(join(ui_handler(), prog_search_handler()), UI_CHANGE.wait()).await;
+            select(ui_handler(), UI_CHANGE.wait()).await;
         } else {
             select(key_handler(), UI_CHANGE.wait()).await;
         }
-    }
-}
-
-async fn prog_search_handler() {
-    loop {
-        {
-            let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().unwrap();
-
-            let files = sd.list_files_by_extension(".bin").unwrap();
-            let mut select = SELECTIONS.lock().await;
-
-            if *select.selections() != files {
-                select.update_selections(files);
-                select.reset();
-            }
-        }
-        Timer::after_secs(5).await;
     }
 }
 

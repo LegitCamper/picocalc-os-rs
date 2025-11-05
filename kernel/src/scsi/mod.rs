@@ -1,7 +1,5 @@
-use embassy_futures::select::select;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::lazy_lock::LazyLock;
-use embassy_sync::signal::Signal;
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
 use embedded_sdmmc::{Block, BlockIdx};
@@ -11,10 +9,13 @@ mod scsi_types;
 use scsi_types::*;
 
 use crate::storage::{SDCARD, SdCard};
+use crate::usb::stop_usb;
 
 const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 
-pub static MSC_SHUTDOWN: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+// indicates that a scsi transaction is occurring and is
+// NOT safe to disable usb, or acquire sdcard
+static SCSI_BUSY: AtomicBool = AtomicBool::new(false);
 
 // number of blocks to read from sd at once
 // higher is better, but is larger. Size is BLOCKS * 512 bytes
@@ -24,7 +25,6 @@ static mut BLOCK_BUF: LazyLock<[Block; BLOCKS]> =
 
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     temp_sd: Option<SdCard>, // temporary owns sdcard when scsi is running
-    ejected: bool,
     pending_eject: bool,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
@@ -42,7 +42,6 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         Self {
             temp_sd,
             pending_eject: false,
-            ejected: false,
             bulk_out,
             bulk_in,
         }
@@ -50,22 +49,11 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
     pub async fn poll(&mut self) {
         loop {
-            if !self.ejected {
-                select(self.handle_cbw(), MSC_SHUTDOWN.wait()).await;
+            self.handle_cbw().await;
 
-                if MSC_SHUTDOWN.signaled() {
-                    #[cfg(feature = "defmt")]
-                    defmt::info!("MSC shutting down");
-
-                    if self.temp_sd.is_some() {
-                        let mut guard = SDCARD.get().lock().await;
-                        guard.replace(self.temp_sd.take().unwrap()).unwrap();
-                    }
-
-                    self.ejected = true;
-
-                    return;
-                }
+            if self.temp_sd.is_some() {
+                let mut guard = SDCARD.get().lock().await;
+                guard.replace(self.temp_sd.take().unwrap()).unwrap();
             }
         }
     }
@@ -75,15 +63,15 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
             if n == 31 {
                 if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
+                    SCSI_BUSY.store(true, Ordering::Release);
+
                     // Take sdcard to increase speed
                     if self.temp_sd.is_none() {
                         let mut guard = SDCARD.get().lock().await;
                         if let Some(sd) = guard.take() {
                             self.temp_sd = Some(sd);
                         } else {
-                            #[cfg(feature = "defmt")]
-                            defmt::warn!("Tried to take SDCARD but it was already taken");
-                            return;
+                            panic!("Tried to take SDCARD but it was already taken");
                         }
                     }
 
@@ -94,9 +82,11 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         self.send_csw_fail(cbw.dCBWTag).await
                     }
 
+                    SCSI_BUSY.store(false, Ordering::Release);
+
                     if self.pending_eject {
                         if let ScsiCommand::Write { lba: _, len: _ } = command {
-                            MSC_SHUTDOWN.signal(());
+                            stop_usb();
                         }
                     }
                 }
