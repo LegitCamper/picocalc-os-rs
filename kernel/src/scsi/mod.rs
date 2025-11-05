@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::lazy_lock::LazyLock;
+use embassy_time::Timer;
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
 use embedded_sdmmc::{Block, BlockIdx};
@@ -15,11 +16,11 @@ const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 
 // indicates that a scsi transaction is occurring and is
 // NOT safe to disable usb, or acquire sdcard
-static SCSI_BUSY: AtomicBool = AtomicBool::new(false);
+pub static SCSI_BUSY: AtomicBool = AtomicBool::new(false);
 
 // number of blocks to read from sd at once
 // higher is better, but is larger. Size is BLOCKS * 512 bytes
-const BLOCKS: usize = 32;
+const BLOCKS: usize = 1;
 static mut BLOCK_BUF: LazyLock<[Block; BLOCKS]> =
     LazyLock::new(|| core::array::from_fn(|_| Block::new()));
 
@@ -47,14 +48,30 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         }
     }
 
+    // Take sdcard to increase speed
+    pub async fn take_sdcard(&mut self) {
+        if self.temp_sd.is_none() {
+            let mut guard = SDCARD.get().lock().await;
+            if let Some(sd) = guard.take() {
+                self.temp_sd = Some(sd);
+            } else {
+                panic!("Tried to take SDCARD but it was already taken");
+            }
+        }
+    }
+
+    pub async fn return_sdcard(&mut self) {
+        if self.temp_sd.is_some() {
+            let mut guard = SDCARD.get().lock().await;
+            guard.replace(self.temp_sd.take().unwrap()).unwrap();
+        }
+    }
+
     pub async fn poll(&mut self) {
         loop {
             self.handle_cbw().await;
 
-            if self.temp_sd.is_some() {
-                let mut guard = SDCARD.get().lock().await;
-                guard.replace(self.temp_sd.take().unwrap()).unwrap();
-            }
+            Timer::after_millis(10).await;
         }
     }
 
@@ -64,16 +81,6 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
             if n == 31 {
                 if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
                     SCSI_BUSY.store(true, Ordering::Release);
-
-                    // Take sdcard to increase speed
-                    if self.temp_sd.is_none() {
-                        let mut guard = SDCARD.get().lock().await;
-                        if let Some(sd) = guard.take() {
-                            self.temp_sd = Some(sd);
-                        } else {
-                            panic!("Tried to take SDCARD but it was already taken");
-                        }
-                    }
 
                     let command = parse_cb(&cbw.CBWCB);
                     if self.handle_command(command).await.is_ok() {
