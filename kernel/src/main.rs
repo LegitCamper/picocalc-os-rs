@@ -28,18 +28,17 @@ use crate::{heap::HEAP, heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
-    display::{FRAMEBUFFER, display_handler, init_display},
+    display::{display_handler, init_display},
+    elf::load_binary,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
     },
     psram::init_psram,
     storage::{SDCARD, SdCard},
-    ui::{SELECTIONS, clear_selection, ui_handler},
+    ui::{clear_screen, ui_handler},
     usb::usb_handler,
 };
-use abi_sys::EntryFn;
-use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::select::select;
@@ -62,12 +61,8 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::{Delay, Duration, Instant, Ticker, Timer};
-use embedded_graphics::{
-    pixelcolor::Rgb565,
-    prelude::{DrawTarget, RgbColor},
-};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::SdCard as SdmmcSdCard;
+use embedded_sdmmc::{SdCard as SdmmcSdCard, ShortFileName};
 use static_cell::StaticCell;
 use talc::*;
 use {defmt_rtt as _, panic_probe as _};
@@ -172,21 +167,21 @@ async fn main(_spawner: Spawner) {
 }
 
 // One-slot channel to pass EntryFn from core1
-static BINARY_CH: Channel<CriticalSectionRawMutex, (EntryFn, Bump), 1> = Channel::new();
+static BINARY_CH: Channel<CriticalSectionRawMutex, ShortFileName, 1> = Channel::new();
 
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
-        let (entry, _bump) = recv.receive().await;
+        let name = recv.receive().await;
+        let (entry, _bump) = unsafe { load_binary(&name).await.expect("unable to load binary") };
 
         // disable kernel ui
         {
             ENABLE_UI.store(false, Ordering::Release);
             UI_CHANGE.signal(());
-
-            clear_selection().await;
+            clear_screen().await;
         }
 
         unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
@@ -198,10 +193,7 @@ async fn userland_task() {
         {
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
-            unsafe { FRAMEBUFFER.as_mut().unwrap().clear(Rgb565::BLACK).unwrap() };
-
-            let mut selections = SELECTIONS.lock().await;
-            selections.set_changed(true);
+            clear_screen().await;
         }
     }
 }

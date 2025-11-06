@@ -10,11 +10,15 @@ use crate::{
 use abi_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
 use core::sync::atomic::Ordering;
+use embassy_futures::yield_now;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
     Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_10X20},
+    mono_font::{
+        MonoTextStyle,
+        ascii::{FONT_4X6, FONT_10X20},
+    },
     pixelcolor::Rgb565,
     prelude::{Dimensions, Point, Primitive, RgbColor, Size},
     primitives::{PrimitiveStyle, Rectangle},
@@ -27,273 +31,265 @@ use embedded_layout::{
 };
 use embedded_text::TextBox;
 
-pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
-    Mutex::new(SelectionList::new());
-
 pub async fn ui_handler() {
+    let mut ui = UiState { page: UiPage::Menu };
+    let mut menu = MenuPage {
+        last_bounds: None,
+        selection: 0,
+        changed: true,
+    };
+    let mut scsi = ScsiPage { last_bounds: None };
+    let overlay = Overlay::new();
     update_selections().await;
-    let mut scsi = Scsi { last_bounds: None };
-    let mut scsi_button = ScsiButton { last_bounds: None };
 
     loop {
-        input_handler().await;
-
-        if USB_ACTIVE.load(Ordering::Acquire) {
-            scsi.draw(&mut scsi_button).await;
-            Timer::after_millis(100).await;
-        } else {
-            let changed = SELECTIONS.lock().await.changed;
-            if changed {
-                clear_selection().await;
-                draw_selection(&mut scsi_button).await;
-            }
+        input_handler(&mut ui, &mut menu, &mut scsi).await;
+        match ui.page {
+            UiPage::Menu => menu.draw().await,
+            UiPage::Scsi => scsi.draw().await,
         }
+        overlay.draw().await;
+        Timer::after_millis(5).await;
     }
 }
 
-async fn input_handler() {
+async fn input_handler(ui: &mut UiState, menu: &mut MenuPage, scsi: &mut ScsiPage) {
     if let Some(event) = keyboard::read_keyboard_fifo().await {
-        if let KeyState::Pressed = event.state {
-            match event.key {
-                KeyCode::Up => {
-                    if !USB_ACTIVE.load(Ordering::Acquire) {
-                        let mut selections = SELECTIONS.lock().await;
-                        selections.up();
-                    }
+        if event.state == KeyState::Pressed {
+            match (&mut ui.page, event.key) {
+                (UiPage::Menu, KeyCode::F1) => {
+                    start_usb();
+                    menu.clear().await;
+                    ui.page = UiPage::Scsi;
                 }
-                KeyCode::Down => {
-                    if !USB_ACTIVE.load(Ordering::Acquire) {
-                        let mut selections = SELECTIONS.lock().await;
-                        selections.down();
-                    }
+                (UiPage::Scsi, KeyCode::F1) => {
+                    stop_usb();
+                    scsi.clear().await;
+                    ui.page = UiPage::Menu;
+                    update_selections().await;
                 }
-                KeyCode::F1 => {
-                    match USB_ACTIVE.load(Ordering::Acquire) {
-                        true => {
-                            stop_usb();
-                            // wait for sd card to be put back and then reload selections
-                            while USB_ACTIVE.load(Ordering::Acquire) {
-                                Timer::after_millis(100).await
-                            }
-                            update_selections().await
-                        }
-                        false => start_usb(),
-                    };
-                }
-                KeyCode::Enter | KeyCode::Right => {
-                    if !USB_ACTIVE.load(Ordering::Acquire) {
-                        let selections = SELECTIONS.lock().await;
-                        let selection =
-                            selections.selections[selections.current_selection as usize].clone();
-
-                        let entry = unsafe {
-                            load_binary(&selection.short_name)
-                                .await
-                                .expect("unable to load binary")
-                        };
-                        BINARY_CH.send(entry).await;
-                    }
-                }
-                _ => (),
+                (UiPage::Menu, _) => menu.handle_input(event.key).await,
+                (UiPage::Scsi, _) => scsi.handle_input(event.key).await,
             }
         }
     }
 }
 
-async fn clear_rect(rect: Rectangle) {
-    Rectangle::new(rect.top_left, rect.size)
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
-        .unwrap();
+struct Overlay {
+    f1_label: &'static str,
 }
+
+impl Overlay {
+    pub fn new() -> Self {
+        Self {
+            f1_label: "Press F1 to enable/disable mass storage",
+        }
+    }
+
+    async fn draw(&self) {
+        let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
+        let fb = unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() };
+        let bounds = fb.bounding_box();
+
+        Text::with_alignment(
+            self.f1_label,
+            Point::new(10, bounds.size.height as i32 - 24), // bottom-left corner
+            text_style,
+            Alignment::Left,
+        )
+        .draw(fb)
+        .unwrap();
+    }
+}
+
+enum UiPage {
+    Menu,
+    Scsi,
+}
+
+struct UiState {
+    page: UiPage,
+}
+
+trait Page {
+    async fn draw(&mut self);
+    async fn handle_input(&mut self, key: KeyCode);
+    async fn clear(&mut self);
+}
+
+struct ScsiPage {
+    last_bounds: Option<Rectangle>,
+}
+
+impl Page for ScsiPage {
+    async fn draw(&mut self) {
+        let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+        let fb = unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() };
+        let bounds = fb.bounding_box();
+
+        Text::with_alignment(
+            "Mass storage over usb enabled",
+            bounds.center(),
+            text_style,
+            Alignment::Center,
+        )
+        .draw(fb)
+        .unwrap();
+    }
+
+    async fn handle_input(&mut self, _key: KeyCode) {
+        ()
+    }
+
+    async fn clear(&mut self) {
+        if let Some(rect) = self.last_bounds {
+            clear_rect(rect).await;
+        }
+    }
+}
+
+static SELECTIONS: Mutex<CriticalSectionRawMutex, Vec<FileName>> = Mutex::new(Vec::new());
+static mut SELECTIONS_CHANGED: bool = true;
 
 async fn update_selections() {
+    while USB_ACTIVE.load(Ordering::Acquire) {
+        Timer::after_millis(50).await;
+    }
     let mut guard = SDCARD.get().lock().await;
     let sd = guard.as_mut().unwrap();
 
     let files = sd.list_files_by_extension(".bin").unwrap();
-    let mut select = SELECTIONS.lock().await;
+    let mut selections = SELECTIONS.lock().await;
 
-    if *select.selections() != files {
-        select.update_selections(files);
-        select.reset();
+    if *selections != files {
+        *selections = files;
+        unsafe { SELECTIONS_CHANGED = true }
     }
 }
-
-struct Scsi {
+struct MenuPage {
     last_bounds: Option<Rectangle>,
-}
-
-impl Scsi {
-    async fn draw(&mut self, scsi_button: &mut ScsiButton) {
-        if let Some(rect) = self.last_bounds {
-            clear_rect(rect).await
-        }
-
-        let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-        let text = Text::with_alignment(
-            "Usb Mass Storage active",
-            unsafe { FRAMEBUFFER.as_ref().unwrap() }
-                .bounding_box()
-                .center(),
-            text_style,
-            Alignment::Center,
-        );
-
-        self.last_bounds = Some(text.bounds());
-
-        text.draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
-            .unwrap();
-        scsi_button.draw().await;
-    }
-}
-
-struct ScsiButton {
-    last_bounds: Option<Rectangle>,
-}
-
-impl ScsiButton {
-    async fn draw(&mut self) {
-        if let Some(rect) = self.last_bounds {
-            clear_rect(rect).await
-        }
-
-        let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-        let text = Text::with_alignment(
-            "Press F1 to enable/disable mass storage",
-            unsafe { FRAMEBUFFER.as_ref().unwrap() }
-                .bounding_box()
-                .bottom_right()
-                .unwrap(),
-            text_style,
-            Alignment::Left,
-        );
-
-        self.last_bounds = Some(text.bounds());
-
-        text.draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
-            .unwrap();
-    }
-}
-
-pub async fn clear_selection() {
-    let sel = SELECTIONS.lock().await;
-
-    if let Some(rect) = sel.last_bounds {
-        clear_rect(rect).await
-    }
-}
-
-async fn draw_selection(scsi_button: &mut ScsiButton) {
-    let mut guard = SELECTIONS.lock().await;
-    let file_names = &guard.selections.clone();
-
-    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-    let display_area = unsafe { FRAMEBUFFER.as_mut().unwrap().bounding_box() };
-
-    const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
-    let no_bins = String::from_str(NO_BINS).unwrap();
-
-    FB_PAUSED.store(true, Ordering::Release); // ensure all elements show up at once
-
-    if file_names.is_empty() {
-        TextBox::new(
-            &no_bins,
-            Rectangle::new(
-                Point::new(25, 25),
-                Size::new(display_area.size.width - 50, display_area.size.width - 50),
-            ),
-            text_style,
-        )
-        .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
-        .unwrap();
-    } else {
-        let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
-
-        for i in file_names {
-            views.push(Text::new(&i.long_name, Point::zero(), text_style));
-        }
-
-        let views_group = Views::new(views.as_mut_slice());
-
-        let layout = LinearLayout::vertical(views_group)
-            .with_alignment(horizontal::Center)
-            .with_spacing(FixedMargin(5))
-            .arrange()
-            .align_to(&display_area, horizontal::Center, vertical::Center);
-
-        // draw selected box
-        let selected_bounds = layout
-            .inner()
-            .get(guard.current_selection as usize)
-            .expect("Selected binary missing")
-            .bounding_box();
-        Rectangle::new(selected_bounds.top_left, selected_bounds.size)
-            .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
-            .unwrap();
-
-        guard.last_bounds = Some(layout.bounds());
-
-        layout
-            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
-            .unwrap();
-    }
-
-    guard.changed = false;
-    scsi_button.draw().await;
-    FB_PAUSED.store(false, Ordering::Release); // ensure all elements show up at once
-}
-
-#[derive(Clone)]
-pub struct SelectionList {
-    // allows easy clearing of selection ui,
-    // based on previous bounds
-    last_bounds: Option<Rectangle>,
-    current_selection: u16,
-    selections: Vec<FileName>,
+    selection: usize,
     changed: bool,
 }
 
-impl SelectionList {
-    pub const fn new() -> Self {
-        Self {
-            last_bounds: None,
-            selections: Vec::new(),
-            current_selection: 0,
-            changed: false,
+impl Page for MenuPage {
+    async fn draw(&mut self) {
+        if self.changed {
+            self.clear().await;
         }
+
+        let guard = SELECTIONS.lock().await;
+        let file_names = &guard.clone();
+
+        let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+        let display_area = unsafe { FRAMEBUFFER.as_mut().unwrap().bounding_box() };
+
+        const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
+        let no_bins = String::from_str(NO_BINS).unwrap();
+
+        FB_PAUSED.store(true, Ordering::Release); // ensure all elements show up at once
+
+        if file_names.is_empty() {
+            TextBox::new(
+                &no_bins,
+                Rectangle::new(
+                    Point::new(25, 25),
+                    Size::new(display_area.size.width - 50, display_area.size.width - 50),
+                ),
+                text_style,
+            )
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
+            .unwrap();
+        } else {
+            let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
+
+            for i in file_names {
+                views.push(Text::new(&i.long_name, Point::zero(), text_style));
+            }
+
+            let views_group = Views::new(views.as_mut_slice());
+
+            let layout = LinearLayout::vertical(views_group)
+                .with_alignment(horizontal::Center)
+                .with_spacing(FixedMargin(5))
+                .arrange()
+                .align_to(&display_area, horizontal::Center, vertical::Center);
+
+            // draw selected box
+            let selected_bounds = layout
+                .inner()
+                .get(self.selection)
+                .expect("Selected binary missing")
+                .bounding_box();
+            Rectangle::new(selected_bounds.top_left, selected_bounds.size)
+                .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
+                .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
+                .unwrap();
+
+            self.last_bounds = Some(layout.bounds());
+
+            layout
+                .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
+                .unwrap();
+        }
+
+        self.changed = false;
+        FB_PAUSED.store(false, Ordering::Release); // ensure all elements show up at once
     }
 
-    pub fn set_changed(&mut self, changed: bool) {
-        self.changed = changed
-    }
+    async fn handle_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter | KeyCode::Right => {
+                let selections = SELECTIONS.lock().await;
+                let selection = selections[self.selection].clone();
 
-    pub fn update_selections(&mut self, selections: Vec<FileName>) {
-        self.selections = selections;
+                BINARY_CH.send(selection.short_name).await;
+                self.clear().await;
+                loop {
+                    yield_now().await;
+                }
+            }
+            KeyCode::Up => {
+                if self.selection > 0 {
+                    self.selection -= 1;
+                } else {
+                    let len = SELECTIONS.lock().await.len();
+                    if len > 0 {
+                        self.selection = len - 1;
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if self.selection + 1 < SELECTIONS.lock().await.len() {
+                    self.selection += 1;
+                } else {
+                    self.selection = 0; // wrap to top
+                }
+            }
+            _ => (),
+        }
         self.changed = true;
     }
 
-    pub fn selections(&self) -> &Vec<FileName> {
-        &self.selections
-    }
-
-    pub fn reset(&mut self) {
-        self.current_selection = 0;
-        self.changed = true;
-    }
-
-    fn up(&mut self) {
-        if self.current_selection > 0 {
-            self.current_selection -= 1;
-            self.changed = true;
+    async fn clear(&mut self) {
+        if let Some(rect) = self.last_bounds {
+            clear_rect(rect).await;
         }
     }
+}
 
-    fn down(&mut self) {
-        if self.current_selection + 1 < self.selections.len() as u16 {
-            self.current_selection += 1;
-            self.changed = true;
-        }
-    }
+pub async fn clear_screen() {
+    clear_rect(Rectangle {
+        top_left: Point::zero(),
+        size: Size::new(320, 320),
+    })
+    .await
+}
+
+async fn clear_rect(rect: Rectangle) {
+    let fb = unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() };
+    Rectangle::new(rect.top_left, rect.size)
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(fb)
+        .unwrap();
 }
