@@ -39,9 +39,7 @@ use crate::{
     ui::{clear_screen, ui_handler},
     usb::usb_handler,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
-use embassy_futures::select::select;
 use embassy_rp::{
     Peri,
     gpio::{Input, Level, Output, Pull},
@@ -106,9 +104,6 @@ async fn watchdog_task(mut watchdog: Watchdog) {
         ticker.next().await;
     }
 }
-
-static ENABLE_UI: AtomicBool = AtomicBool::new(true);
-static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -177,24 +172,15 @@ async fn userland_task() {
         let name = recv.receive().await;
         let (entry, _bump) = unsafe { load_binary(&name).await.expect("unable to load binary") };
 
-        // disable kernel ui
-        {
-            ENABLE_UI.store(false, Ordering::Release);
-            UI_CHANGE.signal(());
-            clear_screen().await;
-        }
+        clear_screen().await;
 
         unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
         #[cfg(feature = "defmt")]
         defmt::info!("Executing Binary");
         entry();
 
-        // enable kernel ui
-        {
-            ENABLE_UI.store(true, Ordering::Release);
-            UI_CHANGE.signal(());
-            clear_screen().await;
-        }
+        STOP_KEY_HANDLER.signal(());
+        clear_screen().await;
     }
 }
 
@@ -336,18 +322,25 @@ async fn kernel_task(
     let usb_driver = embassy_rp_usb::Driver::new(usb, Irqs);
     spawner.spawn(usb_handler(usb_driver)).unwrap();
 
+    let mut ui_enabled = true;
     loop {
-        let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
         if ui_enabled {
-            select(ui_handler(), UI_CHANGE.wait()).await;
+            ui_handler().await;
         } else {
-            select(key_handler(), UI_CHANGE.wait()).await;
+            key_handler().await;
         }
+        ui_enabled ^= true // flip bool
     }
 }
 
+static STOP_KEY_HANDLER: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
 async fn key_handler() {
     loop {
+        if STOP_KEY_HANDLER.try_take().is_some() {
+            break;
+        }
+
         if let Some(event) = read_keyboard_fifo().await {
             if let KeyState::Pressed = event.state {
                 unsafe {

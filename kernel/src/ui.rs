@@ -1,7 +1,6 @@
 use crate::{
     BINARY_CH,
     display::FRAMEBUFFER,
-    elf::load_binary,
     framebuffer::FB_PAUSED,
     peripherals::keyboard,
     storage::{FileName, SDCARD},
@@ -10,7 +9,6 @@ use crate::{
 use abi_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
 use core::sync::atomic::Ordering;
-use embassy_futures::yield_now;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
@@ -43,7 +41,10 @@ pub async fn ui_handler() {
     update_selections().await;
 
     loop {
-        input_handler(&mut ui, &mut menu, &mut scsi).await;
+        if input_handler(&mut ui, &mut menu, &mut scsi).await {
+            overlay.clear().await;
+            return;
+        }
         match ui.page {
             UiPage::Menu => menu.draw().await,
             UiPage::Scsi => scsi.draw().await,
@@ -53,7 +54,7 @@ pub async fn ui_handler() {
     }
 }
 
-async fn input_handler(ui: &mut UiState, menu: &mut MenuPage, scsi: &mut ScsiPage) {
+async fn input_handler(ui: &mut UiState, menu: &mut MenuPage, scsi: &mut ScsiPage) -> bool {
     if let Some(event) = keyboard::read_keyboard_fifo().await {
         if event.state == KeyState::Pressed {
             match (&mut ui.page, event.key) {
@@ -68,11 +69,12 @@ async fn input_handler(ui: &mut UiState, menu: &mut MenuPage, scsi: &mut ScsiPag
                     ui.page = UiPage::Menu;
                     update_selections().await;
                 }
-                (UiPage::Menu, _) => menu.handle_input(event.key).await,
-                (UiPage::Scsi, _) => scsi.handle_input(event.key).await,
+                (UiPage::Menu, _) => return menu.handle_input(event.key).await,
+                (UiPage::Scsi, _) => return scsi.handle_input(event.key).await,
             }
         }
     }
+    false
 }
 
 struct Overlay {
@@ -103,6 +105,12 @@ impl Overlay {
         self.last_bounds = Some(text.bounds());
         text.draw(fb).unwrap();
     }
+
+    async fn clear(&mut self) {
+        if let Some(rect) = self.last_bounds {
+            clear_rect(rect).await
+        }
+    }
 }
 
 enum UiPage {
@@ -116,7 +124,7 @@ struct UiState {
 
 trait Page {
     async fn draw(&mut self);
-    async fn handle_input(&mut self, key: KeyCode);
+    async fn handle_input(&mut self, key: KeyCode) -> bool;
     async fn clear(&mut self);
 }
 
@@ -131,7 +139,7 @@ impl Page for ScsiPage {
         let bounds = fb.bounding_box();
 
         Text::with_alignment(
-            "Mass storage over usb enabled",
+            "Usb Mass storage enabled",
             bounds.center(),
             text_style,
             Alignment::Center,
@@ -140,8 +148,8 @@ impl Page for ScsiPage {
         .unwrap();
     }
 
-    async fn handle_input(&mut self, _key: KeyCode) {
-        ()
+    async fn handle_input(&mut self, _key: KeyCode) -> bool {
+        false
     }
 
     async fn clear(&mut self) {
@@ -240,17 +248,15 @@ impl Page for MenuPage {
         FB_PAUSED.store(false, Ordering::Release); // ensure all elements show up at once
     }
 
-    async fn handle_input(&mut self, key: KeyCode) {
+    async fn handle_input(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Enter | KeyCode::Right => {
                 let selections = SELECTIONS.lock().await;
                 let selection = selections[self.selection].clone();
 
-                BINARY_CH.send(selection.short_name).await;
                 self.clear().await;
-                loop {
-                    yield_now().await;
-                }
+                BINARY_CH.send(selection.short_name).await;
+                return true;
             }
             KeyCode::Up => {
                 if self.selection > 0 {
@@ -272,6 +278,7 @@ impl Page for MenuPage {
             _ => (),
         }
         self.changed = true;
+        false
     }
 
     async fn clear(&mut self) {

@@ -23,7 +23,7 @@ pub static SCSI_HALT: AtomicBool = AtomicBool::new(false);
 
 // number of blocks to read from sd at once
 // higher is better, but is larger. Size is BLOCKS * 512 bytes
-const BLOCKS: usize = 5;
+const BLOCKS: usize = 10;
 static mut BLOCK_BUF: LazyLock<[Block; BLOCKS]> =
     LazyLock::new(|| core::array::from_fn(|_| Block::new()));
 
