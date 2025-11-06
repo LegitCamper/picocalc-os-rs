@@ -39,7 +39,7 @@ pub async fn ui_handler() {
         changed: true,
     };
     let mut scsi = ScsiPage { last_bounds: None };
-    let overlay = Overlay::new();
+    let mut overlay = Overlay::new();
     update_selections().await;
 
     loop {
@@ -77,28 +77,31 @@ async fn input_handler(ui: &mut UiState, menu: &mut MenuPage, scsi: &mut ScsiPag
 
 struct Overlay {
     f1_label: &'static str,
+    last_bounds: Option<Rectangle>,
 }
 
 impl Overlay {
     pub fn new() -> Self {
         Self {
             f1_label: "Press F1 to enable/disable mass storage",
+            last_bounds: None,
         }
     }
 
-    async fn draw(&self) {
+    async fn draw(&mut self) {
         let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
         let fb = unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() };
         let bounds = fb.bounding_box();
 
-        Text::with_alignment(
+        let text = Text::with_alignment(
             self.f1_label,
             Point::new(10, bounds.size.height as i32 - 24), // bottom-left corner
             text_style,
             Alignment::Left,
-        )
-        .draw(fb)
-        .unwrap();
+        );
+
+        self.last_bounds = Some(text.bounds());
+        text.draw(fb).unwrap();
     }
 }
 
