@@ -41,6 +41,12 @@ pub async fn ui_handler() {
     update_selections().await;
 
     loop {
+        // reset page, if usb was disabled internally
+        if ui.page == UiPage::Scsi && !USB_ACTIVE.load(Ordering::Acquire) {
+            menu.clear().await;
+            ui.page = UiPage::Menu;
+        }
+
         if input_handler(&mut ui, &mut menu, &mut scsi).await {
             overlay.clear().await;
             return;
@@ -110,9 +116,11 @@ impl Overlay {
         if let Some(rect) = self.last_bounds {
             clear_rect(rect).await
         }
+        self.last_bounds = None;
     }
 }
 
+#[derive(PartialEq)]
 enum UiPage {
     Menu,
     Scsi,
@@ -138,14 +146,15 @@ impl Page for ScsiPage {
         let fb = unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() };
         let bounds = fb.bounding_box();
 
-        Text::with_alignment(
+        let text = Text::with_alignment(
             "Usb Mass storage enabled",
             bounds.center(),
             text_style,
             Alignment::Center,
-        )
-        .draw(fb)
-        .unwrap();
+        );
+
+        self.last_bounds = Some(text.bounds());
+        text.draw(fb).unwrap();
     }
 
     async fn handle_input(&mut self, _key: KeyCode) -> bool {
@@ -156,6 +165,7 @@ impl Page for ScsiPage {
         if let Some(rect) = self.last_bounds {
             clear_rect(rect).await;
         }
+        self.last_bounds = None;
     }
 }
 
@@ -285,6 +295,7 @@ impl Page for MenuPage {
         if let Some(rect) = self.last_bounds {
             clear_rect(rect).await;
         }
+        self.last_bounds = None;
     }
 }
 

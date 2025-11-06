@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::yield_now;
-use embassy_sync::lazy_lock::LazyLock;
+use embassy_time::Timer;
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
 use embedded_sdmmc::{Block, BlockIdx};
@@ -8,6 +8,9 @@ use heapless::Vec;
 
 mod scsi_types;
 use scsi_types::*;
+#[allow(unused)]
+mod error;
+use error::ScsiSense;
 
 use crate::storage::{SDCARD, SdCard};
 use crate::usb::stop_usb;
@@ -21,17 +24,13 @@ pub static SCSI_BUSY: AtomicBool = AtomicBool::new(false);
 // start no more transfers, usb is trying to stop
 pub static SCSI_HALT: AtomicBool = AtomicBool::new(false);
 
-// number of blocks to read from sd at once
-// higher is better, but is larger. Size is BLOCKS * 512 bytes
-const BLOCKS: usize = 10;
-static mut BLOCK_BUF: LazyLock<[Block; BLOCKS]> =
-    LazyLock::new(|| core::array::from_fn(|_| Block::new()));
-
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     temp_sd: Option<SdCard>, // temporary owns sdcard when scsi is running
     pub pending_eject: bool,
+    pub prevent_removal: bool,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
+    last_sense: ScsiSense,
 }
 
 impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
@@ -46,8 +45,10 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         Self {
             temp_sd: None,
             pending_eject: false,
+            prevent_removal: false,
             bulk_out,
             bulk_in,
+            last_sense: ScsiSense::no_sense(),
         }
     }
 
@@ -72,23 +73,20 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
     pub async fn poll(&mut self) {
         loop {
-            if SCSI_HALT.load(Ordering::Acquire) {
-                break;
+            if !self.prevent_removal {
+                if SCSI_HALT.load(Ordering::Acquire) || self.pending_eject {
+                    break;
+                }
             }
 
-            if self.pending_eject {
-                break;
-            }
             self.handle_cbw().await;
 
-            if self.pending_eject {
+            if !self.prevent_removal && self.pending_eject {
                 break;
             }
 
-            yield_now().await;
+            Timer::after_millis(1).await;
         }
-
-        stop_usb();
     }
 
     async fn handle_cbw(&mut self) {
@@ -106,13 +104,25 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                     }
 
                     SCSI_BUSY.store(false, Ordering::Release);
+                } else {
+                    self.last_sense = ScsiSense::invalid_cdb();
+                    self.send_csw_fail(0).await;
                 }
+            } else {
+                self.last_sense = ScsiSense::invalid_cdb();
+                self.send_csw_fail(0).await;
             }
         }
     }
 
     async fn handle_command(&mut self, command: ScsiCommand) -> Result<(), ()> {
         let mut response: Vec<u8, BULK_ENDPOINT_PACKET_SIZE> = Vec::new();
+
+        const BLOCK_SIZE: usize = 512;
+        // number of blocks to read from sd at once
+        // higher is better, but is larger. Size is BLOCKS * 512 bytes
+        const BLOCKS: usize = 10;
+        let mut block_buf: [Block; BLOCKS] = core::array::from_fn(|_| Block::new());
 
         match command {
             ScsiCommand::Unknown => Err(()),
@@ -199,10 +209,21 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                     Err(())
                 }
             }
-            ScsiCommand::RequestSense {
-                desc: _,
-                alloc_len: _,
-            } => Ok(()),
+            ScsiCommand::RequestSense { desc: _, alloc_len } => {
+                // Prepare the buffer
+                let mut buf = [0u8; 18];
+
+                // Fixed format sense data
+                buf[0] = 0x70; // Response code, current errors
+                buf[2] = self.last_sense.key; // Sense Key
+                buf[7] = 0x0A; // Additional sense length (n-8)
+                buf[12] = self.last_sense.asc; // Additional Sense Code
+                buf[13] = self.last_sense.ascq; // Additional Sense Code Qualifier
+
+                let len = core::cmp::min(buf.len(), alloc_len as usize);
+                self.last_sense = ScsiSense::no_sense();
+                self.bulk_in.write(&buf[..len]).await.map_err(|_| ())
+            }
             ScsiCommand::ModeSense6 {
                 dbd: _,
                 page_control: _,
@@ -242,24 +263,22 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
             ScsiCommand::ReadCapacity10 => {
-                let block_size = SdCard::BLOCK_SIZE as u64;
-                let total_blocks = self.temp_sd.as_ref().unwrap().size() / block_size;
+                let total_blocks = self.temp_sd.as_ref().unwrap().size() / BLOCK_SIZE as u64;
 
                 let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
                 response.extend_from_slice(&(last_lba as u32).to_be_bytes())?;
-                response.extend_from_slice(&(block_size as u32).to_be_bytes())?;
+                response.extend_from_slice(&(BLOCK_SIZE as u32).to_be_bytes())?;
 
                 self.bulk_in.write(&response).await.map_err(|_| ())
             }
             ScsiCommand::ReadCapacity16 { alloc_len } => {
-                let block_size = SdCard::BLOCK_SIZE as u64;
-                let total_blocks = self.temp_sd.as_ref().unwrap().size() / block_size;
+                let total_blocks = self.temp_sd.as_ref().unwrap().size() / BLOCK_SIZE as u64;
 
                 let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
                 response.extend_from_slice(&last_lba.to_be_bytes())?; // 8 bytes last LBA
-                response.extend_from_slice(&(block_size as u32).to_be_bytes())?; // 4 bytes block length
+                response.extend_from_slice(&(BLOCK_SIZE as u32).to_be_bytes())?; // 4 bytes block length
                 response.extend_from_slice(&[0u8; 20])?; // 20 reserved bytes zeroed
 
                 let len = alloc_len.min(response.len() as u32) as usize;
@@ -267,17 +286,20 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
             }
             ScsiCommand::Read { lba, len } => {
                 let sdcard = self.temp_sd.as_ref().unwrap();
-                let block_buf = unsafe { &mut *BLOCK_BUF.get_mut() };
                 let mut blocks = len;
                 let mut idx = lba;
 
+                let mut error_occurred = false;
+
                 while blocks > 0 {
                     if blocks >= block_buf.len() as u64 {
-                        sdcard.read_blocks(block_buf, BlockIdx(idx as u32))?;
+                        sdcard.read_blocks(&mut block_buf, BlockIdx(idx as u32))?;
 
-                        for block in &mut *block_buf {
+                        for block in &mut block_buf {
                             for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
-                                self.bulk_in.write(chunk).await.map_err(|_| ())?;
+                                if self.bulk_in.write(chunk).await.map_err(|_| ()).is_err() {
+                                    error_occurred = true
+                                }
                             }
                         }
 
@@ -289,7 +311,9 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
                         for block in &block_buf[..blocks as usize] {
                             for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
-                                self.bulk_in.write(chunk).await.map_err(|_| ())?;
+                                if self.bulk_in.write(chunk).await.map_err(|_| ()).is_err() {
+                                    error_occurred = true
+                                }
                             }
                         }
 
@@ -297,24 +321,33 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         blocks = 0;
                     }
                 }
+
+                if error_occurred {
+                    self.last_sense = ScsiSense::unrecovered_read_error();
+                    return Err(());
+                }
+
                 Ok(())
             }
             ScsiCommand::Write { lba, len } => {
                 let sdcard = self.temp_sd.as_ref().unwrap();
-                let block_buf = unsafe { &mut *BLOCK_BUF.get_mut() };
                 let mut blocks = len;
                 let mut idx = lba;
+
+                let mut error_occurred = false;
 
                 while blocks > 0 {
                     if blocks >= block_buf.len() as u64 {
                         for block in block_buf.as_mut() {
                             for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
                             {
-                                self.bulk_out.read(chunk).await.map_err(|_| ())?;
+                                if self.bulk_out.read(chunk).await.map_err(|_| ()).is_err() {
+                                    error_occurred = true
+                                }
                             }
                         }
 
-                        sdcard.read_blocks(block_buf, BlockIdx(idx as u32))?;
+                        sdcard.read_blocks(&mut block_buf, BlockIdx(idx as u32))?;
 
                         blocks -= block_buf.len() as u64;
                         idx += block_buf.len() as u64;
@@ -322,7 +355,9 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         for block in block_buf[..blocks as usize].as_mut() {
                             for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
                             {
-                                self.bulk_out.read(chunk).await.map_err(|_| ())?;
+                                if self.bulk_out.read(chunk).await.map_err(|_| ()).is_err() {
+                                    error_occurred = true
+                                }
                             }
                         }
 
@@ -335,6 +370,12 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         blocks = 0;
                     }
                 }
+
+                if error_occurred {
+                    self.last_sense = ScsiSense::unrecovered_write_error();
+                    return Err(());
+                }
+
                 Ok(())
             }
             ScsiCommand::ReadFormatCapacities { alloc_len } => {
@@ -357,7 +398,10 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                     .await
                     .map_err(|_| ())
             }
-            ScsiCommand::PreventAllowMediumRemoval { prevent: _prevent } => Ok(()),
+            ScsiCommand::PreventAllowMediumRemoval { prevent } => {
+                self.prevent_removal = prevent;
+                Ok(())
+            }
             ScsiCommand::StartStopUnit { start, load_eject } => {
                 if !start && load_eject {
                     self.pending_eject = true;
@@ -373,7 +417,9 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
     pub async fn send_csw_fail(&mut self, tag: u32) {
         #[cfg(feature = "defmt")]
-        defmt::error!("Command Failed: {}", tag);
+        if tag != 0 {
+            defmt::error!("Command Failed: {}", tag);
+        }
         self.send_csw(tag, 0x01, 0).await; // 0x01 = Command Failed
     }
 

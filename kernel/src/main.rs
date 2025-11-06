@@ -287,7 +287,7 @@ async fn setup_sd(sd: Sd) {
     let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
     let sdcard = SdmmcSdCard::new(device, Delay);
 
-    config.frequency = 32_000_000;
+    config.frequency = 64_000_000;
     sdcard.spi(|dev| dev.bus_mut().set_config(&config));
     SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
 }

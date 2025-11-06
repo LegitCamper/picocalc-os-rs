@@ -1,6 +1,6 @@
 use crate::scsi::{MassStorageClass, SCSI_BUSY, SCSI_HALT};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::{join::join, select::select};
+use embassy_futures::select::select;
 use embassy_rp::{peripherals::USB, usb::Driver};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embassy_time::Timer;
@@ -55,17 +55,14 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
                     Timer::after_millis(100).await;
                 }
             },
-            async {
-                // runs the usb, until cancelled
-                join(
-                    async {
-                        let _ = usb.remote_wakeup().await;
-                        usb.run().await
-                    },
-                    scsi.poll(),
-                )
-                .await;
-            },
+            // runs the usb, until cancelled
+            select(
+                async {
+                    let _ = usb.remote_wakeup().await;
+                    usb.run().await;
+                },
+                scsi.poll(),
+            ),
         )
         .await;
         usb.disable().await;
