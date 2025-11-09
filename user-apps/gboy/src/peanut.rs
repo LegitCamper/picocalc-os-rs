@@ -63,13 +63,15 @@ pub unsafe extern "C" fn lcd_draw_line(_gb: *mut gb_s, pixels: *const u8, line: 
                 .copied()
                 .unwrap_or(Rgb565::new(0, 0, 0));
 
-            let sx = (x as u16) * 2;
-            let sy = y * 2;
+            // let sx = (x as u16) * 2;
+            // let sy = y * 2;
 
-            draw_color(color, sx, sy);
-            draw_color(color, sx + 1, sy);
-            draw_color(color, sx, sy + 1);
-            draw_color(color, sx + 1, sy + 1);
+            // draw_color(color, sx, sy);
+            // draw_color(color, sx + 1, sy);
+            // draw_color(color, sx, sy + 1);
+            // draw_color(color, sx + 1, sy + 1);
+            //
+            draw_color(color, x as u16, y as u16);
         }
     }
 }

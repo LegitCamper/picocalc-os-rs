@@ -4,23 +4,22 @@
 
 extern crate alloc;
 use abi::{
-    Rng,
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
+    display::Display,
     fs::{file_len, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
-    print, sleep,
+    print,
 };
 use alloc::{vec, vec::Vec};
-use core::{cell::LazyCell, ffi::c_void, mem::MaybeUninit, panic::PanicInfo};
-use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
+use core::{ffi::c_void, mem::MaybeUninit, panic::PanicInfo};
 
 mod peanut;
 use peanut::gb_run_frame;
 
 use crate::peanut::{
-    gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_init, gb_init_lcd, gb_rom_read, gb_s,
-    lcd_draw_line,
+    JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
+    JOYPAD_UP, gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_init, gb_init_lcd, gb_rom_read,
+    gb_s, lcd_draw_line,
 };
 
 static mut DISPLAY: Display = Display;
@@ -35,15 +34,6 @@ fn panic(info: &PanicInfo) -> ! {
 pub extern "Rust" fn _start() {
     main()
 }
-
-const PEANUT_A: u8 = 0x01;
-const PEANUT_B: u8 = 0x02;
-const PEANUT_SELECT: u8 = 0x04;
-const PEANUT_START: u8 = 0x08;
-const PEANUT_RIGHT: u8 = 0x10;
-const PEANUT_LEFT: u8 = 0x20;
-const PEANUT_UP: u8 = 0x40;
-const PEANUT_DOWN: u8 = 0x80;
 
 const GAME: &'static str = "/games/gameboy/zelda.gb";
 
@@ -76,40 +66,39 @@ pub fn main() {
     };
     print!("gb init status: {}", init_status);
 
-    unsafe { gb_init_lcd(gb.as_mut_ptr(), Some(lcd_draw_line)) };
+    unsafe {
+        gb_init_lcd(gb.as_mut_ptr(), Some(lcd_draw_line));
+
+        // enable frame skip
+        gb.assume_init().direct.set_frame_skip(true);
+    };
 
     loop {
         let event = get_key();
-        if event.state != KeyState::Idle {
-            match event.key {
-                KeyCode::Esc => return,
-                KeyCode::Tab => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_START;
+        let keycode = match event.key {
+            KeyCode::Esc => break,
+            KeyCode::Tab => Some(JOYPAD_START),
+            KeyCode::Del => Some(JOYPAD_SELECT),
+            KeyCode::Enter => Some(JOYPAD_A),
+            KeyCode::Backspace => Some(JOYPAD_B),
+            KeyCode::JoyUp => Some(JOYPAD_UP),
+            KeyCode::JoyDown => Some(JOYPAD_DOWN),
+            KeyCode::JoyLeft => Some(JOYPAD_LEFT),
+            KeyCode::JoyRight => Some(JOYPAD_RIGHT),
+            _ => None,
+        };
+
+        if let Some(keycode) = keycode {
+            match event.state {
+                KeyState::Pressed => unsafe {
+                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !keycode as u8
                 },
-                KeyCode::Del => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_SELECT;
-                },
-                KeyCode::Enter => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_A;
-                },
-                KeyCode::Backspace => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_B;
-                },
-                KeyCode::JoyUp => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_UP;
-                },
-                KeyCode::JoyDown => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_DOWN;
-                },
-                KeyCode::JoyLeft => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_LEFT;
-                },
-                KeyCode::JoyRight => unsafe {
-                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad &= !PEANUT_RIGHT;
+                KeyState::Released => unsafe {
+                    (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad |= keycode as u8
                 },
                 _ => (),
-            };
-        };
+            }
+        }
 
         unsafe { gb_run_frame(gb.as_mut_ptr()) };
     }
