@@ -13,6 +13,9 @@ use embedded_hal_2::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
 use st7365p_lcd::ST7365P;
 
+#[cfg(feature = "fps")]
+use fps::{FPS_CANVAS, FPS_CANVAS_HEIGHT, FPS_CANVAS_WIDTH, FPS_CANVAS_X, FPS_CANVAS_Y};
+
 const TILE_SIZE: usize = 16; // 16x16 tile
 const TILE_COUNT: usize = (SCREEN_WIDTH / TILE_SIZE) * (SCREEN_HEIGHT / TILE_SIZE); // 400 tiles
 const NUM_TILE_ROWS: usize = SCREEN_WIDTH / TILE_SIZE;
@@ -138,6 +141,26 @@ impl<'a> AtomicFrameBuffer<'a> {
         Ok(())
     }
 
+    // used when doing a full screen refresh fps must be drawn into fb
+    // unfortunately it is not garenteed to not be drawn over before
+    // being pushed to the display
+    #[cfg(feature = "fps")]
+    pub fn draw_fps_into_fb(&mut self) {
+        unsafe {
+            let canvas = &FPS_CANVAS.canvas;
+
+            for y in 0..FPS_CANVAS_HEIGHT {
+                let fb_y = FPS_CANVAS_Y + y;
+                let fb_row_start = fb_y * SCREEN_WIDTH + FPS_CANVAS_X;
+                let canvas_row_start = y * FPS_CANVAS_WIDTH;
+
+                self.fb[fb_row_start..fb_row_start + FPS_CANVAS_WIDTH].copy_from_slice(
+                    &canvas[canvas_row_start..canvas_row_start + FPS_CANVAS_WIDTH],
+                );
+            }
+        }
+    }
+
     // copy N tiles horizontally to the right into batch tile buf
     fn append_tiles_to_batch(
         &mut self,
@@ -157,6 +180,45 @@ impl<'a> AtomicFrameBuffer<'a> {
                 &self.fb[fb_row_offset..fb_row_offset + (total_tiles as usize * TILE_SIZE)];
 
             batch_row.copy_from_slice(fb_row);
+
+            // override fps pixel region with fps
+            // avoids writing to fps, and having it overridden before draw
+            #[cfg(feature = "fps")]
+            {
+                let global_y = tile_y as usize * TILE_SIZE + batch_row_num;
+
+                if global_y >= FPS_CANVAS_Y && global_y < FPS_CANVAS_Y + FPS_CANVAS_HEIGHT {
+                    let start_x = tile_x as usize * TILE_SIZE;
+                    let end_x = start_x + (total_tiles as usize * TILE_SIZE);
+
+                    // horizontal overlap check
+                    let fps_x0 = FPS_CANVAS_X;
+                    let fps_x1 = FPS_CANVAS_X + FPS_CANVAS_WIDTH;
+
+                    let x0 = start_x.max(fps_x0);
+                    let x1 = end_x.min(fps_x1);
+
+                    if x1 > x0 {
+                        let row_in_fps = global_y - FPS_CANVAS_Y;
+                        let fps_off = row_in_fps
+                            .checked_mul(FPS_CANVAS_WIDTH)
+                            .and_then(|v| v.checked_add(x0 - fps_x0));
+                        let batch_off = x0 - start_x;
+                        let len = x1 - x0;
+
+                        if let Some(fps_off) = fps_off {
+                            let fps_len_ok = fps_off + len <= unsafe { FPS_CANVAS.canvas.len() };
+                            let batch_len_ok = batch_off + len <= batch_row.len();
+
+                            if fps_len_ok && batch_len_ok {
+                                batch_row[batch_off..batch_off + len].copy_from_slice(unsafe {
+                                    &FPS_CANVAS.canvas[fps_off..fps_off + len]
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -172,11 +234,23 @@ impl<'a> AtomicFrameBuffer<'a> {
         DELAY: DelayNs,
     {
         if self.should_full_draw() {
+            self.draw_fps_into_fb();
             return self.draw(display).await;
         }
 
         #[cfg(feature = "fps")]
-        let mut any_drawn = false;
+        {
+            let fps_tile_x = FPS_CANVAS_X / TILE_SIZE;
+            let fps_tile_y = FPS_CANVAS_Y / TILE_SIZE;
+            let fps_tile_w = (FPS_CANVAS_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
+            let fps_tile_h = (FPS_CANVAS_HEIGHT + TILE_SIZE - 1) / TILE_SIZE;
+
+            for ty in fps_tile_y..fps_tile_y + fps_tile_h {
+                for tx in fps_tile_x..fps_tile_x + fps_tile_w {
+                    self.dirty_tiles[ty * NUM_TILE_COLS + tx].store(true, Ordering::Release);
+                }
+            }
+        }
 
         for tile_row in 0..NUM_TILE_ROWS {
             let row_start_idx = tile_row * NUM_TILE_COLS;
@@ -218,10 +292,6 @@ impl<'a> AtomicFrameBuffer<'a> {
                             &self.batch_tile_buf[..run_len * TILE_SIZE * TILE_SIZE],
                         )
                         .await?;
-
-                    if cfg!(feature = "fps") {
-                        any_drawn = true;
-                    }
                 }
 
                 col += 1;
@@ -229,8 +299,8 @@ impl<'a> AtomicFrameBuffer<'a> {
         }
 
         #[cfg(feature = "fps")]
-        if any_drawn {
-            unsafe { crate::display::FPS_COUNTER.measure() }
+        unsafe {
+            crate::display::FPS_COUNTER.measure()
         }
 
         Ok(())
@@ -356,5 +426,148 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
 impl<'a> OriginDimensions for AtomicFrameBuffer<'a> {
     fn size(&self) -> Size {
         Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+    }
+}
+
+#[cfg(feature = "fps")]
+pub mod fps {
+    use crate::display::SCREEN_WIDTH;
+    use core::fmt::Write;
+    use embassy_time::{Duration, Instant};
+    use embedded_graphics::{
+        Drawable, Pixel,
+        draw_target::DrawTarget,
+        geometry::Point,
+        mono_font::{MonoTextStyle, ascii::FONT_8X13},
+        pixelcolor::Rgb565,
+        prelude::{IntoStorage, OriginDimensions, RgbColor, Size},
+        text::{Alignment, Text},
+    };
+
+    pub static mut FPS_COUNTER: FpsCounter = FpsCounter::new();
+    pub static mut FPS_CANVAS: FpsCanvas = FpsCanvas::new();
+
+    // "FPS: 120" = 8 len
+    const FPS_LEN: usize = 8;
+    pub const FPS_CANVAS_WIDTH: usize = (FONT_8X13.character_size.width + 4) as usize * FPS_LEN;
+    pub const FPS_CANVAS_HEIGHT: usize = FONT_8X13.character_size.height as usize;
+
+    // puts canvas in the top right of the display
+    // top left point of canvas
+    pub const FPS_CANVAS_X: usize = SCREEN_WIDTH - FPS_CANVAS_WIDTH;
+    pub const FPS_CANVAS_Y: usize = 0;
+
+    pub struct FpsCanvas {
+        pub canvas: [u16; FPS_CANVAS_HEIGHT * FPS_CANVAS_WIDTH],
+    }
+
+    impl FpsCanvas {
+        const fn new() -> Self {
+            Self {
+                canvas: [0; FPS_CANVAS_HEIGHT * FPS_CANVAS_WIDTH],
+            }
+        }
+
+        fn clear(&mut self) {
+            for p in &mut self.canvas {
+                *p = 0;
+            }
+        }
+
+        pub async fn draw_fps(&mut self) {
+            let mut buf: heapless::String<FPS_LEN> = heapless::String::new();
+            let fps = unsafe { FPS_COUNTER.smoothed };
+            let _ = write!(buf, "FPS: {}", fps as u8);
+
+            self.clear();
+            let text_style = MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE);
+            Text::with_alignment(
+                buf.as_str(),
+                Point::new(
+                    FPS_CANVAS_WIDTH as i32 / 2,
+                    (FPS_CANVAS_HEIGHT as i32 + 8) / 2,
+                ),
+                text_style,
+                Alignment::Center,
+            )
+            .draw(self)
+            .unwrap();
+        }
+    }
+
+    impl DrawTarget for FpsCanvas {
+        type Error = ();
+        type Color = Rgb565;
+
+        fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+        where
+            I: IntoIterator<Item = Pixel<Self::Color>>,
+        {
+            for Pixel(point, color) in pixels {
+                if point.x < 0
+                    || point.x >= FPS_CANVAS_WIDTH as i32
+                    || point.y < 0
+                    || point.y >= FPS_CANVAS_HEIGHT as i32
+                {
+                    continue;
+                }
+
+                let index = (point.y as usize) * FPS_CANVAS_WIDTH + point.x as usize;
+                self.canvas[index] = color.into_storage();
+            }
+            Ok(())
+        }
+    }
+
+    impl OriginDimensions for FpsCanvas {
+        fn size(&self) -> Size {
+            Size::new(FPS_CANVAS_WIDTH as u32, FPS_CANVAS_HEIGHT as u32)
+        }
+    }
+
+    pub struct FpsCounter {
+        last_frame: Option<Instant>,
+        smoothed: f32,
+        last_draw: Option<Instant>,
+    }
+
+    impl FpsCounter {
+        pub const fn new() -> Self {
+            Self {
+                last_frame: None,
+                smoothed: 0.0,
+                last_draw: None,
+            }
+        }
+
+        // Is called once per frame or partial frame to update FPS
+        pub fn measure(&mut self) {
+            let now = Instant::now();
+
+            if let Some(last) = self.last_frame {
+                let dt_us = (now - last).as_micros() as f32;
+                if dt_us > 0.0 {
+                    let current = 1_000_000.0 / dt_us;
+                    self.smoothed = if self.smoothed == 0.0 {
+                        current
+                    } else {
+                        0.9 * self.smoothed + 0.1 * current
+                    };
+                }
+            }
+
+            self.last_frame = Some(now);
+        }
+
+        pub fn should_draw(&mut self) -> bool {
+            let now = Instant::now();
+            match self.last_draw {
+                Some(last) if now - last < Duration::from_millis(200) => false,
+                _ => {
+                    self.last_draw = Some(now);
+                    true
+                }
+            }
+        }
     }
 }

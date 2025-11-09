@@ -11,7 +11,7 @@ doctest = false
 bench = false
 
 [features]
-default = ["rp235x", "defmt"]
+default = ["rp235x", "defmt", "fps"]
 pimoroni2w = ["rp235x"]
 rp2040 = ["embassy-rp/rp2040"]
 rp235x = ["embassy-rp/rp235xb"]
