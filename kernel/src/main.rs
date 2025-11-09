@@ -332,6 +332,7 @@ async fn kernel_task(
 
     setup_mcu(mcu).await;
 
+    #[cfg(feature = "defmt")]
     defmt::info!("setting up psram");
     Timer::after_millis(100).await;
 

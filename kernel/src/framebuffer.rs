@@ -234,6 +234,7 @@ impl<'a> AtomicFrameBuffer<'a> {
         DELAY: DelayNs,
     {
         if self.should_full_draw() {
+            #[cfg(feature = "fps")]
             self.draw_fps_into_fb();
             return self.draw(display).await;
         }
