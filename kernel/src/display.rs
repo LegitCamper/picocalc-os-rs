@@ -15,6 +15,9 @@ use embedded_graphics::{
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
 
+#[cfg(feature = "psram")]
+use crate::heap::HEAP;
+
 #[cfg(feature = "fps")]
 pub use framebuffer::fps::{FPS_CANVAS, FPS_COUNTER};
 
@@ -32,18 +35,21 @@ pub static mut FRAMEBUFFER: Option<AtomicFrameBuffer> = None;
 
 fn init_fb() {
     unsafe {
-        FRAMEBUFFER = Some(if cfg!(not(feature = "pimoroni2w")) {
-            static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
-            AtomicFrameBuffer::new(&mut BUF)
-        } else {
-            let slab = crate::heap::HEAP.alloc(Layout::array::<u16>(framebuffer::SIZE).unwrap())
-                as *mut u16;
+        #[cfg(feature = "psram")]
+        {
+            let slab = HEAP.alloc(Layout::array::<u16>(framebuffer::SIZE).unwrap()) as *mut u16;
             let buf = core::slice::from_raw_parts_mut(slab, framebuffer::SIZE);
 
             let mut fb = AtomicFrameBuffer::new(buf);
             fb.clear(Rgb565::BLACK).unwrap();
-            fb
-        });
+            FRAMEBUFFER = Some(fb);
+        }
+
+        #[cfg(not(feature = "psram"))]
+        {
+            static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
+            FRAMEBUFFER = Some(AtomicFrameBuffer::new(&mut BUF));
+        }
     }
 }
 

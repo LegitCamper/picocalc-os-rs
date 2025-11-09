@@ -12,29 +12,30 @@ mod abi;
 mod display;
 mod elf;
 mod framebuffer;
-#[allow(unused)]
-mod heap;
 mod peripherals;
-#[allow(unused)]
-mod psram;
 mod scsi;
 mod storage;
 mod ui;
 mod usb;
 mod utils;
 
-#[cfg(feature = "pimoroni2w")]
-use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
+#[cfg(feature = "psram")]
+#[allow(unused)]
+mod heap;
+#[cfg(feature = "psram")]
+#[allow(unused)]
+mod psram;
+
+#[cfg(feature = "psram")]
+use crate::{heap::HEAP, heap::init_qmi_psram_heap, psram::init_psram, psram::init_psram_qmi};
 
 use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     display::{FRAMEBUFFER, display_handler, init_display},
-    heap::HEAP,
     peripherals::{
         conf_peripherals,
         keyboard::{KeyState, read_keyboard_fifo},
     },
-    psram::init_psram,
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},
@@ -270,22 +271,22 @@ async fn setup_display(display: Display, spawner: Spawner) {
 
 // psram is kind of useless on the pico calc
 // ive opted to use the pimoroni with on onboard xip psram instead
-async fn setup_psram(psram: Psram) {
-    let psram = init_psram(
-        psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
-    )
-    .await;
+// async fn setup_psram(psram: Psram) {
+//     let psram = init_psram(
+//         psram.pio, psram.sclk, psram.mosi, psram.miso, psram.cs, psram.dma1, psram.dma2,
+//     )
+//     .await;
 
-    #[cfg(feature = "defmt")]
-    defmt::info!("psram size: {}", psram.size);
+//     #[cfg(feature = "defmt")]
+//     defmt::info!("psram size: {}", psram.size);
 
-    if psram.size == 0 {
-        #[cfg(feature = "defmt")]
-        defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
-    }
-}
+//     if psram.size == 0 {
+//         #[cfg(feature = "defmt")]
+//         defmt::info!("\u{1b}[1mExternal PSRAM was NOT found!\u{1b}[0m");
+//     }
+// }
 
-#[cfg(feature = "pimoroni2w")]
+#[cfg(feature = "psram")]
 async fn setup_qmi_psram() {
     Timer::after_millis(250).await;
     let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
@@ -322,7 +323,7 @@ async fn kernel_task(
     watchdog: Peri<'static, WATCHDOG>,
     display: Display,
     sd: Sd,
-    psram: Psram,
+    _psram: Psram,
     mcu: Mcu,
     usb: Peri<'static, USB>,
 ) {
@@ -337,7 +338,7 @@ async fn kernel_task(
     Timer::after_millis(100).await;
 
     // setup_psram(psram).await;
-    #[cfg(feature = "pimoroni2w")]
+    #[cfg(feature = "psram")]
     setup_qmi_psram().await;
 
     Timer::after_millis(100).await;

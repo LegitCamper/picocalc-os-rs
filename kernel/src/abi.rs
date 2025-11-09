@@ -10,6 +10,9 @@ use embedded_graphics::draw_target::DrawTarget;
 use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
 
+#[cfg(feature = "psram")]
+use crate::heap::HEAP;
+
 use crate::{
     display::FRAMEBUFFER,
     framebuffer::FB_PAUSED,
@@ -20,10 +23,14 @@ const _: AllocAbi = alloc;
 pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
     // SAFETY: caller guarantees layout is valid
     unsafe {
-        if cfg!(feature = "pimoroni2w") {
-            crate::heap::HEAP.alloc(layout.into())
-        } else {
-            alloc::alloc::alloc(layout.into())
+        #[cfg(feature = "psram")]
+        {
+            return HEAP.alloc(layout.into());
+        }
+
+        #[cfg(not(feature = "psram"))]
+        {
+            return alloc::alloc::alloc(layout.into());
         }
     }
 }
@@ -31,12 +38,14 @@ pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
 const _: DeallocAbi = dealloc;
 pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
     // SAFETY: caller guarantees ptr and layout are valid
-    unsafe {
-        if cfg!(feature = "pimoroni2w") {
-            crate::heap::HEAP.dealloc(ptr, layout.into())
-        } else {
-            alloc::alloc::dealloc(ptr, layout.into())
-        }
+    #[cfg(feature = "psram")]
+    {
+        unsafe { HEAP.dealloc(ptr, layout.into()) }
+    }
+
+    #[cfg(not(feature = "psram"))]
+    {
+        unsafe { alloc::alloc::dealloc(ptr, layout.into()) }
     }
 }
 
