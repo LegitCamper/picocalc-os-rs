@@ -1,14 +1,13 @@
 #![no_std]
-
 #[cfg(feature = "alloc")]
 use core::alloc::Layout;
 
+use core::ffi::c_char;
 use embedded_graphics::{
     Pixel,
     pixelcolor::{Rgb565, raw::RawU16},
     prelude::{IntoStorage, Point},
 };
-use embedded_sdmmc::DirEntry;
 use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
@@ -396,21 +395,23 @@ pub extern "C" fn gen_rand(req: &mut RngRequest) {
 pub type ListDir = extern "C" fn(
     str: *const u8,
     len: usize,
-    files: *mut Option<DirEntry>,
+    entries: *mut *mut c_char,
     file_len: usize,
+    max_entry_str_len: usize,
 ) -> usize;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn list_dir(
     str: *const u8,
     len: usize,
-    files: *mut Option<DirEntry>,
-    file_len: usize,
+    entries: *mut *mut c_char,
+    entry_count: usize,
+    max_entry_str_len: usize,
 ) -> usize {
     unsafe {
         let ptr = CALL_ABI_TABLE[CallTable::ListDir as usize];
         let f: ListDir = core::mem::transmute(ptr);
-        f(str, len, files, file_len)
+        f(str, len, entries, entry_count, max_entry_str_len)
     }
 }
 

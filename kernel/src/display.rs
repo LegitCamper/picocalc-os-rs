@@ -15,6 +15,12 @@ use embedded_graphics::{
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
 
+#[cfg(feature = "psram")]
+use crate::heap::HEAP;
+
+#[cfg(feature = "fps")]
+pub use framebuffer::fps::{FPS_CANVAS, FPS_COUNTER};
+
 type DISPLAY = ST7365P<
     ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
     Output<'static>,
@@ -29,18 +35,21 @@ pub static mut FRAMEBUFFER: Option<AtomicFrameBuffer> = None;
 
 fn init_fb() {
     unsafe {
-        FRAMEBUFFER = Some(if cfg!(not(feature = "pimoroni2w")) {
-            static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
-            AtomicFrameBuffer::new(&mut BUF)
-        } else {
-            let slab = crate::heap::HEAP.alloc(Layout::array::<u16>(framebuffer::SIZE).unwrap())
-                as *mut u16;
+        #[cfg(feature = "psram")]
+        {
+            let slab = HEAP.alloc(Layout::array::<u16>(framebuffer::SIZE).unwrap()) as *mut u16;
             let buf = core::slice::from_raw_parts_mut(slab, framebuffer::SIZE);
 
             let mut fb = AtomicFrameBuffer::new(buf);
             fb.clear(Rgb565::BLACK).unwrap();
-            fb
-        });
+            FRAMEBUFFER = Some(fb);
+        }
+
+        #[cfg(not(feature = "psram"))]
+        {
+            static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
+            FRAMEBUFFER = Some(AtomicFrameBuffer::new(&mut BUF));
+        }
     }
 }
 
@@ -79,18 +88,26 @@ pub async fn init_display(
 #[embassy_executor::task]
 pub async fn display_handler(mut display: DISPLAY) {
     loop {
+        // renders fps text to canvas
+        #[cfg(feature = "fps")]
+        unsafe {
+            if FPS_COUNTER.should_draw() {
+                FPS_CANVAS.draw_fps().await;
+            }
+        }
+
         if !FB_PAUSED.load(Ordering::Acquire) {
             unsafe {
                 FRAMEBUFFER
                     .as_mut()
                     .unwrap()
-                    .safe_draw(&mut display)
+                    .partial_draw(&mut display)
                     .await
                     .unwrap()
             };
         }
 
         // small yield to allow other tasks to run
-        Timer::after_nanos(500).await;
+        Timer::after_millis(10).await;
     }
 }

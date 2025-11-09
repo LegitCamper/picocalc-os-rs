@@ -3,12 +3,15 @@ use abi_sys::{
     PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
-use core::{alloc::GlobalAlloc, sync::atomic::Ordering};
+use core::{alloc::GlobalAlloc, ffi::c_char, ptr, sync::atomic::Ordering};
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
 use embedded_graphics::draw_target::DrawTarget;
-use embedded_sdmmc::{DirEntry, LfnBuffer};
+use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
+
+#[cfg(feature = "psram")]
+use crate::heap::HEAP;
 
 use crate::{
     display::FRAMEBUFFER,
@@ -20,10 +23,14 @@ const _: AllocAbi = alloc;
 pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
     // SAFETY: caller guarantees layout is valid
     unsafe {
-        if cfg!(feature = "pimoroni2w") {
-            crate::heap::HEAP.alloc(layout.into())
-        } else {
-            alloc::alloc::alloc(layout.into())
+        #[cfg(feature = "psram")]
+        {
+            return HEAP.alloc(layout.into());
+        }
+
+        #[cfg(not(feature = "psram"))]
+        {
+            return alloc::alloc::alloc(layout.into());
         }
     }
 }
@@ -31,12 +38,14 @@ pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
 const _: DeallocAbi = dealloc;
 pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
     // SAFETY: caller guarantees ptr and layout are valid
-    unsafe {
-        if cfg!(feature = "pimoroni2w") {
-            crate::heap::HEAP.dealloc(ptr, layout.into())
-        } else {
-            alloc::alloc::dealloc(ptr, layout.into())
-        }
+    #[cfg(feature = "psram")]
+    {
+        unsafe { HEAP.dealloc(ptr, layout.into()) }
+    }
+
+    #[cfg(not(feature = "psram"))]
+    {
+        unsafe { alloc::alloc::dealloc(ptr, layout.into()) }
     }
 }
 
@@ -116,11 +125,27 @@ pub extern "C" fn gen_rand(req: &mut RngRequest) {
     }
 }
 
-fn get_dir_entries(dir: &Dir, files: &mut [Option<DirEntry>]) -> usize {
+unsafe fn copy_entry_to_user_buf(name: &[u8], dest: *mut c_char, max_str_len: usize) {
+    if !dest.is_null() {
+        let len = name.len().min(max_str_len - 1);
+        unsafe {
+            ptr::copy_nonoverlapping(name.as_ptr(), dest as *mut u8, len);
+            *dest.add(len) = 0; // nul terminator
+        }
+    }
+}
+
+unsafe fn get_dir_entries(dir: &Dir, entries: &mut [*mut c_char], max_str_len: usize) -> usize {
+    let mut b = [0; 25];
+    let mut buf = LfnBuffer::new(&mut b);
     let mut i = 0;
-    dir.iterate_dir(|entry| {
-        if i < files.len() {
-            files[i] = Some(entry.clone());
+    dir.iterate_dir_lfn(&mut buf, |entry, lfn_name| {
+        if i < entries.len() {
+            if let Some(name) = lfn_name {
+                unsafe { copy_entry_to_user_buf(name.as_bytes(), entries[i], max_str_len) };
+            } else {
+                unsafe { copy_entry_to_user_buf(entry.name.base_name(), entries[i], max_str_len) };
+            }
             i += 1;
         }
     })
@@ -128,24 +153,30 @@ fn get_dir_entries(dir: &Dir, files: &mut [Option<DirEntry>]) -> usize {
     i
 }
 
-fn recurse_dir(dir: &Dir, dirs: &[&str], files: &mut [Option<DirEntry>]) -> usize {
+unsafe fn recurse_dir(
+    dir: &Dir,
+    dirs: &[&str],
+    entries: &mut [*mut c_char],
+    max_str_len: usize,
+) -> usize {
     if dirs.is_empty() {
-        return get_dir_entries(dir, files);
+        return unsafe { get_dir_entries(dir, entries, max_str_len) };
     }
 
     let dir = dir.open_dir(dirs[0]).unwrap();
-    recurse_dir(&dir, &dirs[1..], files)
+    unsafe { recurse_dir(&dir, &dirs[1..], entries, max_str_len) }
 }
 
 const _: ListDir = list_dir;
 pub extern "C" fn list_dir(
     dir: *const u8,
     len: usize,
-    files: *mut Option<DirEntry>,
+    entries: *mut *mut c_char,
     files_len: usize,
+    max_entry_str_len: usize,
 ) -> usize {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
-    let files = unsafe { core::slice::from_raw_parts_mut(files, files_len) };
+    let files = unsafe { core::slice::from_raw_parts_mut(entries, files_len) };
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let dir = unsafe { core::str::from_raw_parts(dir, len) };
     let dirs: Vec<&str> = dir.split('/').collect();
@@ -156,10 +187,12 @@ pub extern "C" fn list_dir(
     let mut wrote = 0;
     sd.access_root_dir(|root| {
         if dirs[0] == "" && dirs.len() >= 2 {
-            if dir == "/" {
-                wrote = get_dir_entries(&root, files);
-            } else {
-                wrote = recurse_dir(&root, &dirs[1..], files);
+            unsafe {
+                if dir == "/" {
+                    wrote = get_dir_entries(&root, files, max_entry_str_len);
+                } else {
+                    wrote = recurse_dir(&root, &dirs[1..], files, max_entry_str_len);
+                }
             }
         }
     });

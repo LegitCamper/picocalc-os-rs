@@ -18,7 +18,6 @@ version = "0.1.0"
 dependencies = [
  "abi_sys",
  "embedded-graphics",
- "embedded-sdmmc",
  "once_cell",
  "rand_core 0.9.3",
 ]
@@ -31,7 +30,6 @@ dependencies = [
  "cbindgen",
  "defmt 0.3.100",
  "embedded-graphics",
- "embedded-sdmmc",
  "strum",
 ]
 
@@ -182,12 +180,6 @@ name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
-
-[[package]]
-name = "bit_field"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e4b40c7323adcfc0a41c4b88143ed58346ff65a288fc144329c5c45e05d70c6"
 
 [[package]]
 name = "bitfield"
@@ -1025,18 +1017,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-iconoir"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c52b9899b636b56d4e66834f7a90766d0bc6600c0f067d91ed0711b11fa3f5c8"
-dependencies = [
- "bit_field",
- "embedded-graphics",
- "paste",
- "static_assertions",
-]
-
-[[package]]
 name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1203,12 +1183,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "foldhash"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1355,6 +1329,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "embedded-graphics",
+ "selection_ui",
  "tinygif",
 ]
 
@@ -1421,7 +1396,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
  "hash32",
- "serde",
  "stable_deref_trait",
 ]
 
@@ -1575,7 +1549,6 @@ dependencies = [
  "embedded-text",
  "goblin",
  "heapless",
- "kolibri-embedded-gui",
  "num_enum 0.7.4",
  "once_cell",
  "panic-probe",
@@ -1587,18 +1560,6 @@ dependencies = [
  "strum",
  "talc",
  "trouble-host",
-]
-
-[[package]]
-name = "kolibri-embedded-gui"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "011f8f415e8c2f03e4ad752afcf1bb156a18926250401b1fe29d8feda644c140"
-dependencies = [
- "embedded-graphics",
- "embedded-iconoir",
- "foldhash",
- "heapless",
 ]
 
 [[package]]
@@ -2306,6 +2267,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1257cd4248b4132760d6524d6dda4e053bc648c9070b960929bf50cfb1e7add"
 
 [[package]]
+name = "selection_ui"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "embedded-graphics",
+ "embedded-layout",
+ "embedded-text",
+]
+
+[[package]]
 name = "semver"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2462,12 +2433,6 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "static_assertions"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "static_cell"

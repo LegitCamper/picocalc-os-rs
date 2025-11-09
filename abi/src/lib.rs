@@ -46,7 +46,6 @@ pub fn get_key() -> KeyEvent {
 
 pub mod display {
     use abi_sys::CPixel;
-    use alloc::{vec, vec::Vec};
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
@@ -54,7 +53,6 @@ pub mod display {
         prelude::{DrawTarget, Size},
         primitives::Rectangle,
     };
-    use once_cell::unsync::Lazy;
 
     pub const SCREEN_WIDTH: usize = 320;
     pub const SCREEN_HEIGHT: usize = 320;
@@ -142,7 +140,9 @@ impl RngCore for Rng {
 }
 
 pub mod fs {
-    use embedded_sdmmc::DirEntry;
+    use core::fmt::Display;
+
+    use alloc::{format, vec::Vec};
 
     pub fn read_file(file: &str, read_from: usize, buf: &mut [u8]) -> usize {
         abi_sys::read_file(
@@ -154,8 +154,85 @@ pub mod fs {
         )
     }
 
-    pub fn list_dir(path: &str, files: &mut [Option<DirEntry>]) -> usize {
-        abi_sys::list_dir(path.as_ptr(), path.len(), files.as_mut_ptr(), files.len())
+    pub struct FileName<'a> {
+        full: &'a str,
+        base: &'a str,
+        ext: Option<&'a str>,
+    }
+
+    impl<'a> FileName<'a> {
+        pub fn full_name(&self) -> &str {
+            self.full
+        }
+
+        pub fn base(&self) -> &str {
+            self.base
+        }
+
+        pub fn extension(&self) -> Option<&str> {
+            self.ext
+        }
+    }
+
+    impl<'a> Display for FileName<'a> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(f, "{}", self.full_name())
+        }
+    }
+
+    impl<'a> From<&'a str> for FileName<'a> {
+        fn from(s: &'a str) -> FileName<'a> {
+            let full = s;
+
+            // Split on last dot for extension
+            let (base, ext) = match s.rfind('.') {
+                Some(idx) => (&s[..idx], Some(&s[idx + 1..])),
+                None => (s, None),
+            };
+
+            FileName { full, base, ext }
+        }
+    }
+
+    const MAX_ENTRY_NAME_LEN: usize = 25;
+    const MAX_ENTRIES: usize = 25;
+
+    #[derive(Clone, Copy)]
+    pub struct Entries([[u8; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES]);
+
+    impl Entries {
+        pub fn new() -> Self {
+            Self([[0; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES])
+        }
+
+        /// Get list of file names after listing
+        pub fn entries<'a>(&'a self) -> Vec<FileName<'a>> {
+            self.0
+                .iter()
+                .filter_map(|buf| {
+                    let nul_pos = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                    Some(core::str::from_utf8(&buf[..nul_pos]).ok()?.into())
+                })
+                .collect()
+        }
+
+        fn as_ptrs(&mut self) -> [*mut u8; MAX_ENTRIES] {
+            let mut ptrs: [*mut u8; MAX_ENTRIES] = [core::ptr::null_mut(); MAX_ENTRIES];
+            for (i, buf) in self.0.iter_mut().enumerate() {
+                ptrs[i] = buf.as_mut_ptr();
+            }
+            ptrs
+        }
+    }
+
+    pub fn list_dir(path: &str, entries: &mut Entries) -> usize {
+        abi_sys::list_dir(
+            path.as_ptr(),
+            path.len(),
+            entries.as_ptrs().as_mut_ptr(),
+            MAX_ENTRIES,
+            MAX_ENTRY_NAME_LEN,
+        )
     }
 
     pub fn file_len(str: &str) -> usize {

@@ -4,6 +4,7 @@ members = [
   "kernel",
   "abi_sys",
   "abi",
+  "selection_ui",
   "user-apps/calculator",
   "user-apps/snake",
   "user-apps/gallery",
@@ -27,4 +28,4 @@ panic = "abort"
 
 [profile.dev]
 lto = true
-opt-level = "z"
+opt-level = "s"
