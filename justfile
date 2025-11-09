@@ -1,5 +1,5 @@
 kernel-dev board:
-    cargo run --bin kernel --features {{board}}
+    cargo run --bin kernel --features {{board}} --features fps
 kernel-release board:
     cargo build --bin kernel --release --no-default-features --features {{board}}
     elf2uf2-rs -d target/thumbv8m.main-none-eabihf/release/kernel

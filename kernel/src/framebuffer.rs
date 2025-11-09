@@ -130,6 +130,11 @@ impl<'a> AtomicFrameBuffer<'a> {
             tile.store(false, Ordering::Release);
         }
 
+        #[cfg(feature = "fps")]
+        unsafe {
+            crate::display::FPS_COUNTER.measure()
+        }
+
         Ok(())
     }
 
@@ -214,6 +219,11 @@ impl<'a> AtomicFrameBuffer<'a> {
 
                 col += 1;
             }
+        }
+
+        #[cfg(feature = "fps")]
+        unsafe {
+            crate::display::FPS_COUNTER.measure()
         }
 
         Ok(())

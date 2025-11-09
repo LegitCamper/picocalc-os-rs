@@ -30,6 +30,7 @@ defmt = [
   # "cyw43/defmt",
   # "cyw43-pio/defmt",
 ]
+fps = []
 
 [dependencies]
 embassy-executor = { version = "0.9", features = [
