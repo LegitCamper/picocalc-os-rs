@@ -175,6 +175,9 @@ impl<'a> AtomicFrameBuffer<'a> {
             return self.draw(display).await;
         }
 
+        #[cfg(feature = "fps")]
+        let mut any_drawn = false;
+
         for tile_row in 0..NUM_TILE_ROWS {
             let row_start_idx = tile_row * NUM_TILE_COLS;
             let mut col = 0;
@@ -215,6 +218,10 @@ impl<'a> AtomicFrameBuffer<'a> {
                             &self.batch_tile_buf[..run_len * TILE_SIZE * TILE_SIZE],
                         )
                         .await?;
+
+                    if cfg!(feature = "fps") {
+                        any_drawn = true;
+                    }
                 }
 
                 col += 1;
@@ -222,8 +229,8 @@ impl<'a> AtomicFrameBuffer<'a> {
         }
 
         #[cfg(feature = "fps")]
-        unsafe {
-            crate::display::FPS_COUNTER.measure()
+        if any_drawn {
+            unsafe { crate::display::FPS_COUNTER.measure() }
         }
 
         Ok(())

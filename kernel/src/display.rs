@@ -93,11 +93,6 @@ pub async fn display_handler(mut display: DISPLAY) {
             };
         }
 
-        #[cfg(feature = "fps")]
-        if unsafe { FPS_COUNTER.should_draw() } {
-            fps::draw_fps(&mut display).await;
-        }
-
         // small yield to allow other tasks to run
         Timer::after_millis(10).await;
     }
