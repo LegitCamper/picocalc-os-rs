@@ -1,5 +1,5 @@
+use crate::storage::{SDCARD, SdCard};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::yield_now;
 use embassy_time::Timer;
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, EndpointIn, EndpointOut};
@@ -12,25 +12,24 @@ use scsi_types::*;
 mod error;
 use error::ScsiSense;
 
-use crate::storage::{SDCARD, SdCard};
-use crate::usb::stop_usb;
-
 const BULK_ENDPOINT_PACKET_SIZE: usize = 64;
 
 // indicates that a scsi transaction is occurring and is
 // NOT safe to disable usb, or acquire sdcard
 pub static SCSI_BUSY: AtomicBool = AtomicBool::new(false);
 
-// start no more transfers, usb is trying to stop
+// stop scsi and return sdcard when safe to do so
 pub static SCSI_HALT: AtomicBool = AtomicBool::new(false);
+
+pub static SCSI_EJECTED: AtomicBool = AtomicBool::new(false);
 
 pub struct MassStorageClass<'d, D: Driver<'d>> {
     temp_sd: Option<SdCard>, // temporary owns sdcard when scsi is running
-    pub pending_eject: bool,
-    pub prevent_removal: bool,
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
     last_sense: ScsiSense,
+    prevent_removal: bool,
+    pending_eject: bool,
 }
 
 impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
@@ -44,11 +43,11 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
         Self {
             temp_sd: None,
-            pending_eject: false,
-            prevent_removal: false,
             bulk_out,
             bulk_in,
             last_sense: ScsiSense::no_sense(),
+            prevent_removal: false,
+            pending_eject: false,
         }
     }
 
@@ -64,6 +63,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         }
     }
 
+    // return sdcard to global, so other tasks can use it
     pub async fn return_sdcard(&mut self) {
         if let Some(card) = self.temp_sd.take() {
             let mut guard = SDCARD.get().lock().await;
@@ -73,19 +73,26 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
     pub async fn poll(&mut self) {
         loop {
-            if !self.prevent_removal {
-                if SCSI_HALT.load(Ordering::Acquire) || self.pending_eject {
-                    break;
+            if !self.prevent_removal && (SCSI_HALT.load(Ordering::Acquire) || self.pending_eject) {
+                if self.temp_sd.is_some() {
+                    self.return_sdcard().await;
+                    SCSI_BUSY.store(false, Ordering::Release);
+                    self.pending_eject = false;
                 }
+            } else {
+                self.handle_cbw().await;
             }
 
-            self.handle_cbw().await;
-
-            if !self.prevent_removal && self.pending_eject {
-                break;
+            if SCSI_EJECTED.load(Ordering::Acquire) {
+                Timer::after_millis(100).await;
+                continue;
             }
 
-            Timer::after_millis(1).await;
+            if SCSI_BUSY.load(Ordering::Relaxed) {
+                Timer::after_millis(1).await;
+            } else {
+                Timer::after_millis(100).await;
+            }
         }
     }
 
@@ -94,16 +101,12 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
         if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
             if n == 31 {
                 if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
-                    SCSI_BUSY.store(true, Ordering::Release);
-
                     let command = parse_cb(&cbw.CBWCB);
                     if self.handle_command(command).await.is_ok() {
                         self.send_csw_success(cbw.dCBWTag).await
                     } else {
                         self.send_csw_fail(cbw.dCBWTag).await
                     }
-
-                    SCSI_BUSY.store(false, Ordering::Release);
                 } else {
                     self.last_sense = ScsiSense::invalid_cdb();
                     self.send_csw_fail(0).await;
@@ -203,10 +206,24 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
             ScsiCommand::TestUnitReady => {
-                if self.temp_sd.as_ref().unwrap().is_attached() {
-                    Ok(())
-                } else {
-                    Err(())
+                if !SCSI_EJECTED.load(Ordering::Acquire) && self.temp_sd.is_none() {
+                    SCSI_BUSY.store(true, Ordering::Release);
+                    self.take_sdcard().await;
+                }
+
+                match &self.temp_sd {
+                    Some(sd) => {
+                        if sd.is_attached() {
+                            Ok(())
+                        } else {
+                            self.last_sense = ScsiSense::medium_not_present();
+                            Err(())
+                        }
+                    }
+                    None => {
+                        self.last_sense = ScsiSense::medium_not_present();
+                        Err(())
+                    }
                 }
             }
             ScsiCommand::RequestSense { desc: _, alloc_len } => {
@@ -262,148 +279,183 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
                 self.bulk_in.write(&response[..len]).await.map_err(|_| ())
             }
-            ScsiCommand::ReadCapacity10 => {
-                let total_blocks = self.temp_sd.as_ref().unwrap().size() / BLOCK_SIZE as u64;
+            ScsiCommand::ReadCapacity10 => match self.temp_sd.as_ref() {
+                Some(sd) => {
+                    let total_blocks = sd.size() / BLOCK_SIZE as u64;
 
-                let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
+                    let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
-                response.extend_from_slice(&(last_lba as u32).to_be_bytes())?;
-                response.extend_from_slice(&(BLOCK_SIZE as u32).to_be_bytes())?;
+                    response.extend_from_slice(&(last_lba as u32).to_be_bytes())?;
+                    response.extend_from_slice(&(BLOCK_SIZE as u32).to_be_bytes())?;
 
-                self.bulk_in.write(&response).await.map_err(|_| ())
-            }
-            ScsiCommand::ReadCapacity16 { alloc_len } => {
-                let total_blocks = self.temp_sd.as_ref().unwrap().size() / BLOCK_SIZE as u64;
+                    self.bulk_in.write(&response).await.map_err(|_| ())
+                }
+                None => {
+                    self.last_sense = ScsiSense::medium_not_present();
+                    Err(())
+                }
+            },
+            ScsiCommand::ReadCapacity16 { alloc_len } => match self.temp_sd.as_ref() {
+                Some(sd) => {
+                    let total_blocks = sd.size() / BLOCK_SIZE as u64;
 
-                let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
+                    let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
 
-                response.extend_from_slice(&last_lba.to_be_bytes())?; // 8 bytes last LBA
-                response.extend_from_slice(&(BLOCK_SIZE as u32).to_be_bytes())?; // 4 bytes block length
-                response.extend_from_slice(&[0u8; 20])?; // 20 reserved bytes zeroed
+                    response.extend_from_slice(&last_lba.to_be_bytes())?; // 8 bytes last LBA
+                    response.extend_from_slice(&(BLOCK_SIZE as u32).to_be_bytes())?; // 4 bytes block length
+                    response.extend_from_slice(&[0u8; 20])?; // 20 reserved bytes zeroed
 
-                let len = alloc_len.min(response.len() as u32) as usize;
-                self.bulk_in.write(&response[..len]).await.map_err(|_| ())
-            }
-            ScsiCommand::Read { lba, len } => {
-                let sdcard = self.temp_sd.as_ref().unwrap();
-                let mut blocks = len;
-                let mut idx = lba;
+                    let len = alloc_len.min(response.len() as u32) as usize;
+                    self.bulk_in.write(&response[..len]).await.map_err(|_| ())
+                }
+                None => {
+                    self.last_sense = ScsiSense::medium_not_present();
+                    Err(())
+                }
+            },
+            ScsiCommand::Read { lba, len } => match self.temp_sd.as_ref() {
+                Some(sd) => {
+                    let mut blocks = len;
+                    let mut idx = lba;
 
-                let mut error_occurred = false;
+                    let mut error_occurred = false;
 
-                while blocks > 0 {
-                    if blocks >= block_buf.len() as u64 {
-                        sdcard.read_blocks(&mut block_buf, BlockIdx(idx as u32))?;
+                    while blocks > 0 {
+                        if blocks >= block_buf.len() as u64 {
+                            sd.read_blocks(&mut block_buf, BlockIdx(idx as u32))?;
 
-                        for block in &mut block_buf {
-                            for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
-                                if self.bulk_in.write(chunk).await.map_err(|_| ()).is_err() {
-                                    error_occurred = true
+                            for block in &mut block_buf {
+                                for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into())
+                                {
+                                    if self.bulk_in.write(chunk).await.map_err(|_| ()).is_err() {
+                                        error_occurred = true
+                                    }
                                 }
                             }
-                        }
 
-                        blocks -= block_buf.len() as u64;
-                        idx += block_buf.len() as u64;
-                    } else {
-                        sdcard
-                            .read_blocks(&mut block_buf[..blocks as usize], BlockIdx(idx as u32))?;
+                            blocks -= block_buf.len() as u64;
+                            idx += block_buf.len() as u64;
+                        } else {
+                            sd.read_blocks(
+                                &mut block_buf[..blocks as usize],
+                                BlockIdx(idx as u32),
+                            )?;
 
-                        for block in &block_buf[..blocks as usize] {
-                            for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
-                                if self.bulk_in.write(chunk).await.map_err(|_| ()).is_err() {
-                                    error_occurred = true
+                            for block in &block_buf[..blocks as usize] {
+                                for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into())
+                                {
+                                    if self.bulk_in.write(chunk).await.map_err(|_| ()).is_err() {
+                                        error_occurred = true
+                                    }
                                 }
                             }
-                        }
 
-                        idx += blocks;
-                        blocks = 0;
+                            idx += blocks;
+                            blocks = 0;
+                        }
                     }
-                }
 
-                if error_occurred {
-                    self.last_sense = ScsiSense::unrecovered_read_error();
-                    return Err(());
-                }
-
-                Ok(())
-            }
-            ScsiCommand::Write { lba, len } => {
-                let sdcard = self.temp_sd.as_ref().unwrap();
-                let mut blocks = len;
-                let mut idx = lba;
-
-                let mut error_occurred = false;
-
-                while blocks > 0 {
-                    if blocks >= block_buf.len() as u64 {
-                        for block in block_buf.as_mut() {
-                            for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
-                            {
-                                if self.bulk_out.read(chunk).await.map_err(|_| ()).is_err() {
-                                    error_occurred = true
-                                }
-                            }
-                        }
-
-                        sdcard.read_blocks(&mut block_buf, BlockIdx(idx as u32))?;
-
-                        blocks -= block_buf.len() as u64;
-                        idx += block_buf.len() as u64;
-                    } else {
-                        for block in block_buf[..blocks as usize].as_mut() {
-                            for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
-                            {
-                                if self.bulk_out.read(chunk).await.map_err(|_| ()).is_err() {
-                                    error_occurred = true
-                                }
-                            }
-                        }
-
-                        sdcard.write_blocks(
-                            &mut block_buf[..blocks as usize],
-                            BlockIdx(idx as u32),
-                        )?;
-
-                        idx += blocks;
-                        blocks = 0;
+                    if error_occurred {
+                        self.last_sense = ScsiSense::unrecovered_read_error();
+                        return Err(());
                     }
+
+                    Ok(())
                 }
-
-                if error_occurred {
-                    self.last_sense = ScsiSense::unrecovered_write_error();
-                    return Err(());
+                None => {
+                    self.last_sense = ScsiSense::medium_not_present();
+                    Err(())
                 }
+            },
+            ScsiCommand::Write { lba, len } => match self.temp_sd.as_ref() {
+                Some(sd) => {
+                    let mut blocks = len;
+                    let mut idx = lba;
 
-                Ok(())
-            }
-            ScsiCommand::ReadFormatCapacities { alloc_len } => {
-                let block_size = SdCard::BLOCK_SIZE as u32;
-                let num_blocks = (self.temp_sd.as_ref().unwrap().size() / block_size as u64) as u32;
+                    let mut error_occurred = false;
 
-                let mut response = [0u8; 12];
+                    while blocks > 0 {
+                        if blocks >= block_buf.len() as u64 {
+                            for block in block_buf.as_mut() {
+                                for chunk in
+                                    block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
+                                {
+                                    if self.bulk_out.read(chunk).await.map_err(|_| ()).is_err() {
+                                        error_occurred = true
+                                    }
+                                }
+                            }
 
-                // Capacity List Length (8 bytes follows)
-                response[3] = 8;
+                            sd.read_blocks(&mut block_buf, BlockIdx(idx as u32))?;
 
-                // Descriptor
-                response[4..8].copy_from_slice(&num_blocks.to_be_bytes());
-                response[8] = 0x03; // formatted media
-                response[9..12].copy_from_slice(&block_size.to_be_bytes()[1..4]); // only 3 bytes
+                            blocks -= block_buf.len() as u64;
+                            idx += block_buf.len() as u64;
+                        } else {
+                            for block in block_buf[..blocks as usize].as_mut() {
+                                for chunk in
+                                    block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
+                                {
+                                    if self.bulk_out.read(chunk).await.map_err(|_| ()).is_err() {
+                                        error_occurred = true
+                                    }
+                                }
+                            }
 
-                let response_len = alloc_len.min(response.len() as u16) as usize;
-                self.bulk_in
-                    .write(&response[..response_len])
-                    .await
-                    .map_err(|_| ())
-            }
+                            sd.write_blocks(
+                                &mut block_buf[..blocks as usize],
+                                BlockIdx(idx as u32),
+                            )?;
+
+                            idx += blocks;
+                            blocks = 0;
+                        }
+                    }
+
+                    if error_occurred {
+                        self.last_sense = ScsiSense::unrecovered_write_error();
+                        return Err(());
+                    }
+
+                    Ok(())
+                }
+                None => {
+                    self.last_sense = ScsiSense::medium_not_present();
+                    Err(())
+                }
+            },
+            ScsiCommand::ReadFormatCapacities { alloc_len } => match self.temp_sd.as_ref() {
+                Some(sd) => {
+                    let block_size = SdCard::BLOCK_SIZE as u32;
+                    let num_blocks = (sd.size() / block_size as u64) as u32;
+
+                    let mut response = [0u8; 12];
+
+                    // Capacity List Length (8 bytes follows)
+                    response[3] = 8;
+
+                    // Descriptor
+                    response[4..8].copy_from_slice(&num_blocks.to_be_bytes());
+                    response[8] = 0x03; // formatted media
+                    response[9..12].copy_from_slice(&block_size.to_be_bytes()[1..4]); // only 3 bytes
+
+                    let response_len = alloc_len.min(response.len() as u16) as usize;
+                    self.bulk_in
+                        .write(&response[..response_len])
+                        .await
+                        .map_err(|_| ())
+                }
+                None => {
+                    self.last_sense = ScsiSense::medium_not_present();
+                    Err(())
+                }
+            },
             ScsiCommand::PreventAllowMediumRemoval { prevent } => {
                 self.prevent_removal = prevent;
                 Ok(())
             }
             ScsiCommand::StartStopUnit { start, load_eject } => {
                 if !start && load_eject {
+                    SCSI_EJECTED.store(true, Ordering::Release);
                     self.pending_eject = true;
                 }
                 Ok(())

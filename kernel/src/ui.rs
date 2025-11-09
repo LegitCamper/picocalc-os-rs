@@ -3,8 +3,8 @@ use crate::{
     display::FRAMEBUFFER,
     framebuffer::FB_PAUSED,
     peripherals::keyboard,
+    scsi::SCSI_BUSY,
     storage::{FileName, SDCARD},
-    usb::{USB_ACTIVE, start_usb, stop_usb},
 };
 use abi_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
@@ -37,25 +37,25 @@ pub async fn ui_handler() {
         changed: true,
     };
     let mut scsi = ScsiPage { last_bounds: None };
-    let mut overlay = Overlay::new();
     update_selections().await;
 
     loop {
         // reset page, if usb was disabled internally
-        if ui.page == UiPage::Scsi && !USB_ACTIVE.load(Ordering::Acquire) {
-            menu.clear().await;
+        if ui.page == UiPage::Scsi && !SCSI_BUSY.load(Ordering::Acquire) {
+            scsi.clear().await;
             ui.page = UiPage::Menu;
+        } else if ui.page == UiPage::Menu && SCSI_BUSY.load(Ordering::Acquire) {
+            menu.clear().await;
+            ui.page = UiPage::Scsi;
         }
 
         if input_handler(&mut ui, &mut menu, &mut scsi).await {
-            overlay.clear().await;
             return;
         }
         match ui.page {
             UiPage::Menu => menu.draw().await,
             UiPage::Scsi => scsi.draw().await,
         }
-        overlay.draw().await;
         Timer::after_millis(5).await;
     }
 }
@@ -64,60 +64,12 @@ async fn input_handler(ui: &mut UiState, menu: &mut MenuPage, scsi: &mut ScsiPag
     if let Some(event) = keyboard::read_keyboard_fifo().await {
         if event.state == KeyState::Pressed {
             match (&mut ui.page, event.key) {
-                (UiPage::Menu, KeyCode::F1) => {
-                    start_usb();
-                    menu.clear().await;
-                    ui.page = UiPage::Scsi;
-                }
-                (UiPage::Scsi, KeyCode::F1) => {
-                    stop_usb();
-                    scsi.clear().await;
-                    ui.page = UiPage::Menu;
-                    update_selections().await;
-                }
                 (UiPage::Menu, _) => return menu.handle_input(event.key).await,
                 (UiPage::Scsi, _) => return scsi.handle_input(event.key).await,
             }
         }
     }
     false
-}
-
-struct Overlay {
-    f1_label: &'static str,
-    last_bounds: Option<Rectangle>,
-}
-
-impl Overlay {
-    pub fn new() -> Self {
-        Self {
-            f1_label: "Press F1 to enable/disable mass storage",
-            last_bounds: None,
-        }
-    }
-
-    async fn draw(&mut self) {
-        let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
-        let fb = unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() };
-        let bounds = fb.bounding_box();
-
-        let text = Text::with_alignment(
-            self.f1_label,
-            Point::new(10, bounds.size.height as i32 - 24), // bottom-left corner
-            text_style,
-            Alignment::Left,
-        );
-
-        self.last_bounds = Some(text.bounds());
-        text.draw(fb).unwrap();
-    }
-
-    async fn clear(&mut self) {
-        if let Some(rect) = self.last_bounds {
-            clear_rect(rect).await
-        }
-        self.last_bounds = None;
-    }
 }
 
 #[derive(PartialEq)]
@@ -173,8 +125,8 @@ static SELECTIONS: Mutex<CriticalSectionRawMutex, Vec<FileName>> = Mutex::new(Ve
 static mut SELECTIONS_CHANGED: bool = true;
 
 async fn update_selections() {
-    while USB_ACTIVE.load(Ordering::Acquire) {
-        Timer::after_millis(50).await;
+    while SCSI_BUSY.load(Ordering::Acquire) {
+        Timer::after_millis(100).await;
     }
     let mut guard = SDCARD.get().lock().await;
     let sd = guard.as_mut().unwrap();
