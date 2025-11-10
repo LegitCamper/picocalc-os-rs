@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use abi::{
-    display::Display,
+    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
     fs::{Entries, file_len, list_dir, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
@@ -70,17 +70,18 @@ pub fn main() {
     assert!(read == size);
 
     let gif = Gif::<Rgb565>::from_slice(&buf).expect("Failed to parse gif");
-    let height = gif.height();
+
+    let translation = Point::new(
+        (SCREEN_WIDTH as i32 - gif.width() as i32) / 2,
+        (SCREEN_HEIGHT as i32 - gif.height() as i32) / 2,
+    );
 
     let mut frame_num = 0;
     loop {
         for mut frame in gif.frames() {
             let start = get_ms();
 
-            frame
-                .translate_mut(Point::new(0, (320 - height as i32) / 2))
-                .draw(&mut display)
-                .unwrap();
+            frame.translate_mut(translation).draw(&mut display).unwrap();
             frame_num += 1;
 
             if frame_num % 5 == 0 {

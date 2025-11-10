@@ -53,7 +53,6 @@ impl<'a> SelectionUi<'a> {
         loop {
             let key = get_key();
             if key.state == KeyState::Pressed {
-                print!("Got Key press: {:?}", key.key);
                 if let Some(s) = self.update(display, key.key)? {
                     selection = Some(s);
                     break;
@@ -70,16 +69,18 @@ impl<'a> SelectionUi<'a> {
         display: &mut Display,
         key: KeyCode,
     ) -> Result<Option<usize>, SelectionUiError<<Display as DrawTarget>::Error>> {
+        print!("Got Key: {:?}", key);
         match key {
-            KeyCode::JoyDown => {
+            KeyCode::Down => {
                 self.selection = (self.selection + 1).min(self.items.len() - 1);
             }
-            KeyCode::JoyUp => {
+            KeyCode::Up => {
                 self.selection = self.selection.saturating_sub(1);
             }
-            KeyCode::Enter | KeyCode::JoyRight => return Ok(Some(self.selection)),
-            _ => return Ok(Some(self.selection)),
+            KeyCode::Enter | KeyCode::Right => return Ok(Some(self.selection)),
+            _ => return Ok(None),
         };
+        print!("new selection: {:?}", self.selection);
         self.draw(display)?;
         Ok(None)
     }
@@ -93,6 +94,13 @@ impl<'a> SelectionUi<'a> {
 
         if self.items.is_empty() {
             return Err(SelectionUiError::SelectionListEmpty);
+        }
+
+        if let Some(bounds) = self.last_bounds {
+            Rectangle::new(bounds.top_left, bounds.size)
+                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                .draw(display)
+                .map_err(|e| SelectionUiError::DisplayError(e))?;
         }
 
         let mut views: Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
@@ -109,6 +117,10 @@ impl<'a> SelectionUi<'a> {
             .arrange()
             .align_to(&display_area, horizontal::Center, vertical::Center);
 
+        layout
+            .draw(display)
+            .map_err(|e| SelectionUiError::DisplayError(e))?;
+
         // draw selected box
         if let Some(selected_bounds) = layout.inner().get(self.selection) {
             let selected_bounds = selected_bounds.bounding_box();
@@ -117,12 +129,10 @@ impl<'a> SelectionUi<'a> {
                 .draw(display)
                 .map_err(|e| SelectionUiError::DisplayError(e))?;
 
-            self.last_bounds = Some(layout.bounds());
+            self.last_bounds = Some(selected_bounds);
         }
 
-        layout
-            .draw(display)
-            .map_err(|e| SelectionUiError::DisplayError(e))
+        Ok(())
     }
 }
 
