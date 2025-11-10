@@ -2,3 +2,5 @@
 *.uf2
 abi_sys.h
 assets/gif/bad_apple.gif
+picolibc
+user-apps/gboy/Peanut-GB

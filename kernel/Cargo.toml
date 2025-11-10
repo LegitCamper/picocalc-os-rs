@@ -72,8 +72,8 @@ panic-probe = "0.3"
 portable-atomic = { version = "1.11", features = ["critical-section"] }
 assign-resources = "0.5.0"
 
-defmt = { version = "0.3", optional = true }
-defmt-rtt = "0.4.2"
+defmt = { version = "1.0.1", optional = true }
+defmt-rtt = "1.1.0"
 
 embedded-sdmmc = { version = "0.9", default-features = false }
 st7365p-lcd = { git = "https://github.com/legitcamper/st7365p-lcd-rs", rev = "a784b9e6df0769371dfc522528e770cf8fc6403a" } # async branch

@@ -6,42 +6,48 @@ use abi::{
     display::Display,
     get_key,
     keyboard::{KeyCode, KeyState},
-    print, sleep,
+    print,
 };
 use alloc::vec::Vec;
 use embedded_graphics::{
     Drawable,
     mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::Rgb565,
-    prelude::{Dimensions, Point, Primitive, RgbColor, Size},
+    prelude::{Dimensions, DrawTarget, Point, Primitive, RgbColor},
     primitives::{PrimitiveStyle, Rectangle},
-    text::Text,
+    text::{Alignment, Text, renderer::TextRenderer},
 };
 use embedded_layout::{
     align::{horizontal, vertical},
     layout::linear::{FixedMargin, LinearLayout},
     prelude::*,
 };
-use embedded_text::TextBox;
+
+#[derive(Debug)]
+pub enum SelectionUiError<DisplayError> {
+    SelectionListEmpty,
+    DisplayError(DisplayError),
+}
 
 pub struct SelectionUi<'a> {
     selection: usize,
     items: &'a [&'a str],
-    error: &'a str,
     last_bounds: Option<Rectangle>,
 }
 
 impl<'a> SelectionUi<'a> {
-    pub fn new(items: &'a [&'a str], error: &'a str) -> Self {
+    pub fn new(items: &'a [&'a str]) -> Self {
         Self {
             selection: 0,
             items,
-            error,
             last_bounds: None,
         }
     }
 
-    pub fn run_selection_ui(&mut self, display: &mut Display) -> Result<Option<usize>, ()> {
+    pub fn run_selection_ui(
+        &mut self,
+        display: &mut Display,
+    ) -> Result<Option<usize>, SelectionUiError<<Display as DrawTarget>::Error>> {
         self.draw(display)?;
         let selection;
         loop {
@@ -59,13 +65,17 @@ impl<'a> SelectionUi<'a> {
 
     /// updates the display with a new keypress.
     /// returns selection idx if selected
-    pub fn update(&mut self, display: &mut Display, key: KeyCode) -> Result<Option<usize>, ()> {
+    pub fn update(
+        &mut self,
+        display: &mut Display,
+        key: KeyCode,
+    ) -> Result<Option<usize>, SelectionUiError<<Display as DrawTarget>::Error>> {
         match key {
+            KeyCode::JoyDown => {
+                self.selection = (self.selection + 1).min(self.items.len() - 1);
+            }
             KeyCode::JoyUp => {
                 self.selection = self.selection.saturating_sub(1);
-            }
-            KeyCode::JoyDown => {
-                self.selection = self.selection.saturating_add(1);
             }
             KeyCode::Enter | KeyCode::JoyRight => return Ok(Some(self.selection)),
             _ => return Ok(Some(self.selection)),
@@ -74,21 +84,15 @@ impl<'a> SelectionUi<'a> {
         Ok(None)
     }
 
-    fn draw(&mut self, display: &mut Display) -> Result<(), ()> {
+    fn draw(
+        &mut self,
+        display: &mut Display,
+    ) -> Result<(), SelectionUiError<<Display as DrawTarget>::Error>> {
         let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
         let display_area = display.bounding_box();
 
         if self.items.is_empty() {
-            TextBox::new(
-                &self.error,
-                Rectangle::new(
-                    Point::new(25, 25),
-                    Size::new(display_area.size.width - 50, display_area.size.width - 50),
-                ),
-                text_style,
-            )
-            .draw(display)
-            .unwrap();
+            return Err(SelectionUiError::SelectionListEmpty);
         }
 
         let mut views: Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
@@ -106,14 +110,29 @@ impl<'a> SelectionUi<'a> {
             .align_to(&display_area, horizontal::Center, vertical::Center);
 
         // draw selected box
-        let selected_bounds = layout.inner().get(self.selection).ok_or(())?.bounding_box();
-        Rectangle::new(selected_bounds.top_left, selected_bounds.size)
-            .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-            .draw(display)?;
+        if let Some(selected_bounds) = layout.inner().get(self.selection) {
+            let selected_bounds = selected_bounds.bounding_box();
+            Rectangle::new(selected_bounds.top_left, selected_bounds.size)
+                .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
+                .draw(display)
+                .map_err(|e| SelectionUiError::DisplayError(e))?;
 
-        self.last_bounds = Some(layout.bounds());
+            self.last_bounds = Some(layout.bounds());
+        }
 
-        layout.draw(display)?;
-        Ok(())
+        layout
+            .draw(display)
+            .map_err(|e| SelectionUiError::DisplayError(e))
     }
+}
+
+pub fn draw_text_center<'a, S>(
+    display: &mut Display,
+    text: &'a str,
+    style: S,
+) -> Result<Point, <Display as DrawTarget>::Error>
+where
+    S: TextRenderer<Color = <Display as DrawTarget>::Color>,
+{
+    Text::with_alignment(text, Point::zero(), style, Alignment::Center).draw(display)
 }

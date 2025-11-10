@@ -3,7 +3,7 @@ use abi_sys::{
     PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
-use core::{alloc::GlobalAlloc, ffi::c_char, ptr, sync::atomic::Ordering};
+use core::{ffi::c_char, ptr, sync::atomic::Ordering};
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
 use embedded_graphics::draw_target::DrawTarget;
@@ -12,6 +12,9 @@ use heapless::spsc::Queue;
 
 #[cfg(feature = "psram")]
 use crate::heap::HEAP;
+
+#[cfg(feature = "psram")]
+use core::alloc::GlobalAlloc;
 
 use crate::{
     display::FRAMEBUFFER,

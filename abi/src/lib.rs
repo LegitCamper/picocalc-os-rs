@@ -45,6 +45,8 @@ pub fn get_key() -> KeyEvent {
 }
 
 pub mod display {
+    use core::sync::atomic::{AtomicBool, Ordering};
+
     use abi_sys::CPixel;
     use embedded_graphics::{
         Pixel,
@@ -64,7 +66,25 @@ pub mod display {
     // const BUF_SIZE: usize = 250 * 1024; // tune this for performance
     // static mut BUF: Lazy<Vec<CPixel>> = Lazy::new(|| vec![const { CPixel::new() }; BUF_SIZE]);
 
-    pub struct Display;
+    static DISPLAY_TAKEN: AtomicBool = AtomicBool::new(false);
+
+    pub struct Display {
+        _private: (),
+    }
+
+    impl Display {
+        /// Only one instance of Display can be taken
+        pub fn take() -> Option<Display> {
+            if DISPLAY_TAKEN
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                Some(Self { _private: () })
+            } else {
+                None
+            }
+        }
+    }
 
     impl Dimensions for Display {
         fn bounding_box(&self) -> Rectangle {

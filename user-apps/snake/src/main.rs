@@ -28,7 +28,7 @@ const CELL_SIZE: usize = 8;
 
 pub fn main() {
     print!("Starting Snake app");
-    let mut display = Display;
+    let mut display = Display::take().unwrap();
 
     let mut game = SnakeGame::<100, Rgb565, Rng>::new(
         SCREEN_WIDTH as u16,

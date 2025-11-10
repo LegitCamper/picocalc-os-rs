@@ -32,7 +32,7 @@ pub extern "Rust" fn _start() {
 pub fn main() {
     print!("Starting Gallery app");
     let mut bmp_buf = vec![0_u8; 100_000];
-    let mut display = Display;
+    let mut display = Display::take().unwrap();
 
     let grid_cols = 3;
     let grid_rows = 3;
