@@ -47,6 +47,8 @@ use embassy_executor::{Executor, Spawner};
 use embassy_futures::{join::join, select::select};
 use embassy_rp::{
     Peri,
+    clocks::ClockConfig,
+    config::Config,
     gpio::{Input, Level, Output, Pull},
     i2c::{self, I2c},
     multicore::{Stack, spawn_core1},
@@ -119,7 +121,13 @@ static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let p = embassy_rp::init(Default::default());
+    let p = if cfg!(feature = "overclock") {
+        let clocks = ClockConfig::system_freq(192_000_000).unwrap();
+        let config = Config::new(clocks);
+        embassy_rp::init(config)
+    } else {
+        embassy_rp::init(Default::default())
+    };
 
     spawn_core1(
         p.CORE1,
@@ -255,7 +263,7 @@ async fn setup_mcu(mcu: Mcu) {
 
 async fn setup_display(display: Display, spawner: Spawner) {
     let mut config = spi::Config::default();
-    config.frequency = 64_000_000;
+    config.frequency = 192_000_000;
     let spi = Spi::new(
         display.spi,
         display.clk,

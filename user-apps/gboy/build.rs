@@ -48,13 +48,11 @@ fn bindgen() {
         .file("peanut_gb_stub.c")
         .include("Peanut-GB")
         // optimization flags
-        .flag("-O3") // max optimization
-        .flag("-ffast-math") // faster floating point, if any
-        .flag("-funroll-loops") // unroll small loops
-        // CPU/architecture flags (example for ARM Cortex-M33)
+        .flag("-Ofast")
+        .flag("-fdata-sections")
+        .flag("-ffunction-sections")
         .flag("-mcpu=cortex-m33")
         .flag("-mthumb")
-        // optional: strip debug info
         .flag("-g0")
         .compile("peanut_gb");
 
