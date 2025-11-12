@@ -39,7 +39,7 @@ pub extern "Rust" fn _start() {
 
 pub fn main() {
     print!("Starting Calculator app");
-    let mut display = Display;
+    let mut display = Display::take().unwrap();
 
     let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];
     let input_min = input.len();
