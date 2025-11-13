@@ -1291,6 +1291,7 @@ dependencies = [
  "bindgen",
  "cc",
  "embedded-graphics",
+ "selection_ui",
 ]
 
 [[package]]

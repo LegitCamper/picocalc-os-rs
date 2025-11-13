@@ -2,27 +2,42 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::{DISPLAY, GAME_ROM};
+use crate::{DISPLAY, GAME_ROM, RAM};
 
+#[allow(unused)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use abi::{display::Pixel565, fs::read_file};
+use abi::{display::Pixel565, print};
 use embedded_graphics::{Drawable, pixelcolor::Rgb565, prelude::Point};
 
 pub const GBOY_WIDTH: usize = 160;
 pub const GBOY_HEIGHT: usize = 144;
 
-pub unsafe extern "C" fn gb_rom_read(gb: *mut gb_s, addr: u32) -> u8 {
+pub unsafe extern "C" fn gb_rom_read(_gb: *mut gb_s, addr: u32) -> u8 {
     unsafe { GAME_ROM.as_ref().unwrap()[addr as usize] }
 }
 
-pub unsafe extern "C" fn gb_cart_ram_read(gb: *mut gb_s, addr: u32) -> u8 {
-    0
+pub unsafe extern "C" fn gb_cart_ram_read(_gb: *mut gb_s, addr: u32) -> u8 {
+    unsafe { RAM[addr as usize] }
 }
 
-pub unsafe extern "C" fn gb_cart_ram_write(gb: *mut gb_s, addr: u32, val: u8) {}
+pub unsafe extern "C" fn gb_cart_ram_write(_gb: *mut gb_s, addr: u32, val: u8) {
+    unsafe { RAM[addr as usize] = val }
+}
 
-pub unsafe extern "C" fn gb_error(gb: *mut gb_s, err: gb_error_e, addr: u16) {}
+pub unsafe extern "C" fn gb_error(_gb: *mut gb_s, err: gb_error_e, addr: u16) {
+    let e = match err {
+        0 => "UNKNOWN ERROR",
+        1 => "INVALID OPCODE",
+        2 => "INVALID READ",
+        3 => "INVALID WRITE",
+        4 => "HALT FOREVER",
+        5 => "INVALID MAX",
+        _ => unreachable!(),
+    };
+
+    print!("PeanutGB error: {}, addr: {}", e, addr);
+}
 
 const NUM_PALETTES: usize = 3;
 const SHADES_PER_PALETTE: usize = 4;
@@ -82,6 +97,6 @@ fn draw_color(color: Rgb565, x: u16, y: u16) {
     pixel.1 = color;
 
     unsafe {
-        pixel.draw(&mut DISPLAY).unwrap();
+        pixel.draw(&mut *DISPLAY).unwrap();
     }
 }

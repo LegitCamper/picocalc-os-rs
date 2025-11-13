@@ -206,6 +206,7 @@ fn patch_abi(
                             CallTable::GenRand => abi::gen_rand as usize,
                             CallTable::ListDir => abi::list_dir as usize,
                             CallTable::ReadFile => abi::read_file as usize,
+                            CallTable::WriteFile => abi::write_file as usize,
                             CallTable::FileLen => abi::file_len as usize,
                         };
                         unsafe {

@@ -12,7 +12,7 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const ABI_CALL_TABLE_COUNT: usize = 11;
+pub const ABI_CALL_TABLE_COUNT: usize = 12;
 const _: () = assert!(ABI_CALL_TABLE_COUNT == CallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
@@ -28,7 +28,8 @@ pub enum CallTable {
     GenRand = 7,
     ListDir = 8,
     ReadFile = 9,
-    FileLen = 10,
+    WriteFile = 10,
+    FileLen = 11,
 }
 
 #[unsafe(no_mangle)]
@@ -435,6 +436,24 @@ pub extern "C" fn read_file(
         let ptr = CALL_ABI_TABLE[CallTable::ReadFile as usize];
         let f: ReadFile = core::mem::transmute(ptr);
         f(str, len, read_from, buf, buf_len)
+    }
+}
+
+pub type WriteFile =
+    extern "C" fn(str: *const u8, len: usize, write_from: usize, buf: *const u8, buf_len: usize);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn write_file(
+    str: *const u8,
+    len: usize,
+    write_from: usize,
+    buf: *const u8,
+    buf_len: usize,
+) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallTable::WriteFile as usize];
+        let f: WriteFile = core::mem::transmute(ptr);
+        f(str, len, write_from, buf, buf_len)
     }
 }
 

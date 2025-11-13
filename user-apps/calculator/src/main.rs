@@ -104,7 +104,7 @@ pub fn main() {
         }
 
         let event = get_key();
-        if event.state != KeyState::Idle {
+        if event.state == KeyState::Released {
             match event.key {
                 KeyCode::Char(ch) => {
                     input.push(ch);

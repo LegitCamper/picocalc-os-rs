@@ -41,9 +41,10 @@ pub fn main() {
 
     let mut files = entries.entries();
     files.retain(|e| e.extension().unwrap_or("") == "gif");
-    let gifs = &files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
+    let mut gifs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
+    gifs.sort();
 
-    let mut selection_ui = SelectionUi::new(&gifs);
+    let mut selection_ui = SelectionUi::new(&mut gifs);
     let selection = match selection_ui.run_selection_ui(&mut display) {
         Ok(maybe_sel) => maybe_sel,
         Err(e) => match e {

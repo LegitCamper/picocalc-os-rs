@@ -45,6 +45,7 @@ fn bindgen() {
         .expect("Couldn't write bindings!");
 
     cc::Build::new()
+        .define("PEANUT_GB_IS_LITTLE_ENDIAN", None)
         .file("peanut_gb_stub.c")
         .include("Peanut-GB")
         // optimization flags

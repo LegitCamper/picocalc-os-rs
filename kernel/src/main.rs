@@ -122,7 +122,7 @@ static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = if cfg!(feature = "overclock") {
-        let clocks = ClockConfig::system_freq(192_000_000).unwrap();
+        let clocks = ClockConfig::system_freq(300_000_000).unwrap();
         let config = Config::new(clocks);
         embassy_rp::init(config)
     } else {
@@ -339,6 +339,9 @@ async fn kernel_task(
         .spawn(watchdog_task(Watchdog::new(watchdog)))
         .unwrap();
 
+    #[cfg(feature = "debug")]
+    defmt::info!("Clock: {}", embassy_rp::clocks::clk_sys_freq());
+
     setup_mcu(mcu).await;
 
     #[cfg(feature = "defmt")]
@@ -372,7 +375,8 @@ async fn prog_search_handler() {
             let mut guard = SDCARD.get().lock().await;
             let sd = guard.as_mut().unwrap();
 
-            let files = sd.list_files_by_extension(".bin").unwrap();
+            let mut files = sd.list_files_by_extension(".bin").unwrap();
+            files.sort();
             let mut select = SELECTIONS.lock().await;
 
             if *select.selections() != files {
@@ -387,10 +391,8 @@ async fn prog_search_handler() {
 async fn key_handler() {
     loop {
         if let Some(event) = read_keyboard_fifo().await {
-            if let KeyState::Pressed = event.state {
-                unsafe {
-                    let _ = KEY_CACHE.enqueue(event);
-                }
+            unsafe {
+                let _ = KEY_CACHE.enqueue(event);
             }
         }
         Timer::after_millis(50).await;

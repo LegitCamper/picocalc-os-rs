@@ -9,4 +9,5 @@ cc = "1.2.44"
 
 [dependencies]
 abi = { path = "../../abi" }
+selection_ui = { path = "../../selection_ui" }
 embedded-graphics = "0.8.1"

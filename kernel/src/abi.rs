@@ -1,6 +1,6 @@
 use abi_sys::{
     AllocAbi, CLayout, CPixel, DeallocAbi, DrawIterAbi, FileLen, GenRand, GetMsAbi, ListDir,
-    PrintAbi, ReadFile, RngRequest, SleepMsAbi, keyboard::*,
+    PrintAbi, ReadFile, RngRequest, SleepMsAbi, WriteFile, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::{ffi::c_char, ptr, sync::atomic::Ordering};
@@ -207,6 +207,7 @@ fn recurse_file<T>(
     dirs: &[&str],
     mut access: impl FnMut(&mut File) -> T,
 ) -> Result<T, ()> {
+    defmt::info!("dir: {}, dirs: {}", dir, dirs);
     if dirs.len() == 1 {
         let mut b = [0_u8; 50];
         let mut buf = LfnBuffer::new(&mut b);
@@ -218,7 +219,8 @@ fn recurse_file<T>(
                 }
             }
         })
-        .unwrap();
+        .expect("Failed to iterate dir");
+
         if let Some(name) = short_name {
             let mut file = dir
                 .open_file_in_dir(name, embedded_sdmmc::Mode::ReadWriteAppend)
@@ -242,7 +244,17 @@ pub extern "C" fn read_file(
 ) -> usize {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let file = unsafe { core::str::from_raw_parts(str, len) };
-    let file: Vec<&str> = file.split('/').collect();
+
+    let mut components: [&str; 8] = [""; 8];
+    let mut count = 0;
+    for part in file.split('/') {
+        if count >= components.len() {
+            break;
+        }
+        components[count] = part;
+        count += 1;
+    }
+
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let mut buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
 
@@ -252,8 +264,8 @@ pub extern "C" fn read_file(
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
         sd.access_root_dir(|root| {
-            if let Ok(result) = recurse_file(&root, &file[1..], |file| {
-                file.seek_from_start(start_from as u32).unwrap();
+            if let Ok(result) = recurse_file(&root, &components[1..count], |file| {
+                file.seek_from_start(start_from as u32).unwrap_or(());
                 file.read(&mut buf).unwrap()
             }) {
                 read = result
@@ -263,9 +275,46 @@ pub extern "C" fn read_file(
     read
 }
 
+const _: WriteFile = write_file;
+pub extern "C" fn write_file(
+    str: *const u8,
+    len: usize,
+    start_from: usize,
+    buf: *const u8,
+    buf_len: usize,
+) {
+    // SAFETY: caller guarantees str ptr is valid for `len` bytes
+    let file = unsafe { core::str::from_raw_parts(str, len) };
+
+    let mut components: [&str; 8] = [""; 8];
+    let mut count = 0;
+    for part in file.split('/') {
+        if count >= components.len() {
+            break;
+        }
+        components[count] = part;
+        count += 1;
+    }
+
+    // SAFETY: caller guarantees buf ptr is valid for `buf_len` bytes
+    let buf = unsafe { core::slice::from_raw_parts(buf, buf_len) };
+
+    let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
+    let sd = guard.as_mut().unwrap();
+    if !file.is_empty() {
+        sd.access_root_dir(|root| {
+            recurse_file(&root, &components[1..count], |file| {
+                file.seek_from_start(start_from as u32).unwrap();
+                file.write(&buf).unwrap()
+            })
+            .unwrap_or(())
+        });
+    };
+}
+
 const _: FileLen = file_len;
 pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
-    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
+    // SAFETY: caller guarantees str ptr is valid for `len` bytes
     let file = unsafe { core::str::from_raw_parts(str, len) };
     let file: Vec<&str> = file.split('/').collect();
 
