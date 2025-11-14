@@ -33,6 +33,7 @@ fn bindgen() {
     let bindings = bindgen::Builder::default()
         .header("Peanut-GB/peanut_gb.h")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .disable_nested_struct_naming()
         .clang_arg("-I../../picolibc/newlib/libc/include/")
         .clang_arg("-I../../picolibc/build/")
         .use_core()
@@ -46,6 +47,7 @@ fn bindgen() {
 
     cc::Build::new()
         .define("PEANUT_GB_IS_LITTLE_ENDIAN", None)
+        .define("ENABLE_LCD", None)
         .file("peanut_gb_stub.c")
         .include("Peanut-GB")
         // optimization flags

@@ -24,7 +24,7 @@ codegen-units = 1
 lto = true
 debug = false
 opt-level = "z"
-panic = "abort"
+panic = "unwind"
 
 [profile.dev]
 lto = true

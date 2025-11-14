@@ -6,7 +6,7 @@ use abi::{
     display::Display,
     get_key,
     keyboard::{KeyCode, KeyState},
-    print,
+    println,
 };
 use alloc::vec::Vec;
 use embedded_graphics::{

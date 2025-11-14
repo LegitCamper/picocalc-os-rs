@@ -6,7 +6,7 @@ use abi::{
     display::Display,
     get_key,
     keyboard::{KeyCode, KeyState},
-    print,
+    println,
 };
 use alloc::{format, string::String, vec, vec::Vec};
 use core::panic::PanicInfo;
@@ -28,7 +28,7 @@ use embedded_layout::{
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -38,7 +38,7 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print!("Starting Calculator app");
+    println!("Starting Calculator app");
     let mut display = Display::take().unwrap();
 
     let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];

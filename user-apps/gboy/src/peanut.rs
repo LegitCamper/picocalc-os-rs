@@ -7,7 +7,7 @@ use crate::{DISPLAY, GAME_ROM, RAM};
 #[allow(unused)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use abi::{display::Pixel565, print};
+use abi::{display::Pixel565, println};
 use embedded_graphics::{Drawable, pixelcolor::Rgb565, prelude::Point};
 
 pub const GBOY_WIDTH: usize = 160;
@@ -36,7 +36,7 @@ pub unsafe extern "C" fn gb_error(_gb: *mut gb_s, err: gb_error_e, addr: u16) {
         _ => unreachable!(),
     };
 
-    print!("PeanutGB error: {}, addr: {}", e, addr);
+    println!("PeanutGB error: {}, addr: {}", e, addr);
 }
 
 const NUM_PALETTES: usize = 3;

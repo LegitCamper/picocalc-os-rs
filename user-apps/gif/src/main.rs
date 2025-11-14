@@ -7,7 +7,7 @@ use abi::{
     fs::{Entries, file_len, list_dir, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
-    print, sleep,
+    println, sleep,
 };
 use alloc::{format, vec, vec::Vec};
 use core::panic::PanicInfo;
@@ -23,7 +23,7 @@ use tinygif::Gif;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -33,7 +33,7 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print!("Starting Gif app");
+    println!("Starting Gif app");
     let mut display = Display::take().unwrap();
 
     let mut entries = Entries::new();
@@ -67,7 +67,7 @@ pub fn main() {
     let size = file_len(&file_name);
     let mut buf = vec![0_u8; size];
     let read = read_file(&file_name, 0, &mut buf);
-    print!("read: {}, file size: {}", read, size);
+    println!("read: {}, file size: {}", read, size);
     assert!(read == size);
 
     let gif = Gif::<Rgb565>::from_slice(&buf).expect("Failed to parse gif");

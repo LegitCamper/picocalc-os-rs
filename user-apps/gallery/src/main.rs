@@ -8,7 +8,7 @@ use abi::{
     fs::{Entries, list_dir, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
-    print,
+    println,
 };
 use alloc::{format, vec};
 use core::panic::PanicInfo;
@@ -20,7 +20,7 @@ use tinybmp::Bmp;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location());
+    println!("user panic: {} @ {:?}", info.message(), info.location());
     loop {}
 }
 
@@ -30,7 +30,7 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print!("Starting Gallery app");
+    println!("Starting Gallery app");
     let mut bmp_buf = vec![0_u8; 100_000];
     let mut display = Display::take().unwrap();
 
@@ -49,7 +49,7 @@ pub fn main() {
             break; // only draw 3x3
         }
 
-        print!("file: {}", file);
+        println!("file: {}", file);
         if file.extension().unwrap_or("") == "bmp" || file.extension().unwrap_or("") == "BMP" {
             let file_path = format!("/images/{}", file);
 

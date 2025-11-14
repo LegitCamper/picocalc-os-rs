@@ -9,10 +9,10 @@ use abi::{
     fs::{Entries, file_len, list_dir, read_file, write_file},
     get_key,
     keyboard::{KeyCode, KeyState},
-    print,
+    println,
 };
-use alloc::{string::String, vec, vec::Vec};
-use core::{cell::LazyCell, ffi::c_void, mem::MaybeUninit, panic::PanicInfo};
+use alloc::{vec, vec::Vec};
+use core::{cell::LazyCell, mem::MaybeUninit, panic::PanicInfo};
 use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
@@ -26,7 +26,7 @@ use peanut::gb_run_frame;
 use crate::peanut::{
     JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
     JOYPAD_UP, gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_get_rom_name, gb_get_save_size,
-    gb_init, gb_init_lcd, gb_rom_read, gb_s, lcd_draw_line,
+    gb_init, gb_init_lcd, gb_reset, gb_rom_read, gb_s, lcd_draw_line,
 };
 
 static mut DISPLAY: LazyCell<Display> = LazyCell::new(|| Display::take().unwrap());
@@ -36,7 +36,7 @@ static mut RAM: [u8; RAM_SIZE] = [0; RAM_SIZE];
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -49,11 +49,8 @@ const GAME_PATH: &'static str = "/games/gameboy";
 
 static mut GAME_ROM: Option<Vec<u8>> = None;
 
-#[repr(C)]
-struct Priv {}
-
 pub fn main() {
-    print!("Starting Gameboy app");
+    println!("Starting Gameboy app");
 
     let mut entries = Entries::new();
     list_dir(GAME_PATH, &mut entries);
@@ -93,9 +90,8 @@ pub fn main() {
     unsafe { GAME_ROM = Some(vec![0_u8; size]) };
     let read = read_file(&file_name, 0, unsafe { GAME_ROM.as_mut().unwrap() });
     assert!(size == read);
-    print!("Rom size: {}", read);
+    println!("Rom size: {}", read);
 
-    let mut priv_ = MaybeUninit::<Priv>::uninit();
     let mut gb = MaybeUninit::<gb_s>::uninit();
 
     let init_status = unsafe {
@@ -105,10 +101,10 @@ pub fn main() {
             Some(gb_cart_ram_read),
             Some(gb_cart_ram_write),
             Some(gb_error),
-            priv_.as_mut_ptr() as *mut c_void,
+            core::ptr::null_mut(),
         )
     };
-    print!("gb init status: {}", init_status);
+    println!("gb init status: {}", init_status);
 
     unsafe {
         load_save(&mut gb.assume_init());
@@ -118,7 +114,7 @@ pub fn main() {
         gb_init_lcd(gb.as_mut_ptr(), Some(lcd_draw_line));
 
         // enable frame skip
-        gb.assume_init().direct.set_frame_skip(!true); // active low
+        // gb.assume_init().direct.set_frame_skip(!true); // active low
     };
 
     loop {
@@ -127,6 +123,10 @@ pub fn main() {
             KeyCode::Esc => {
                 unsafe { write_save(&mut gb.assume_init()) };
                 break;
+            }
+            KeyCode::Char('r') => {
+                unsafe { gb_reset(gb.as_mut_ptr()) };
+                continue;
             }
             KeyCode::Tab => JOYPAD_START as u8,
             KeyCode::Del => JOYPAD_SELECT as u8,
@@ -140,14 +140,19 @@ pub fn main() {
         };
 
         if button != 0 {
-            let mut joypad = unsafe { (*gb.as_mut_ptr()).direct.__bindgen_anon_1.joypad };
-            match event.state {
-                KeyState::Pressed => joypad &= !button,
-                KeyState::Released => joypad |= button,
-                _ => {}
-            }
+            unsafe {
+                // bindgen incorrectly generates direct so manual manipulation is required :(
+                let direct_ptr = &mut gb.assume_init().direct as *mut _ as *mut u8;
+                let joypad_ptr = direct_ptr.add(2); // this is the joypad bitfield byte
 
-            print!("joypad now: {:#010b}\n", joypad);
+                if let KeyState::Pressed = event.state {
+                    *joypad_ptr &= !button;
+                } else if let KeyState::Released = event.state {
+                    *joypad_ptr |= button;
+                }
+
+                println!("joypad: {:b}", *joypad_ptr);
+            }
         }
 
         unsafe {

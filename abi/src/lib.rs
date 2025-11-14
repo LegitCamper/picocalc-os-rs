@@ -25,7 +25,7 @@ unsafe impl GlobalAlloc for Alloc {
 }
 
 #[macro_export]
-macro_rules! print {
+macro_rules! println {
     ($($arg:tt)*) => {{
         let s = $crate::format!($($arg)*);
         $crate::print(s.as_ptr(), s.len());
