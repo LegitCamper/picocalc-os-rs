@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-abi = { path = "../abi" }
+userlib = { path = "../userlib" }
 embedded-graphics = "0.8.1"
 embedded-layout = "0.4.2"
 embedded-text = "0.7.3"

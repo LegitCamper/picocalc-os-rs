@@ -13,27 +13,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "abi"
-version = "0.1.0"
-dependencies = [
- "abi_sys",
- "embedded-graphics",
- "once_cell",
- "rand_core 0.9.3",
-]
-
-[[package]]
-name = "abi_sys"
-version = "0.1.0"
-dependencies = [
- "bitflags 2.10.0",
- "cbindgen",
- "defmt 0.3.100",
- "embedded-graphics",
- "strum",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -243,9 +222,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 name = "calculator"
 version = "0.1.0"
 dependencies = [
- "abi",
  "embedded-graphics",
  "embedded-layout",
+ "userlib",
 ]
 
 [[package]]
@@ -1230,9 +1209,9 @@ dependencies = [
 name = "gallery"
 version = "0.1.0"
 dependencies = [
- "abi",
  "embedded-graphics",
  "tinybmp",
+ "userlib",
 ]
 
 [[package]]
@@ -1272,10 +1251,10 @@ dependencies = [
 name = "gif"
 version = "0.1.0"
 dependencies = [
- "abi",
  "embedded-graphics",
  "selection_ui",
  "tinygif",
+ "userlib",
 ]
 
 [[package]]
@@ -1450,7 +1429,6 @@ dependencies = [
 name = "kernel"
 version = "0.0.1"
 dependencies = [
- "abi_sys",
  "assign-resources",
  "bitflags 2.10.0",
  "bt-hci",
@@ -1493,6 +1471,7 @@ dependencies = [
  "strum",
  "talc",
  "trouble-host",
+ "userlib_sys",
 ]
 
 [[package]]
@@ -2157,10 +2136,10 @@ checksum = "c1257cd4248b4132760d6524d6dda4e053bc648c9070b960929bf50cfb1e7add"
 name = "selection_ui"
 version = "0.1.0"
 dependencies = [
- "abi",
  "embedded-graphics",
  "embedded-layout",
  "embedded-text",
+ "userlib",
 ]
 
 [[package]]
@@ -2271,10 +2250,10 @@ dependencies = [
 name = "snake"
 version = "0.1.0"
 dependencies = [
- "abi",
  "embedded-graphics",
  "embedded-snake",
  "rand",
+ "userlib",
 ]
 
 [[package]]
@@ -2648,6 +2627,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "userlib"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "once_cell",
+ "rand_core 0.9.3",
+ "userlib_sys",
+]
+
+[[package]]
+name = "userlib_sys"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.10.0",
+ "cbindgen",
+ "defmt 0.3.100",
+ "embedded-graphics",
+ "strum",
+]
+
+[[package]]
 name = "uuid"
 version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2758,11 +2758,11 @@ dependencies = [
 name = "wav_player"
 version = "0.1.0"
 dependencies = [
- "abi",
  "embedded-audio",
  "embedded-graphics",
  "rand",
  "selection_ui",
+ "userlib",
 ]
 
 [[package]]

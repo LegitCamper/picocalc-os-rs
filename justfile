@@ -9,7 +9,7 @@ kernel-release board:
 binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
 
 cbindgen:
-    cbindgen abi_sys --output abi_sys.h -q
+    cbindgen userlib_sys --output userlib_sys.h -q
 
 newlib:
     #!/bin/bash

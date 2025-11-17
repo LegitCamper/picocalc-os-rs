@@ -99,4 +99,4 @@ embedded-alloc = { version = "0.6.0", features = [
 ], optional = true }
 bumpalo = "3.19.0"
 
-abi_sys = { path = "../abi_sys" }
+userlib_sys = { path = "../userlib_sys" }

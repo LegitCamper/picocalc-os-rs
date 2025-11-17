@@ -15,7 +15,7 @@ use fixed::traits::ToFixed;
 
 pub const SAMPLE_RATE_HZ: u32 = 22_050;
 const AUDIO_BUFFER_SAMPLES: usize = 1024;
-const _: () = assert!(AUDIO_BUFFER_SAMPLES == abi_sys::AUDIO_BUFFER_SAMPLES);
+const _: () = assert!(AUDIO_BUFFER_SAMPLES == userlib_sys::AUDIO_BUFFER_SAMPLES);
 
 // 8bit stereo interleaved PCM audio buffers
 pub static mut AUDIO_BUFFER: [u8; AUDIO_BUFFER_SAMPLES * 2] = [0; AUDIO_BUFFER_SAMPLES * 2];

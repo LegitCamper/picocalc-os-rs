@@ -2,7 +2,7 @@ use crate::{
     abi,
     storage::{File, SDCARD},
 };
-use abi_sys::{CallTable, EntryFn};
+use userlib_sys::{CallTable, EntryFn};
 use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
 use core::ptr;

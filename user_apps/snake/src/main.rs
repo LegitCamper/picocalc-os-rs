@@ -2,16 +2,16 @@
 #![no_main]
 
 extern crate alloc;
-use abi::{
+use core::panic::PanicInfo;
+use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
+use embedded_snake::{Direction, SnakeGame};
+use userlib::{
     Rng,
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
     get_key,
     keyboard::{KeyCode, KeyState},
     println, sleep,
 };
-use core::panic::PanicInfo;
-use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
-use embedded_snake::{Direction, SnakeGame};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {

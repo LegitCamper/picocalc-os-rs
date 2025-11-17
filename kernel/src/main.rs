@@ -39,7 +39,7 @@ use crate::{
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
-use abi_sys::EntryFn;
+use userlib_sys::EntryFn;
 use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};

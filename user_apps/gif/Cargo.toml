@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-abi = { path = "../../abi" }
+userlib = { path = "../../userlib" }
 selection_ui = { path = "../../selection_ui" }
 embedded-graphics = "0.8.1"
 tinygif = { git = "https://github.com/LegitCamper/tinygif" }

@@ -3,11 +3,11 @@
 
 extern crate alloc;
 
-use abi_sys::{RngRequest, keyboard::KeyEvent};
-pub use abi_sys::{keyboard, print};
 pub use alloc::format;
 use core::alloc::{GlobalAlloc, Layout};
 use rand_core::RngCore;
+pub use userlib_sys::{keyboard, print};
+use userlib_sys::{keyboard::KeyEvent, RngRequest};
 
 #[global_allocator]
 static ALLOC: Alloc = Alloc;
@@ -16,11 +16,11 @@ struct Alloc;
 
 unsafe impl GlobalAlloc for Alloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        abi_sys::alloc(layout.into())
+        userlib_sys::alloc(layout.into())
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        abi_sys::dealloc(ptr, layout.into());
+        userlib_sys::dealloc(ptr, layout.into());
     }
 }
 
@@ -33,28 +33,28 @@ macro_rules! println {
 }
 
 pub fn sleep(ms: u64) {
-    abi_sys::sleep(ms);
+    userlib_sys::sleep(ms);
 }
 
 pub fn get_ms() -> u64 {
-    abi_sys::get_ms()
+    userlib_sys::get_ms()
 }
 
 pub fn get_key() -> KeyEvent {
-    abi_sys::keyboard::get_key().into()
+    userlib_sys::keyboard::get_key().into()
 }
 
 pub mod display {
     use core::sync::atomic::{AtomicBool, Ordering};
 
-    use abi_sys::CPixel;
     use embedded_graphics::{
-        Pixel,
         geometry::{Dimensions, Point},
         pixelcolor::Rgb565,
         prelude::{DrawTarget, Size},
         primitives::Rectangle,
+        Pixel,
     };
+    use userlib_sys::CPixel;
 
     pub const SCREEN_WIDTH: usize = 320;
     pub const SCREEN_HEIGHT: usize = 320;
@@ -110,13 +110,13 @@ pub mod display {
                 count += 1;
 
                 if count == BUF_SIZE - 1 {
-                    abi_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
+                    userlib_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
                     count = 0;
                 }
             }
 
             if count > 0 {
-                abi_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
+                userlib_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
             }
 
             Ok(())
@@ -125,7 +125,7 @@ pub mod display {
 }
 
 fn gen_rand(req: &mut RngRequest) {
-    abi_sys::gen_rand(req);
+    userlib_sys::gen_rand(req);
 }
 
 pub struct Rng;
@@ -162,7 +162,7 @@ pub mod fs {
     use core::fmt::Display;
 
     pub fn read_file(file: &str, start_from: usize, buf: &mut [u8]) -> usize {
-        abi_sys::read_file(
+        userlib_sys::read_file(
             file.as_ptr(),
             file.len(),
             start_from,
@@ -172,7 +172,7 @@ pub mod fs {
     }
 
     pub fn write_file(file: &str, start_from: usize, buf: &[u8]) {
-        abi_sys::write_file(
+        userlib_sys::write_file(
             file.as_ptr(),
             file.len(),
             start_from,
@@ -254,7 +254,7 @@ pub mod fs {
     }
 
     pub fn list_dir(path: &str, entries: &mut Entries) -> usize {
-        abi_sys::list_dir(
+        userlib_sys::list_dir(
             path.as_ptr(),
             path.len(),
             entries.as_ptrs().as_mut_ptr(),
@@ -264,14 +264,14 @@ pub mod fs {
     }
 
     pub fn file_len(str: &str) -> usize {
-        abi_sys::file_len(str.as_ptr(), str.len())
+        userlib_sys::file_len(str.as_ptr(), str.len())
     }
 }
 
 pub mod audio {
-    pub use abi_sys::{AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES, audio_buffer_ready};
+    pub use userlib_sys::{audio_buffer_ready, AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES};
 
     pub fn send_audio_buffer(buf: &[u8]) {
-        abi_sys::send_audio_buffer(buf.as_ptr(), buf.len())
+        userlib_sys::send_audio_buffer(buf.as_ptr(), buf.len())
     }
 }

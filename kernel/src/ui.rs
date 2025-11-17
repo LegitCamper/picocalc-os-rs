@@ -2,7 +2,7 @@ use crate::{
     BINARY_CH, display::FRAMEBUFFER, elf::load_binary, framebuffer::FB_PAUSED,
     peripherals::keyboard, storage::FileName,
 };
-use abi_sys::keyboard::{KeyCode, KeyState};
+use userlib_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
