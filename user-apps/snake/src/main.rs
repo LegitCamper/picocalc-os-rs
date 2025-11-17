@@ -3,22 +3,19 @@
 
 extern crate alloc;
 use abi::{
-    KeyCode, KeyState, Rng,
+    Rng,
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    get_key, lock_display, print, sleep,
+    get_key,
+    keyboard::{KeyCode, KeyState},
+    println, sleep,
 };
-use alloc::format;
 use core::panic::PanicInfo;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
 use embedded_snake::{Direction, SnakeGame};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print(&format!(
-        "user panic: {} @ {:?}",
-        info.message(),
-        info.location(),
-    ));
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -30,8 +27,8 @@ pub extern "Rust" fn _start() {
 const CELL_SIZE: usize = 8;
 
 pub fn main() {
-    print("Starting Snake app");
-    let mut display = Display;
+    println!("Starting Snake app");
+    let mut display = Display::take().unwrap();
 
     let mut game = SnakeGame::<100, Rgb565, Rng>::new(
         SCREEN_WIDTH as u16,
@@ -60,10 +57,8 @@ pub fn main() {
         };
 
         // ensure all draws show up at once
-        lock_display(true);
         game.pre_draw(&mut display);
         game.draw(&mut display);
-        lock_display(false);
 
         sleep(15);
     }

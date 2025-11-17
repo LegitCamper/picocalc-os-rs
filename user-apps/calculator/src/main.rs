@@ -2,7 +2,12 @@
 #![no_main]
 
 extern crate alloc;
-use abi::{KeyCode, KeyState, display::Display, get_key, lock_display, print};
+use abi::{
+    display::Display,
+    get_key,
+    keyboard::{KeyCode, KeyState},
+    println,
+};
 use alloc::{format, string::String, vec, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{
@@ -23,11 +28,7 @@ use embedded_layout::{
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print(&format!(
-        "user panic: {} @ {:?}",
-        info.message(),
-        info.location(),
-    ));
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -37,8 +38,8 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print("Starting Calculator app");
-    let mut display = Display;
+    println!("Starting Calculator app");
+    let mut display = Display::take().unwrap();
 
     let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];
     let input_min = input.len();
@@ -57,8 +58,6 @@ pub fn main() {
 
     loop {
         if dirty {
-            lock_display(true);
-
             let style = PrimitiveStyle::with_fill(Rgb565::BLACK);
             if let Some(area) = last_area {
                 Rectangle::new(area.0.top_left, area.0.size)
@@ -102,11 +101,10 @@ pub fn main() {
             eq_layout.draw(&mut display).unwrap();
 
             dirty = false;
-            lock_display(false);
         }
 
         let event = get_key();
-        if event.state != KeyState::Idle {
+        if event.state == KeyState::Released {
             match event.key {
                 KeyCode::Char(ch) => {
                     input.push(ch);

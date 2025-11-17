@@ -11,9 +11,8 @@ Current focus is on **expanding the ABI syscalls** and **fixing the MSC/USB-SCSI
 ## Project Structure
 
 - **`kernel/`** – The core OS kernel (task scheduling, drivers, memory, etc.)
-- **`abi_sys/`** – Shared application binary interface definitions for kernel ↔ userspace interaction
-- **`abi/`** – ABI helpers and abstractions for easier development
-- **`shared/`** – Shared utilities and common code across kernel and user applications
+- **`abi_sys/`** – Shared application binary interface definitions for kernel ↔ userspace (Repr "C")
+- **`abi/`** – Rust focused ABI helpers and abstractions for easier development
 - **`user-apps/`** – Collection of userspace programs (calculator, snake, etc.)
 
 ## Features
@@ -30,4 +29,6 @@ git clone https://github.com/LegitCamper/picocalc-os-rs.git
 cd picocalc-os-rs
 just userapps
 # copy the build applications from target/thumbv8m.main-none-eabihf/release-binary/application to the sdcard and rename them to app.bin
-just kernel-release # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged
+
+# has builds for the official rp2350 board and the pimoroni2w board
+just kernel-release rp235x # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged

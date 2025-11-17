@@ -3,22 +3,20 @@
 
 extern crate alloc;
 use abi::{
-    AUDIO_BUFFER_LEN, KeyCode, KeyState, Rng, audio_buffer_ready,
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    file_len, get_key, lock_display, print, read_file, send_audio_buffer, sleep,
+    audio::{AUDIO_BUFFER_LEN, audio_buffer_ready, send_audio_buffer},
+    display::Display,
+    fs::{file_len, read_file},
+    get_key,
+    keyboard::{KeyCode, KeyState},
+    println,
 };
-use alloc::{format, string::String};
+use alloc::string::String;
 use core::panic::PanicInfo;
 use embedded_audio::{AudioFile, PlatformFile, PlatformFileError, wav::Wav};
-use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print(&format!(
-        "user panic: {} @ {:?}",
-        info.message(),
-        info.location(),
-    ));
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -28,8 +26,8 @@ pub extern "Rust" fn _start() {
 }
 
 pub fn main() {
-    print("Starting Wav player app");
-    let mut display = Display;
+    println!("Starting Wav player app");
+    let mut _display = Display::take();
 
     let mut buf = [0_u8; AUDIO_BUFFER_LEN];
 
@@ -41,7 +39,7 @@ pub fn main() {
                 wav.restart().unwrap()
             }
 
-            let read = wav.read(&mut buf).unwrap();
+            let _read = wav.read(&mut buf).unwrap();
             send_audio_buffer(&buf);
         }
 

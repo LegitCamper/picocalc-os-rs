@@ -2,11 +2,13 @@
 resolver = "3"
 members = [
   "kernel",
+  "abi_sys",
   "abi",
-  "shared",
+  "selection_ui",
   "user-apps/calculator",
   "user-apps/snake",
   "user-apps/gallery",
+  "user-apps/gif",
   "user-apps/wav_player",
 ]
 
@@ -18,10 +20,12 @@ codegen-units = 1
 
 [profile.release-binary]
 inherits = "release"
+codegen-units = 1
 lto = true
 debug = false
-opt-level = "s"
+opt-level = "z"
+panic = "unwind"
 
 [profile.dev]
 lto = true
-opt-level = "z"
+opt-level = "s"

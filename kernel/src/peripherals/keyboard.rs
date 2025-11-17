@@ -1,5 +1,5 @@
 use crate::peripherals::PERIPHERAL_BUS;
-pub use shared::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
+pub use abi_sys::keyboard::{KeyCode, KeyEvent, KeyState, Modifiers};
 
 const REG_ID_KEY: u8 = 0x04;
 const REG_ID_FIF: u8 = 0x09;

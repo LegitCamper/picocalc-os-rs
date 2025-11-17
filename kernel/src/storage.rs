@@ -35,10 +35,22 @@ impl TimeSource for DummyTimeSource {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FileName {
     pub long_name: String,
     pub short_name: ShortFileName,
+}
+
+impl PartialOrd for FileName {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.long_name.cmp(&other.long_name))
+    }
+}
+
+impl Ord for FileName {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.long_name.cmp(&other.long_name)
+    }
 }
 
 pub struct SdCard {

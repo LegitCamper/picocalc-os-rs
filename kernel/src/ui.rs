@@ -1,10 +1,8 @@
 use crate::{
-    BINARY_CH,
-    display::{FB_PAUSED, FRAMEBUFFER},
-    elf::load_binary,
-    peripherals::keyboard,
-    storage::FileName,
+    BINARY_CH, display::FRAMEBUFFER, elf::load_binary, framebuffer::FB_PAUSED,
+    peripherals::keyboard, storage::FileName,
 };
+use abi_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -22,7 +20,6 @@ use embedded_layout::{
     prelude::*,
 };
 use embedded_text::TextBox;
-use shared::keyboard::{KeyCode, KeyState};
 
 pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
     Mutex::new(SelectionList::new());
@@ -71,17 +68,17 @@ pub async fn clear_selection() {
     if let Some(area) = sel.last_bounds {
         Rectangle::new(area.top_left, area.size)
             .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-            .draw(unsafe { &mut FRAMEBUFFER })
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
             .unwrap();
     }
 }
 
 async fn draw_selection() {
     let mut guard = SELECTIONS.lock().await;
-    let file_names = &guard.selections.clone();
+    let file_names = guard.selections.clone();
 
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-    let display_area = unsafe { FRAMEBUFFER.bounding_box() };
+    let display_area = unsafe { FRAMEBUFFER.as_mut().unwrap().bounding_box() };
 
     const NO_BINS: &str = "No Programs found on SD Card. Ensure programs end with '.bin', and are located in the root directory";
     let no_bins = String::from_str(NO_BINS).unwrap();
@@ -97,12 +94,12 @@ async fn draw_selection() {
             ),
             text_style,
         )
-        .draw(unsafe { &mut FRAMEBUFFER })
+        .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
         .unwrap();
     } else {
         let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
 
-        for i in file_names {
+        for i in &file_names {
             views.push(Text::new(&i.long_name, Point::zero(), text_style));
         }
 
@@ -122,12 +119,14 @@ async fn draw_selection() {
             .bounding_box();
         Rectangle::new(selected_bounds.top_left, selected_bounds.size)
             .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-            .draw(unsafe { &mut FRAMEBUFFER })
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
             .unwrap();
 
         guard.last_bounds = Some(layout.bounds());
 
-        layout.draw(unsafe { &mut FRAMEBUFFER }).unwrap();
+        layout
+            .draw(unsafe { &mut *FRAMEBUFFER.as_mut().unwrap() })
+            .unwrap();
     }
 
     guard.changed = false;

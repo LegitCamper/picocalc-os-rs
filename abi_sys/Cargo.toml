@@ -4,11 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+default = ["alloc"]
+alloc = []
 defmt = ["dep:defmt"]
 
 [dependencies]
-embedded-graphics = "0.8.1"
 strum = { version = "0.27.2", default-features = false, features = ["derive"] }
+bitflags = "2.9.4"
+embedded-graphics = "0.8.1"
 defmt = { version = "0.3", optional = true }
-shared = { path = "../shared" }
-embedded-sdmmc = { version = "0.9.0", default-features = false }
+
+[build-dependencies]
+cbindgen = "0.24.0"

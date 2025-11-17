@@ -1,0 +1,4 @@
+language = "C"
+
+[macro_expansion]
+bitflags = true
