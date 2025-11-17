@@ -5,14 +5,21 @@ extern crate alloc;
 use abi::{
     audio::{AUDIO_BUFFER_LEN, audio_buffer_ready, send_audio_buffer},
     display::Display,
-    fs::{file_len, read_file},
+    format,
+    fs::{Entries, file_len, list_dir, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
     println,
 };
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_audio::{AudioFile, PlatformFile, PlatformFileError, wav::Wav};
+use embedded_graphics::{
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
+    pixelcolor::Rgb565,
+    prelude::RgbColor,
+};
+use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -27,30 +34,60 @@ pub extern "Rust" fn _start() {
 
 pub fn main() {
     println!("Starting Wav player app");
-    let mut _display = Display::take();
-
-    let mut buf = [0_u8; AUDIO_BUFFER_LEN];
-
-    let file = File::new(String::from("/music/test.wav"));
-    let mut wav = Wav::new(file).unwrap();
-    println!("sample rate: {}", wav.sample_rate());
-    println!("channels: {:?}", wav.channels() as u8);
+    let mut display = Display::take().unwrap();
 
     loop {
-        if audio_buffer_ready() {
-            if wav.is_eof() {
-                wav.restart().unwrap()
+        let mut entries = Entries::new();
+        list_dir("/music", &mut entries);
+
+        let mut files = entries.entries();
+        files.retain(|e| e.extension().unwrap_or("") == "wav");
+        let mut wavs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
+        wavs.sort();
+
+        let mut selection_ui = SelectionUi::new(&mut wavs);
+        let selection = match selection_ui.run_selection_ui(&mut display) {
+            Ok(maybe_sel) => maybe_sel,
+            Err(e) => match e {
+                SelectionUiError::SelectionListEmpty => {
+                    draw_text_center(
+                        &mut display,
+                        "No Wavs were found in /gifs",
+                        MonoTextStyle::new(&FONT_6X10, Rgb565::RED),
+                    )
+                    .expect("Display Error");
+                    None
+                }
+                SelectionUiError::DisplayError(_) => panic!("Display Error"),
+            },
+        };
+
+        assert!(selection.is_some());
+
+        let file_name = format!("/music/{}", wavs[selection.unwrap()]);
+        let file = File::new(String::from(file_name));
+        let mut wav = Wav::new(file).unwrap();
+        println!("sample rate: {}", wav.sample_rate());
+        println!("channels: {:?}", wav.channels() as u8);
+
+        let mut buf = [0_u8; AUDIO_BUFFER_LEN];
+
+        loop {
+            if audio_buffer_ready() {
+                if wav.is_eof() {
+                    break;
+                }
+
+                let _read = wav.read(&mut buf).unwrap();
+                send_audio_buffer(&buf);
             }
 
-            let _read = wav.read(&mut buf).unwrap();
-            send_audio_buffer(&buf);
-        }
-
-        let event = get_key();
-        if event.state == KeyState::Released {
-            match event.key {
-                KeyCode::Esc => return,
-                _ => (),
+            let event = get_key();
+            if event.state == KeyState::Released {
+                match event.key {
+                    KeyCode::Esc => return,
+                    _ => (),
+                }
             }
         }
     }

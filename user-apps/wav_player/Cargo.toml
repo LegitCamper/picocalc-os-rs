@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 abi = { path = "../../abi" }
+selection_ui = { path = "../../selection_ui" }
 embedded-graphics = "0.8.1"
 rand = { version = "0.9.0", default-features = false }
 embedded-audio = { git = "https://github.com/LegitCamper/embedded-audio" }

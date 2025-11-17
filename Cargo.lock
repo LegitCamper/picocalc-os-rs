@@ -2762,6 +2762,7 @@ dependencies = [
  "embedded-audio",
  "embedded-graphics",
  "rand",
+ "selection_ui",
 ]
 
 [[package]]
