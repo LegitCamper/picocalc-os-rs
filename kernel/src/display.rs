@@ -1,17 +1,15 @@
 use crate::framebuffer::{self, AtomicFrameBuffer, FB_PAUSED};
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::Ordering;
+use embassy_futures::yield_now;
 use embassy_rp::{
     Peri,
     gpio::{Level, Output},
     peripherals::{PIN_13, PIN_14, PIN_15, SPI1},
     spi::{Async, Spi},
 };
-use embassy_time::{Delay, Timer};
-use embedded_graphics::{
-    pixelcolor::Rgb565,
-    prelude::{DrawTarget, RgbColor},
-};
+use embassy_time::Delay;
+use embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
 
@@ -117,7 +115,7 @@ pub async fn display_handler(mut display: DISPLAY) {
         if elapsed < FRAME_TIME_MS {
             Timer::after_millis(FRAME_TIME_MS - elapsed).await;
         } else {
-            Timer::after_millis(1).await;
+            yield_now().await;
         }
     }
 }

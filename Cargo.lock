@@ -899,6 +899,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-audio"
+version = "0.1.0"
+source = "git+https://github.com/LegitCamper/embedded-audio#087784644d810b94dd659a03dbed4795dfb0bd24"
+dependencies = [
+ "heapless",
+]
+
+[[package]]
 name = "embedded-graphics"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1470,8 +1478,10 @@ dependencies = [
  "embedded-layout",
  "embedded-sdmmc",
  "embedded-text",
+ "fixed",
  "goblin",
  "heapless",
+ "micromath",
  "num_enum 0.7.5",
  "once_cell",
  "panic-probe",
@@ -2742,6 +2752,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76f218a38c84bcb33c25ec7059b07847d465ce0e0a76b995e134a45adcb6af76"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wav_player"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "embedded-audio",
+ "embedded-graphics",
+ "rand",
+ "selection_ui",
 ]
 
 [[package]]

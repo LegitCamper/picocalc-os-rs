@@ -12,7 +12,7 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const ABI_CALL_TABLE_COUNT: usize = 12;
+pub const ABI_CALL_TABLE_COUNT: usize = 14;
 const _: () = assert!(ABI_CALL_TABLE_COUNT == CallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
@@ -30,6 +30,8 @@ pub enum CallTable {
     ReadFile = 9,
     WriteFile = 10,
     FileLen = 11,
+    AudioBufferReady = 12,
+    SendAudioBuffer = 13,
 }
 
 #[unsafe(no_mangle)]
@@ -465,5 +467,30 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
         let ptr = CALL_ABI_TABLE[CallTable::FileLen as usize];
         let f: FileLen = core::mem::transmute(ptr);
         f(str, len)
+    }
+}
+
+pub type AudioBufferReady = extern "C" fn() -> bool;
+
+#[allow(unused)]
+pub fn audio_buffer_ready() -> bool {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallTable::AudioBufferReady as usize];
+        let f: AudioBufferReady = core::mem::transmute(ptr);
+        f()
+    }
+}
+
+pub const AUDIO_BUFFER_SAMPLES: usize = 1024;
+pub const AUDIO_BUFFER_LEN: usize = AUDIO_BUFFER_SAMPLES * 2;
+
+pub type SendAudioBuffer = extern "C" fn(ptr: *const u8, len: usize);
+
+#[allow(unused)]
+pub fn send_audio_buffer(buf: *const u8, len: usize) {
+    unsafe {
+        let ptr = CALL_ABI_TABLE[CallTable::SendAudioBuffer as usize];
+        let f: SendAudioBuffer = core::mem::transmute(ptr);
+        f(buf, len)
     }
 }

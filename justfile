@@ -39,6 +39,7 @@ userapps: cbindgen
     just userapp snake
     just userapp gallery
     just userapp gif
+    just userapp wav_player
 
 copy-userapp app:
     cp ./target/thumbv8m.main-none-eabihf/release-binary/{{app}} /run/media/$(whoami)/PICOCALC/{{app}}.bin
@@ -50,6 +51,7 @@ copy-userapps:
     just copy-userapp snake
     just copy-userapp gallery
     just copy-userapp gif
+    just copy-userapp wav_player
 
     DEV=$(lsblk -o LABEL,NAME -nr | awk -v L="PICOCALC" '$1==L {print "/dev/" $2}')
     udisksctl unmount -b "$DEV"

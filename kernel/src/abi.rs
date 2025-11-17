@@ -1,6 +1,7 @@
 use abi_sys::{
-    AllocAbi, CLayout, CPixel, DeallocAbi, DrawIterAbi, FileLen, GenRand, GetMsAbi, ListDir,
-    PrintAbi, ReadFile, RngRequest, SleepMsAbi, WriteFile, keyboard::*,
+    AUDIO_BUFFER_SAMPLES, AllocAbi, AudioBufferReady, CLayout, CPixel, DeallocAbi, DrawIterAbi,
+    FileLen, GenRand, GetMsAbi, ListDir, PrintAbi, ReadFile, RngRequest, SendAudioBuffer,
+    SleepMsAbi, WriteFile, keyboard::*,
 };
 use alloc::{string::ToString, vec::Vec};
 use core::{ffi::c_char, ptr, sync::atomic::Ordering};
@@ -17,6 +18,7 @@ use crate::heap::HEAP;
 use core::alloc::GlobalAlloc;
 
 use crate::{
+    audio::{AUDIO_BUFFER, AUDIO_BUFFER_READY},
     display::FRAMEBUFFER,
     framebuffer::FB_PAUSED,
     storage::{Dir, File, SDCARD},
@@ -207,7 +209,6 @@ fn recurse_file<T>(
     dirs: &[&str],
     mut access: impl FnMut(&mut File) -> T,
 ) -> Result<T, ()> {
-    defmt::info!("dir: {}, dirs: {}", dir, dirs);
     if dirs.len() == 1 {
         let mut b = [0_u8; 50];
         let mut buf = LfnBuffer::new(&mut b);
@@ -330,4 +331,29 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
         });
     }
     len as usize
+}
+
+const _: AudioBufferReady = audio_buffer_ready;
+pub extern "C" fn audio_buffer_ready() -> bool {
+    AUDIO_BUFFER_READY.load(Ordering::Acquire)
+}
+
+const _: SendAudioBuffer = send_audio_buffer;
+pub extern "C" fn send_audio_buffer(ptr: *const u8, len: usize) {
+    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
+    let buf = unsafe { core::slice::from_raw_parts(ptr, len) };
+
+    while !AUDIO_BUFFER_READY.load(Ordering::Acquire) {}
+
+    if buf.len() == AUDIO_BUFFER_SAMPLES * 2 {
+        AUDIO_BUFFER_READY.store(false, Ordering::Release);
+        unsafe { AUDIO_BUFFER.copy_from_slice(buf) };
+    } else {
+        #[cfg(feature = "defmt")]
+        defmt::warn!(
+            "user audio stream was wrong size: {} should be {}",
+            buf.len(),
+            AUDIO_BUFFER_SAMPLES * 2
+        )
+    }
 }

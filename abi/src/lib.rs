@@ -3,7 +3,7 @@
 
 extern crate alloc;
 
-use abi_sys::{RngRequest, alloc, dealloc, keyboard::KeyEvent};
+use abi_sys::{RngRequest, keyboard::KeyEvent};
 pub use abi_sys::{keyboard, print};
 pub use alloc::format;
 use core::alloc::{GlobalAlloc, Layout};
@@ -16,11 +16,11 @@ struct Alloc;
 
 unsafe impl GlobalAlloc for Alloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        alloc(layout.into())
+        abi_sys::alloc(layout.into())
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        dealloc(ptr, layout.into());
+        abi_sys::dealloc(ptr, layout.into());
     }
 }
 
@@ -265,5 +265,13 @@ pub mod fs {
 
     pub fn file_len(str: &str) -> usize {
         abi_sys::file_len(str.as_ptr(), str.len())
+    }
+}
+
+pub mod audio {
+    pub use abi_sys::{AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES, audio_buffer_ready};
+
+    pub fn send_audio_buffer(buf: &[u8]) {
+        abi_sys::send_audio_buffer(buf.as_ptr(), buf.len())
     }
 }

@@ -9,6 +9,7 @@ members = [
   "user-apps/snake",
   "user-apps/gallery",
   "user-apps/gif",
+  "user-apps/wav_player",
 ]
 
 [profile.release]

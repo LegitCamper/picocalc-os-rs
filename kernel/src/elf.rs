@@ -2,8 +2,7 @@ use crate::{
     abi,
     storage::{File, SDCARD},
 };
-use abi_sys::CallTable;
-use abi_sys::EntryFn;
+use abi_sys::{CallTable, EntryFn};
 use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
 use core::ptr;
@@ -208,6 +207,8 @@ fn patch_abi(
                             CallTable::ReadFile => abi::read_file as usize,
                             CallTable::WriteFile => abi::write_file as usize,
                             CallTable::FileLen => abi::file_len as usize,
+                            CallTable::AudioBufferReady => abi::audio_buffer_ready as usize,
+                            CallTable::SendAudioBuffer => abi::send_audio_buffer as usize,
                         };
                         unsafe {
                             table_base.add(idx as usize).write(ptr);
