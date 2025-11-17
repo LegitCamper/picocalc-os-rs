@@ -10,7 +10,6 @@ use embassy_rp::{
         Common, Config, Direction, FifoJoin, Instance, LoadedProgram, PioPin, ShiftConfig,
         StateMachine, program::pio_asm,
     },
-    pio_programs::clock_divider::calculate_pio_clock_divider,
 };
 use fixed::traits::ToFixed;
 
