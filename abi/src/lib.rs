@@ -3,8 +3,8 @@
 
 extern crate alloc;
 
-pub use abi_sys::{self, keyboard};
 use abi_sys::{RngRequest, alloc, dealloc, keyboard::KeyEvent};
+pub use abi_sys::{keyboard, print};
 pub use alloc::format;
 use core::alloc::{GlobalAlloc, Layout};
 use rand_core::RngCore;
@@ -25,10 +25,10 @@ unsafe impl GlobalAlloc for Alloc {
 }
 
 #[macro_export]
-macro_rules! print {
+macro_rules! println {
     ($($arg:tt)*) => {{
         let s = $crate::format!($($arg)*);
-        $crate::abi_sys::print(s.as_ptr(), s.len());
+        $crate::print(s.as_ptr(), s.len());
     }};
 }
 
@@ -61,10 +61,8 @@ pub mod display {
 
     pub type Pixel565 = Pixel<Rgb565>;
 
-    const BUF_SIZE: usize = 15 * 1024; // tune this for performance
+    const BUF_SIZE: usize = 1024;
     static mut BUF: [CPixel; BUF_SIZE] = [CPixel::new(); BUF_SIZE];
-    // const BUF_SIZE: usize = 250 * 1024; // tune this for performance
-    // static mut BUF: Lazy<Vec<CPixel>> = Lazy::new(|| vec![const { CPixel::new() }; BUF_SIZE]);
 
     static DISPLAY_TAKEN: AtomicBool = AtomicBool::new(false);
 
@@ -160,20 +158,30 @@ impl RngCore for Rng {
 }
 
 pub mod fs {
+    use alloc::vec::Vec;
     use core::fmt::Display;
 
-    use alloc::{format, vec::Vec};
-
-    pub fn read_file(file: &str, read_from: usize, buf: &mut [u8]) -> usize {
+    pub fn read_file(file: &str, start_from: usize, buf: &mut [u8]) -> usize {
         abi_sys::read_file(
             file.as_ptr(),
             file.len(),
-            read_from,
+            start_from,
             buf.as_mut_ptr(),
             buf.len(),
         )
     }
 
+    pub fn write_file(file: &str, start_from: usize, buf: &[u8]) {
+        abi_sys::write_file(
+            file.as_ptr(),
+            file.len(),
+            start_from,
+            buf.as_ptr(),
+            buf.len(),
+        )
+    }
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub struct FileName<'a> {
         full: &'a str,
         base: &'a str,
@@ -217,7 +225,7 @@ pub mod fs {
     const MAX_ENTRY_NAME_LEN: usize = 25;
     const MAX_ENTRIES: usize = 25;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     pub struct Entries([[u8; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES]);
 
     impl Entries {

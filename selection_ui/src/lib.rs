@@ -6,7 +6,6 @@ use abi::{
     display::Display,
     get_key,
     keyboard::{KeyCode, KeyState},
-    print,
 };
 use alloc::vec::Vec;
 use embedded_graphics::{
@@ -55,6 +54,9 @@ impl<'a> SelectionUi<'a> {
             if key.state == KeyState::Pressed {
                 if let Some(s) = self.update(display, key.key)? {
                     selection = Some(s);
+                    display
+                        .clear(Rgb565::BLACK)
+                        .map_err(|e| SelectionUiError::DisplayError(e))?;
                     break;
                 }
             }
@@ -69,7 +71,6 @@ impl<'a> SelectionUi<'a> {
         display: &mut Display,
         key: KeyCode,
     ) -> Result<Option<usize>, SelectionUiError<<Display as DrawTarget>::Error>> {
-        print!("Got Key: {:?}", key);
         match key {
             KeyCode::Down => {
                 self.selection = (self.selection + 1).min(self.items.len() - 1);
@@ -80,7 +81,6 @@ impl<'a> SelectionUi<'a> {
             KeyCode::Enter | KeyCode::Right => return Ok(Some(self.selection)),
             _ => return Ok(None),
         };
-        print!("new selection: {:?}", self.selection);
         self.draw(display)?;
         Ok(None)
     }

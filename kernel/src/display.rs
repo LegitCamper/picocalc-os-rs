@@ -87,8 +87,14 @@ pub async fn init_display(
 
 #[embassy_executor::task]
 pub async fn display_handler(mut display: DISPLAY) {
+    use embassy_time::{Instant, Timer};
+
+    // Target ~60 Hz refresh (≈16.67 ms per frame)
+    const FRAME_TIME_MS: u64 = 1000 / 60;
+
     loop {
-        // renders fps text to canvas
+        let start = Instant::now();
+
         #[cfg(feature = "fps")]
         unsafe {
             if FPS_COUNTER.should_draw() {
@@ -103,11 +109,15 @@ pub async fn display_handler(mut display: DISPLAY) {
                     .unwrap()
                     .partial_draw(&mut display)
                     .await
-                    .unwrap()
-            };
+                    .unwrap();
+            }
         }
 
-        // small yield to allow other tasks to run
-        Timer::after_millis(10).await;
+        let elapsed = start.elapsed().as_millis() as u64;
+        if elapsed < FRAME_TIME_MS {
+            Timer::after_millis(FRAME_TIME_MS - elapsed).await;
+        } else {
+            Timer::after_millis(1).await;
+        }
     }
 }

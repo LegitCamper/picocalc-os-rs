@@ -7,7 +7,7 @@ use abi::{
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
     get_key,
     keyboard::{KeyCode, KeyState},
-    print, sleep,
+    println, sleep,
 };
 use core::panic::PanicInfo;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
@@ -15,7 +15,7 @@ use embedded_snake::{Direction, SnakeGame};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print!("user panic: {} @ {:?}", info.message(), info.location(),);
+    println!("user panic: {} @ {:?}", info.message(), info.location(),);
     loop {}
 }
 
@@ -27,7 +27,7 @@ pub extern "Rust" fn _start() {
 const CELL_SIZE: usize = 8;
 
 pub fn main() {
-    print!("Starting Snake app");
+    println!("Starting Snake app");
     let mut display = Display::take().unwrap();
 
     let mut game = SnakeGame::<100, Rgb565, Rng>::new(

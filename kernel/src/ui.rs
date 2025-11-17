@@ -75,7 +75,7 @@ pub async fn clear_selection() {
 
 async fn draw_selection() {
     let mut guard = SELECTIONS.lock().await;
-    let file_names = &guard.selections.clone();
+    let file_names = guard.selections.clone();
 
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
     let display_area = unsafe { FRAMEBUFFER.as_mut().unwrap().bounding_box() };
@@ -99,7 +99,7 @@ async fn draw_selection() {
     } else {
         let mut views: alloc::vec::Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
 
-        for i in file_names {
+        for i in &file_names {
             views.push(Text::new(&i.long_name, Point::zero(), text_style));
         }
 
