@@ -51,6 +51,7 @@ copy-userapps:
     just copy-userapp snake
     just copy-userapp gallery
     just copy-userapp gif
+    just copy-userapp wav_player
 
     DEV=$(lsblk -o LABEL,NAME -nr | awk -v L="PICOCALC" '$1==L {print "/dev/" $2}')
     udisksctl unmount -b "$DEV"
