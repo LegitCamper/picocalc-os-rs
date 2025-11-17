@@ -481,7 +481,8 @@ pub fn audio_buffer_ready() -> bool {
     }
 }
 
-pub const AUDIO_BUFFER_LEN: usize = 1024;
+pub const AUDIO_BUFFER_SAMPLES: usize = 1024;
+pub const AUDIO_BUFFER_LEN: usize = AUDIO_BUFFER_SAMPLES * 2;
 
 pub type SendAudioBuffer = extern "C" fn(ptr: *const u8, len: usize);
 

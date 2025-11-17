@@ -269,7 +269,7 @@ pub mod fs {
 }
 
 pub mod audio {
-    pub use abi_sys::{AUDIO_BUFFER_LEN, audio_buffer_ready};
+    pub use abi_sys::{AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES, audio_buffer_ready};
 
     pub fn send_audio_buffer(buf: &[u8]) {
         abi_sys::send_audio_buffer(buf.as_ptr(), buf.len())

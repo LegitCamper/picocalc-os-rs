@@ -121,10 +121,12 @@ async fn watchdog_task(mut watchdog: Watchdog) {
 static ENABLE_UI: AtomicBool = AtomicBool::new(true);
 static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
+const OVERCLOCK: u32 = 300_000_000;
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = if cfg!(feature = "overclock") {
-        let clocks = ClockConfig::system_freq(300_000_000).unwrap();
+        let clocks = ClockConfig::system_freq(OVERCLOCK).unwrap();
         let config = Config::new(clocks);
         embassy_rp::init(config)
     } else {
@@ -156,11 +158,12 @@ async fn main(_spawner: Spawner) {
     } = Pio::new(p.PIO0, Irqs);
 
     let audio = Audio {
-        dma: p.DMA_CH3,
         pio: common,
         sm0,
-        sm1,
+        dma0: p.DMA_CH3,
         left: p.PIN_26,
+        sm1,
+        dma1: p.DMA_CH4,
         right: p.PIN_27,
     };
     let sd = Sd {
@@ -244,11 +247,12 @@ struct Display {
     reset: Peri<'static, PIN_15>,
 }
 struct Audio {
-    dma: Peri<'static, DMA_CH3>,
     pio: Common<'static, PIO0>,
+    dma0: Peri<'static, DMA_CH3>,
     sm0: StateMachine<'static, PIO0, 0>,
-    sm1: StateMachine<'static, PIO0, 1>,
     left: Peri<'static, PIN_26>,
+    dma1: Peri<'static, DMA_CH4>,
+    sm1: StateMachine<'static, PIO0, 1>,
     right: Peri<'static, PIN_27>,
 }
 struct Sd {

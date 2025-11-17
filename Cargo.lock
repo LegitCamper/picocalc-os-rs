@@ -1478,6 +1478,7 @@ dependencies = [
  "embedded-layout",
  "embedded-sdmmc",
  "embedded-text",
+ "fixed",
  "goblin",
  "heapless",
  "micromath",

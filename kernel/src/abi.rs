@@ -1,5 +1,5 @@
 use abi_sys::{
-    AUDIO_BUFFER_LEN, AllocAbi, AudioBufferReady, CLayout, CPixel, DeallocAbi, DrawIterAbi,
+    AUDIO_BUFFER_SAMPLES, AllocAbi, AudioBufferReady, CLayout, CPixel, DeallocAbi, DrawIterAbi,
     FileLen, GenRand, GetMsAbi, ListDir, PrintAbi, ReadFile, RngRequest, SendAudioBuffer,
     SleepMsAbi, WriteFile, keyboard::*,
 };
@@ -209,7 +209,6 @@ fn recurse_file<T>(
     dirs: &[&str],
     mut access: impl FnMut(&mut File) -> T,
 ) -> Result<T, ()> {
-    defmt::info!("dir: {}, dirs: {}", dir, dirs);
     if dirs.len() == 1 {
         let mut b = [0_u8; 50];
         let mut buf = LfnBuffer::new(&mut b);
@@ -346,8 +345,15 @@ pub extern "C" fn send_audio_buffer(ptr: *const u8, len: usize) {
 
     while !AUDIO_BUFFER_READY.load(Ordering::Acquire) {}
 
-    if buf.len() == AUDIO_BUFFER_LEN {
+    if buf.len() == AUDIO_BUFFER_SAMPLES * 2 {
+        AUDIO_BUFFER_READY.store(false, Ordering::Release);
         unsafe { AUDIO_BUFFER.copy_from_slice(buf) };
-        AUDIO_BUFFER_READY.store(false, Ordering::Release)
+    } else {
+        #[cfg(feature = "defmt")]
+        defmt::warn!(
+            "user audio stream was wrong size: {} should be {}",
+            buf.len(),
+            AUDIO_BUFFER_SAMPLES * 2
+        )
     }
 }

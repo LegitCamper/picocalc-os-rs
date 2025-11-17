@@ -33,6 +33,9 @@ pub fn main() {
 
     let file = File::new(String::from("/music/test.wav"));
     let mut wav = Wav::new(file).unwrap();
+    println!("sample rate: {}", wav.sample_rate());
+    println!("channels: {:?}", wav.channels() as u8);
+
     loop {
         if audio_buffer_ready() {
             if wav.is_eof() {
@@ -44,7 +47,7 @@ pub fn main() {
         }
 
         let event = get_key();
-        if event.state != KeyState::Idle {
+        if event.state == KeyState::Released {
             match event.key {
                 KeyCode::Esc => return,
                 _ => (),
