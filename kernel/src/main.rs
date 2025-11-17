@@ -34,10 +34,7 @@ use crate::{
     abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     audio::audio_handler,
     display::{FRAMEBUFFER, display_handler, init_display},
-    peripherals::{
-        conf_peripherals,
-        keyboard::{KeyState, read_keyboard_fifo},
-    },
+    peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},

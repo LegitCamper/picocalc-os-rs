@@ -52,7 +52,7 @@ pub fn main() {
                 SelectionUiError::SelectionListEmpty => {
                     draw_text_center(
                         &mut display,
-                        "No Wavs were found in /gifs",
+                        "No Wavs were found in /music",
                         MonoTextStyle::new(&FONT_6X10, Rgb565::RED),
                     )
                     .expect("Display Error");
@@ -63,6 +63,13 @@ pub fn main() {
         };
 
         assert!(selection.is_some());
+
+        draw_text_center(
+            &mut display,
+            &format!("Now playing {}", wavs[selection.unwrap()]),
+            MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE),
+        )
+        .expect("Display Error");
 
         let file_name = format!("/music/{}", wavs[selection.unwrap()]);
         let file = File::new(String::from(file_name));

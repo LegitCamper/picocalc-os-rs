@@ -144,5 +144,11 @@ pub fn draw_text_center<'a, S>(
 where
     S: TextRenderer<Color = <Display as DrawTarget>::Color>,
 {
-    Text::with_alignment(text, Point::zero(), style, Alignment::Center).draw(display)
+    Text::with_alignment(
+        text,
+        display.bounding_box().center(),
+        style,
+        Alignment::Center,
+    )
+    .draw(display)
 }
