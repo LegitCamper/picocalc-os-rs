@@ -40,3 +40,18 @@ userapps: cbindgen
     just userapp gallery
     just userapp gif
     just userapp gboy
+
+copy-userapp app:
+    cp ./target/thumbv8m.main-none-eabihf/release-binary/{{app}} /run/media/$(whoami)/PICOCALC/{{app}}.bin
+
+copy-userapps:
+    #!/bin/bash
+    just userapps
+    just copy-userapp calculator
+    just copy-userapp snake
+    just copy-userapp gallery
+    just copy-userapp gif
+
+    DEV=$(lsblk -o LABEL,NAME -nr | awk -v L="PICOCALC" '$1==L {print "/dev/" $2}')
+    udisksctl unmount -b "$DEV"
+    udisksctl power-off -b "$DEV"    
