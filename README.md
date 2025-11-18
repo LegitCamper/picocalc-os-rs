@@ -1,17 +1,17 @@
 # PicoCalc OS (Rust)
 
-A simple operating system for the **Clockwork PicoCalc**, written in Rust.  
+A simple kernel and applications for the **Clockwork PicoCalc**, written in Rust.  
 This project provides a minimal kernel, ABI, and user-space applications to experiment with OS development on constrained hardware.
 
 ## Status
 
 Basic synchronous applications are working great.  
-Current focus is on exanding applications and porting software, finding bufs in ffi, and making sure the kernel is as stable as possible.
+Current focus is on exanding applications and porting software, finding bugs in ffi, and making sure the kernel is as stable as possible.
 
 ## Project Structure
 
-- **`kernel/`** – The core OS kernel (task scheduling, drivers, memory, etc.)
-- **`userlib_sys/`** – FFI bindings for kernel syscalls - kernel ↔ userspace (Repr "C")
+- **`kernel/`** – The core OS kernel
+- **`userlib_sys/`** – C FFI bindings for kernel syscall
 - **`userlib/`** – Rust wrapper on top of `userlib_sys` 
 - **`picolib/`** – Built with ```just newlib```, and provides libc symbols when linking with C libraries 
 - **`user-apps/`** – Collection of userspace programs (gif player, wav player, calculator, snake, etc.)
