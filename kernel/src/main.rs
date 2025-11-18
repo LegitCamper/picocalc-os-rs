@@ -12,11 +12,15 @@ mod audio;
 mod display;
 mod elf;
 mod framebuffer;
+// TODO: NEED TO UPDATE MCU TO TEST BATTERY READS
+#[allow(unused)]
 mod peripherals;
+#[allow(unused)]
 mod scsi;
 mod storage;
 mod syscalls;
 mod ui;
+#[allow(unused)]
 mod usb;
 mod utils;
 
@@ -28,7 +32,7 @@ mod heap;
 mod psram;
 
 #[cfg(feature = "psram")]
-use crate::{heap::HEAP, heap::init_qmi_psram_heap, psram::init_psram, psram::init_psram_qmi};
+use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
     audio::audio_handler,
@@ -102,7 +106,7 @@ async fn watchdog_task(mut watchdog: Watchdog) {
             ResetReason::Forced => "forced",
             ResetReason::TimedOut => "timed out",
         };
-        #[cfg(feature = "debug")]
+        #[cfg(feature = "defmt")]
         defmt::error!("Watchdog reset reason: {}", _reason);
     }
 
@@ -321,7 +325,7 @@ async fn setup_display(display: Display, spawner: Spawner) {
 async fn setup_qmi_psram() {
     Timer::after_millis(250).await;
     let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     defmt::info!("size:  {}", psram_qmi_size);
     Timer::after_millis(100).await;
 
@@ -363,7 +367,7 @@ async fn kernel_task(
         .spawn(watchdog_task(Watchdog::new(watchdog)))
         .unwrap();
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     defmt::info!("Clock: {}", embassy_rp::clocks::clk_sys_freq());
 
     setup_mcu(mcu).await;

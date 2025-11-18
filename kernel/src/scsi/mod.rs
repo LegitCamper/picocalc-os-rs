@@ -30,7 +30,7 @@ pub struct MassStorageClass<'d, D: Driver<'d>> {
     bulk_in: D::EndpointIn,
 }
 
-impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
+impl<'d, D: Driver<'d>> MassStorageClass<'d, D> {
     pub fn new(builder: &mut Builder<'d, D>, temp_sd: Option<SdCard>) -> Self {
         let mut function = builder.function(0x08, SUBCLASS_SCSI, 0x50); // Mass Storage class
         let mut interface = function.interface();
@@ -72,34 +72,33 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
 
     async fn handle_cbw(&mut self) {
         let mut cbw_buf = [0u8; 31];
-        if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await {
-            if n == 31 {
-                if let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n]) {
-                    // Take sdcard to increase speed
-                    if self.temp_sd.is_none() {
-                        let mut guard = SDCARD.get().lock().await;
-                        if let Some(sd) = guard.take() {
-                            self.temp_sd = Some(sd);
-                        } else {
-                            #[cfg(feature = "defmt")]
-                            defmt::warn!("Tried to take SDCARD but it was already taken");
-                            return;
-                        }
-                    }
-
-                    let command = parse_cb(&cbw.CBWCB);
-                    if self.handle_command(command).await.is_ok() {
-                        self.send_csw_success(cbw.dCBWTag).await
-                    } else {
-                        self.send_csw_fail(cbw.dCBWTag).await
-                    }
-
-                    if self.pending_eject {
-                        if let ScsiCommand::Write { lba: _, len: _ } = command {
-                            MSC_SHUTDOWN.signal(());
-                        }
-                    }
+        if let Ok(n) = self.bulk_out.read(&mut cbw_buf).await
+            && n == 31
+            && let Some(cbw) = CommandBlockWrapper::parse(&cbw_buf[..n])
+        {
+            // Take sdcard to increase speed
+            if self.temp_sd.is_none() {
+                let mut guard = SDCARD.get().lock().await;
+                if let Some(sd) = guard.take() {
+                    self.temp_sd = Some(sd);
+                } else {
+                    #[cfg(feature = "defmt")]
+                    defmt::warn!("Tried to take SDCARD but it was already taken");
+                    return;
                 }
+            }
+
+            let command = parse_cb(&cbw.CBWCB);
+            if self.handle_command(command).await.is_ok() {
+                self.send_csw_success(cbw.dCBWTag).await
+            } else {
+                self.send_csw_fail(cbw.dCBWTag).await
+            }
+
+            if self.pending_eject
+                && let ScsiCommand::Write { lba: _, len: _ } = command
+            {
+                MSC_SHUTDOWN.signal(());
             }
         }
     }
@@ -238,7 +237,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 let block_size = SdCard::BLOCK_SIZE as u64;
                 let total_blocks = self.temp_sd.as_ref().unwrap().size() / block_size;
 
-                let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
+                let last_lba = total_blocks.saturating_sub(1);
 
                 response.extend_from_slice(&(last_lba as u32).to_be_bytes())?;
                 response.extend_from_slice(&(block_size as u32).to_be_bytes())?;
@@ -249,7 +248,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 let block_size = SdCard::BLOCK_SIZE as u64;
                 let total_blocks = self.temp_sd.as_ref().unwrap().size() / block_size;
 
-                let last_lba = total_blocks.checked_sub(1).unwrap_or(0);
+                let last_lba = total_blocks.saturating_sub(1);
 
                 response.extend_from_slice(&last_lba.to_be_bytes())?; // 8 bytes last LBA
                 response.extend_from_slice(&(block_size as u32).to_be_bytes())?; // 4 bytes block length
@@ -269,7 +268,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         sdcard.read_blocks(block_buf, BlockIdx(idx as u32))?;
 
                         for block in &mut *block_buf {
-                            for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
+                            for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE) {
                                 self.bulk_in.write(chunk).await.map_err(|_| ())?;
                             }
                         }
@@ -281,7 +280,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                             .read_blocks(&mut block_buf[..blocks as usize], BlockIdx(idx as u32))?;
 
                         for block in &block_buf[..blocks as usize] {
-                            for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE.into()) {
+                            for chunk in block.contents.chunks(BULK_ENDPOINT_PACKET_SIZE) {
                                 self.bulk_in.write(chunk).await.map_err(|_| ())?;
                             }
                         }
@@ -301,8 +300,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                 while blocks > 0 {
                     if blocks >= block_buf.len() as u64 {
                         for block in block_buf.as_mut() {
-                            for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
-                            {
+                            for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE) {
                                 self.bulk_out.read(chunk).await.map_err(|_| ())?;
                             }
                         }
@@ -313,8 +311,7 @@ impl<'d, 's, D: Driver<'d>> MassStorageClass<'d, D> {
                         idx += block_buf.len() as u64;
                     } else {
                         for block in block_buf[..blocks as usize].as_mut() {
-                            for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE.into())
-                            {
+                            for chunk in block.contents.chunks_mut(BULK_ENDPOINT_PACKET_SIZE) {
                                 self.bulk_out.read(chunk).await.map_err(|_| ())?;
                             }
                         }

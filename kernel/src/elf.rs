@@ -39,7 +39,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
             let mut ph_buf = vec![0_u8; elf_header.e_phentsize as usize];
 
             let (total_size, min_vaddr, _max_vaddr) =
-                total_loadable_size(&mut file, &elf_header, &mut ph_buf);
+                total_loadable_size(&mut file, elf_header, &mut ph_buf);
 
             let bump = Bump::with_capacity(total_size);
             let base = bump.alloc_slice_fill_default::<u8>(total_size);
@@ -52,25 +52,22 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
                 let ph = cast_phdr(&ph_buf);
 
                 let seg_offset = (ph.p_vaddr - min_vaddr) as usize;
-                let mut segment = &mut base[seg_offset..seg_offset + ph.p_memsz as usize];
+                let segment = &mut base[seg_offset..seg_offset + ph.p_memsz as usize];
 
                 if ph.p_type == PT_LOAD {
-                    load_segment(&mut file, &ph, &mut segment).unwrap();
+                    load_segment(&mut file, &ph, segment).unwrap();
                 }
             }
 
             for i in 0..elf_header.e_shnum {
                 let sh = read_section(&mut file, elf_header, i.into());
 
-                match sh.sh_type {
-                    SHT_REL => {
-                        apply_relocations(&sh, min_vaddr, base.as_mut_ptr(), &mut file).unwrap();
-                    }
-                    _ => {}
+                if sh.sh_type == SHT_REL {
+                    apply_relocations(&sh, min_vaddr, base.as_mut_ptr(), &mut file).unwrap();
                 }
             }
 
-            patch_syscalls(&elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
+            patch_syscalls(elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
 
             // entry pointer is base_ptr + (entry - min_vaddr)
             let entry_ptr: EntryFn = unsafe {
@@ -157,7 +154,7 @@ fn patch_syscalls(
     file: &mut File,
 ) -> Result<(), ()> {
     for i in 1..=elf_header.e_shnum {
-        let sh = read_section(file, &elf_header, i.into());
+        let sh = read_section(file, elf_header, i.into());
 
         // find the symbol table
         if sh.sh_type == SHT_SYMTAB {
@@ -172,7 +169,7 @@ fn patch_syscalls(
                     &symtab_buf[i * sh.sh_entsize as usize..(i + 1) * sh.sh_entsize as usize];
                 let sym = cast_sym(sym_bytes);
 
-                let str_sh = read_section(file, &elf_header, sh.sh_link);
+                let str_sh = read_section(file, elf_header, sh.sh_link);
 
                 let mut name = Vec::new();
                 file.seek_from_start(str_sh.sh_offset + sym.st_name)
@@ -211,7 +208,7 @@ fn patch_syscalls(
                             SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
                         };
                         unsafe {
-                            table_base.add(idx as usize).write(ptr);
+                            table_base.add(idx).write(ptr);
                         }
                     }
                     return Ok(());
@@ -233,7 +230,7 @@ fn total_loadable_size(
         file.seek_from_start(elf_header.e_phoff + (elf_header.e_phentsize * i) as u32)
             .unwrap();
         file.read(ph_buf).unwrap();
-        let ph = cast_phdr(&ph_buf);
+        let ph = cast_phdr(ph_buf);
 
         if ph.p_type == PT_LOAD {
             if ph.p_vaddr < min_vaddr {

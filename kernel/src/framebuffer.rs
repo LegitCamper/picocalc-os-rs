@@ -46,7 +46,7 @@ impl<'a> AtomicFrameBuffer<'a> {
     }
 
     fn mark_tiles_dirty(&mut self, rect: Rectangle) {
-        let tiles_x = (SCREEN_WIDTH + TILE_SIZE - 1) / TILE_SIZE;
+        let tiles_x = SCREEN_WIDTH.div_ceil(TILE_SIZE);
         let start_tx = (rect.top_left.x as usize) / TILE_SIZE;
         let end_tx = ((rect.top_left.x + rect.size.width as i32 - 1) as usize) / TILE_SIZE;
         let start_ty = (rect.top_left.y as usize) / TILE_SIZE;
@@ -346,11 +346,10 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
             }
         }
 
-        if changed {
-            if let Some(rect) = dirty_rect {
+        if changed
+            && let Some(rect) = dirty_rect {
                 self.mark_tiles_dirty(rect);
             }
-        }
 
         Ok(())
     }
@@ -402,7 +401,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
         self.fill_contiguous(
             area,
-            core::iter::repeat(color).take((self.size().width * self.size().height) as usize),
+            core::iter::repeat_n(color, (self.size().width * self.size().height) as usize),
         )
     }
 
@@ -412,8 +411,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
             0,
             self.size().width as u16 - 1,
             self.size().height as u16 - 1,
-            core::iter::repeat(RawU16::from(color).into_inner())
-                .take((self.size().width * self.size().height) as usize),
+            core::iter::repeat_n(RawU16::from(color).into_inner(), (self.size().width * self.size().height) as usize),
         )?;
 
         for tile in self.dirty_tiles.iter() {

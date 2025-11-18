@@ -120,8 +120,10 @@ impl<'d, PIO: Instance, const SM: usize> PioPwmAudio<'d, PIO, SM> {
         let mut cfg = Config::default();
         cfg.set_set_pins(&[&pin]);
         cfg.fifo_join = FifoJoin::TxOnly;
-        let mut shift_cfg = ShiftConfig::default();
-        shift_cfg.auto_fill = true;
+        let shift_cfg = ShiftConfig {
+            auto_fill: true,
+            ..Default::default()
+        };
         cfg.shift_out = shift_cfg;
         cfg.use_program(&prg.0, &[]);
         sm.set_config(&cfg);

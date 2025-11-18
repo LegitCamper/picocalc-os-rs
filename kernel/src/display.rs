@@ -1,5 +1,4 @@
 use crate::framebuffer::{self, AtomicFrameBuffer, FB_PAUSED};
-use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::Ordering;
 use embassy_futures::yield_now;
 use embassy_rp::{
@@ -9,17 +8,20 @@ use embassy_rp::{
     spi::{Async, Spi},
 };
 use embassy_time::Delay;
-use embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
 
 #[cfg(feature = "psram")]
 use crate::heap::HEAP;
+#[cfg(feature = "psram")]
+use core::alloc::{GlobalAlloc, Layout};
+#[cfg(feature = "psram")]
+use embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor};
 
 #[cfg(feature = "fps")]
 pub use framebuffer::fps::{FPS_CANVAS, FPS_COUNTER};
 
-type DISPLAY = ST7365P<
+type Display = ST7365P<
     ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
     Output<'static>,
     Output<'static>,
@@ -56,7 +58,7 @@ pub async fn init_display(
     cs: Peri<'static, PIN_13>,
     data: Peri<'static, PIN_14>,
     reset: Peri<'static, PIN_15>,
-) -> DISPLAY {
+) -> Display {
     init_fb();
 
     let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
@@ -84,7 +86,7 @@ pub async fn init_display(
 }
 
 #[embassy_executor::task]
-pub async fn display_handler(mut display: DISPLAY) {
+pub async fn display_handler(mut display: Display) {
     use embassy_time::{Instant, Timer};
 
     // Target ~60 Hz refresh (≈16.67 ms per frame)
@@ -111,7 +113,7 @@ pub async fn display_handler(mut display: DISPLAY) {
             }
         }
 
-        let elapsed = start.elapsed().as_millis() as u64;
+        let elapsed = start.elapsed().as_millis();
         if elapsed < FRAME_TIME_MS {
             Timer::after_millis(FRAME_TIME_MS - elapsed).await;
         } else {

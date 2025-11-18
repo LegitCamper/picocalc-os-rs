@@ -6,16 +6,16 @@ use alloc::{format, vec, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{
     image::ImageDrawable,
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
     prelude::{Point, RgbColor},
     transform::Transform,
 };
-use selection_ui::{draw_text_center, SelectionUi, SelectionUiError};
+use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 use tinygif::Gif;
 use userlib::{
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    fs::{file_len, list_dir, read_file, Entries},
+    fs::{Entries, file_len, list_dir, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
     println, sleep,
@@ -44,7 +44,7 @@ pub fn main() {
     let mut gifs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
     gifs.sort();
 
-    let mut selection_ui = SelectionUi::new(&mut gifs);
+    let mut selection_ui = SelectionUi::new(&gifs);
     let selection = match selection_ui.run_selection_ui(&mut display) {
         Ok(maybe_sel) => maybe_sel,
         Err(e) => match e {
@@ -87,14 +87,9 @@ pub fn main() {
 
             if frame_num % 5 == 0 {
                 let event = get_key();
-                if event.state != KeyState::Idle {
-                    match event.key {
-                        KeyCode::Esc => {
-                            drop(buf);
-                            return;
-                        }
-                        _ => (),
-                    };
+                if event.state != KeyState::Idle && event.key == KeyCode::Esc {
+                    drop(buf);
+                    return;
                 };
             }
             sleep(((frame.delay_centis as u64) * 10).saturating_sub(start));

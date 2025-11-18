@@ -51,9 +51,9 @@ pub fn main() {
 
         println!("file: {}", file);
         if file.extension().unwrap_or("") == "bmp" || file.extension().unwrap_or("") == "BMP" {
-            let file_path = format!("/images/{}", file);
+            let file_path = format!("/images/{file}");
 
-            let read = read_file(&file_path, 0, &mut &mut bmp_buf[..]);
+            let read = read_file(&file_path, 0, &mut bmp_buf[..]);
             if read > 0 {
                 let bmp = Bmp::from_slice(&bmp_buf).expect("failed to parse bmp");
 
@@ -74,7 +74,7 @@ pub fn main() {
 
                 let text_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
                 let text_y = y + bmp_h + 2; // 2px gap under image
-                Text::new(&file.base(), Point::new(cell_x + 2, text_y), text_style)
+                Text::new(file.base(), Point::new(cell_x + 2, text_y), text_style)
                     .draw(&mut display)
                     .unwrap();
 
@@ -85,11 +85,8 @@ pub fn main() {
 
     loop {
         let event = get_key();
-        if event.state != KeyState::Idle {
-            match event.key {
-                KeyCode::Esc => return,
-                _ => (),
-            }
-        };
+        if event.state != KeyState::Idle && event.key == KeyCode::Esc {
+            return;
+        }
     }
 }

@@ -4,18 +4,18 @@
 extern crate alloc;
 use alloc::{string::String, vec::Vec};
 use core::panic::PanicInfo;
-use embedded_audio::{wav::Wav, AudioFile, PlatformFile, PlatformFileError};
+use embedded_audio::{AudioFile, PlatformFile, PlatformFileError, wav::Wav};
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
     prelude::RgbColor,
 };
-use selection_ui::{draw_text_center, SelectionUi, SelectionUiError};
+use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 use userlib::{
-    audio::{audio_buffer_ready, send_audio_buffer, AUDIO_BUFFER_LEN},
+    audio::{AUDIO_BUFFER_LEN, audio_buffer_ready, send_audio_buffer},
     display::Display,
     format,
-    fs::{file_len, list_dir, read_file, Entries},
+    fs::{Entries, file_len, list_dir, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
     println,
@@ -45,7 +45,7 @@ pub fn main() {
         let mut wavs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
         wavs.sort();
 
-        let mut selection_ui = SelectionUi::new(&mut wavs);
+        let mut selection_ui = SelectionUi::new(&wavs);
         let selection = match selection_ui.run_selection_ui(&mut display) {
             Ok(maybe_sel) => maybe_sel,
             Err(e) => match e {
@@ -72,7 +72,7 @@ pub fn main() {
         .expect("Display Error");
 
         let file_name = format!("/music/{}", wavs[selection.unwrap()]);
-        let file = File::new(String::from(file_name));
+        let file = File::new(file_name);
         let mut wav = Wav::new(file).unwrap();
         println!("sample rate: {}", wav.sample_rate());
         println!("channels: {:?}", wav.channels() as u8);
@@ -90,11 +90,8 @@ pub fn main() {
             }
 
             let event = get_key();
-            if event.state == KeyState::Released {
-                match event.key {
-                    KeyCode::Esc => return,
-                    _ => (),
-                }
+            if event.state == KeyState::Released && event.key == KeyCode::Esc {
+                return;
             }
         }
     }

@@ -46,9 +46,9 @@ pub struct CLayout {
 }
 
 #[cfg(feature = "alloc")]
-impl Into<Layout> for CLayout {
-    fn into(self) -> Layout {
-        unsafe { Layout::from_size_align_unchecked(self.size, self.alignment) }
+impl From<CLayout> for Layout {
+    fn from(val: CLayout) -> Self {
+        unsafe { Layout::from_size_align_unchecked(val.size, val.alignment) }
     }
 }
 
@@ -106,7 +106,7 @@ pub extern "C" fn get_ms() -> u64 {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Default, Copy, Clone)]
 pub struct CPixel {
     pub x: i32,
     pub y: i32,
@@ -123,19 +123,22 @@ impl CPixel {
     }
 }
 
-impl Into<CPixel> for Pixel<Rgb565> {
-    fn into(self) -> CPixel {
-        CPixel {
-            x: self.0.x,
-            y: self.0.y,
-            color: self.1.into_storage(),
-        }
+impl From<CPixel> for Pixel<Rgb565> {
+    fn from(value: CPixel) -> Self {
+        Pixel(
+            Point::new(value.x, value.y),
+            RawU16::new(value.color).into(),
+        )
     }
 }
 
-impl Into<Pixel<Rgb565>> for CPixel {
-    fn into(self) -> Pixel<Rgb565> {
-        Pixel(Point::new(self.x, self.y), RawU16::new(self.color).into())
+impl From<Pixel<Rgb565>> for CPixel {
+    fn from(value: Pixel<Rgb565>) -> Self {
+        CPixel {
+            x: value.0.x,
+            y: value.0.y,
+            color: value.1.into_storage(),
+        }
     }
 }
 
@@ -171,12 +174,12 @@ pub mod keyboard {
         pub mods: Modifiers,
     }
 
-    impl Into<KeyEvent> for KeyEventC {
-        fn into(self) -> KeyEvent {
+    impl From<KeyEventC> for KeyEvent {
+        fn from(val: KeyEventC) -> Self {
             KeyEvent {
-                key: self.key.into(),
-                state: self.state,
-                mods: self.mods,
+                key: val.key.into(),
+                state: val.state,
+                mods: val.mods,
             }
         }
     }
@@ -188,12 +191,12 @@ pub mod keyboard {
         pub mods: Modifiers,
     }
 
-    impl Into<KeyEventC> for KeyEvent {
-        fn into(self) -> KeyEventC {
+    impl From<KeyEvent> for KeyEventC {
+        fn from(val: KeyEvent) -> Self {
             KeyEventC {
-                key: self.key.into(),
-                state: self.state,
-                mods: self.mods,
+                key: val.key.into(),
+                state: val.state,
+                mods: val.mods,
             }
         }
     }
@@ -267,9 +270,9 @@ pub mod keyboard {
         Unknown(u8),
     }
 
-    impl Into<u8> for KeyCode {
-        fn into(self) -> u8 {
-            match self {
+    impl From<KeyCode> for u8 {
+        fn from(val: KeyCode) -> Self {
+            match val {
                 KeyCode::JoyUp => 0x01,
                 KeyCode::JoyDown => 0x02,
                 KeyCode::JoyLeft => 0x03,

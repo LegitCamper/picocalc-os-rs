@@ -2,7 +2,6 @@ use crate::{
     BINARY_CH, display::FRAMEBUFFER, elf::load_binary, framebuffer::FB_PAUSED,
     peripherals::keyboard, storage::FileName,
 };
-use userlib_sys::keyboard::{KeyCode, KeyState};
 use alloc::{str::FromStr, string::String, vec::Vec};
 use core::sync::atomic::Ordering;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -20,37 +19,38 @@ use embedded_layout::{
     prelude::*,
 };
 use embedded_text::TextBox;
+use userlib_sys::keyboard::{KeyCode, KeyState};
 
 pub static SELECTIONS: Mutex<CriticalSectionRawMutex, SelectionList> =
     Mutex::new(SelectionList::new());
 
 pub async fn ui_handler() {
     loop {
-        if let Some(event) = keyboard::read_keyboard_fifo().await {
-            if let KeyState::Pressed = event.state {
-                match event.key {
-                    KeyCode::Up => {
-                        let mut selections = SELECTIONS.lock().await;
-                        selections.up();
-                    }
-                    KeyCode::Down => {
-                        let mut selections = SELECTIONS.lock().await;
-                        selections.down();
-                    }
-                    KeyCode::Enter | KeyCode::Right => {
-                        let selections = SELECTIONS.lock().await;
-                        let selection =
-                            selections.selections[selections.current_selection as usize].clone();
-
-                        let entry = unsafe {
-                            load_binary(&selection.short_name)
-                                .await
-                                .expect("unable to load binary")
-                        };
-                        BINARY_CH.send(entry).await;
-                    }
-                    _ => (),
+        if let Some(event) = keyboard::read_keyboard_fifo().await
+            && let KeyState::Pressed = event.state
+        {
+            match event.key {
+                KeyCode::Up => {
+                    let mut selections = SELECTIONS.lock().await;
+                    selections.up();
                 }
+                KeyCode::Down => {
+                    let mut selections = SELECTIONS.lock().await;
+                    selections.down();
+                }
+                KeyCode::Enter | KeyCode::Right => {
+                    let selections = SELECTIONS.lock().await;
+                    let selection =
+                        selections.selections[selections.current_selection as usize].clone();
+
+                    let entry = unsafe {
+                        load_binary(&selection.short_name)
+                            .await
+                            .expect("unable to load binary")
+                    };
+                    BINARY_CH.send(entry).await;
+                }
+                _ => (),
             }
         }
 

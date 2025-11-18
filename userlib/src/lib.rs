@@ -228,6 +228,12 @@ pub mod fs {
     #[derive(Clone, Copy, Debug)]
     pub struct Entries([[u8; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES]);
 
+    impl Default for Entries {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl Entries {
         pub fn new() -> Self {
             Self([[0; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES])

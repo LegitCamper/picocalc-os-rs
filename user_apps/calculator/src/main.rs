@@ -83,7 +83,7 @@ pub fn main() {
             .align_to(&display.bounding_box(), horizontal::Left, vertical::Center);
 
             let result = if let Ok(result) = evaluate(&input[input_min..]) {
-                &format!(" = {}", result)
+                &format!(" = {result}")
             } else {
                 " = Error"
             };

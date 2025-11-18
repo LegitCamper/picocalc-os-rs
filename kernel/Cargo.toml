@@ -11,7 +11,7 @@ doctest = false
 bench = false
 
 [features]
-default = ["rp235x", "defmt"]
+default = ["rp235x"]
 pimoroni2w = ["rp235x", "psram"]
 # rp2040 = ["embassy-rp/rp2040"] # unsupported, ram too small for fb
 rp235x = ["embassy-rp/rp235xb"]

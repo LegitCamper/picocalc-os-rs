@@ -35,7 +35,7 @@ pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
 
         #[cfg(not(feature = "psram"))]
         {
-            return alloc::alloc::alloc(layout.into());
+            alloc::alloc::alloc(layout.into())
         }
     }
 }
@@ -134,7 +134,7 @@ unsafe fn copy_entry_to_user_buf(name: &[u8], dest: *mut c_char, max_str_len: us
     if !dest.is_null() {
         let len = name.len().min(max_str_len - 1);
         unsafe {
-            ptr::copy_nonoverlapping(name.as_ptr(), dest as *mut u8, len);
+            ptr::copy_nonoverlapping(name.as_ptr(), dest, len);
             *dest.add(len) = 0; // nul terminator
         }
     }
@@ -191,7 +191,7 @@ pub extern "C" fn list_dir(
 
     let mut wrote = 0;
     sd.access_root_dir(|root| {
-        if dirs[0] == "" && dirs.len() >= 2 {
+        if dirs[0].is_empty() && dirs.len() >= 2 {
             unsafe {
                 if dir == "/" {
                     wrote = get_dir_entries(&root, files, max_entry_str_len);
@@ -214,10 +214,10 @@ fn recurse_file<T>(
         let mut buf = LfnBuffer::new(&mut b);
         let mut short_name = None;
         dir.iterate_dir_lfn(&mut buf, |entry, name| {
-            if let Some(name) = name {
-                if name == dirs[0] || entry.name.to_string().as_str() == dirs[0] {
-                    short_name = Some(entry.name.clone());
-                }
+            if let Some(name) = name
+                && (name == dirs[0] || entry.name.to_string().as_str() == dirs[0])
+            {
+                short_name = Some(entry.name.clone());
             }
         })
         .expect("Failed to iterate dir");
@@ -257,7 +257,7 @@ pub extern "C" fn read_file(
     }
 
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
-    let mut buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
+    let buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
 
     let mut read = 0;
 
@@ -267,7 +267,7 @@ pub extern "C" fn read_file(
         sd.access_root_dir(|root| {
             if let Ok(result) = recurse_file(&root, &components[1..count], |file| {
                 file.seek_from_start(start_from as u32).unwrap_or(());
-                file.read(&mut buf).unwrap()
+                file.read(buf).unwrap()
             }) {
                 read = result
             };
@@ -306,7 +306,7 @@ pub extern "C" fn write_file(
         sd.access_root_dir(|root| {
             recurse_file(&root, &components[1..count], |file| {
                 file.seek_from_start(start_from as u32).unwrap();
-                file.write(&buf).unwrap()
+                file.write(buf).unwrap()
             })
             .unwrap_or(())
         });
@@ -343,7 +343,9 @@ pub extern "C" fn send_audio_buffer(ptr: *const u8, len: usize) {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let buf = unsafe { core::slice::from_raw_parts(ptr, len) };
 
-    while !AUDIO_BUFFER_READY.load(Ordering::Acquire) {}
+    while !AUDIO_BUFFER_READY.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
 
     if buf.len() == AUDIO_BUFFER_SAMPLES * 2 {
         AUDIO_BUFFER_READY.store(false, Ordering::Release);
