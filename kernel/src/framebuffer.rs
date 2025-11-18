@@ -261,14 +261,15 @@ impl<'a> AtomicFrameBuffer<'a> {
                 // Check for dirty tile
                 if self.dirty_tiles[row_start_idx + col].swap(false, Ordering::Acquire) {
                     let run_start = col;
+                    let mut scan_col = col;
                     let mut run_len = 1;
 
                     // Extend run while contiguous dirty tiles and within MAX_BATCH_TILES
-                    while col + 1 < NUM_TILE_COLS
+                    while scan_col + 1 < NUM_TILE_COLS
                         && self.dirty_tiles[row_start_idx + col + 1].load(Ordering::Acquire)
                         && run_len < MAX_BATCH_TILES
                     {
-                        col += 1;
+                        scan_col += 1;
                         run_len += 1;
                     }
 
@@ -293,6 +294,8 @@ impl<'a> AtomicFrameBuffer<'a> {
                             &self.batch_tile_buf[..run_len * TILE_SIZE * TILE_SIZE],
                         )
                         .await?;
+
+                    col = scan_col;
                 }
 
                 col += 1;
@@ -346,10 +349,9 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
             }
         }
 
-        if changed
-            && let Some(rect) = dirty_rect {
-                self.mark_tiles_dirty(rect);
-            }
+        if changed && let Some(rect) = dirty_rect {
+            self.mark_tiles_dirty(rect);
+        }
 
         Ok(())
     }
@@ -411,7 +413,10 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
             0,
             self.size().width as u16 - 1,
             self.size().height as u16 - 1,
-            core::iter::repeat_n(RawU16::from(color).into_inner(), (self.size().width * self.size().height) as usize),
+            core::iter::repeat_n(
+                RawU16::from(color).into_inner(),
+                (self.size().width * self.size().height) as usize,
+            ),
         )?;
 
         for tile in self.dirty_tiles.iter() {
