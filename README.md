@@ -1,7 +1,7 @@
 # PicoCalc OS (Rust)
 
 A simple kernel and applications for the **Clockwork PicoCalc**, written in Rust.  
-This project provides a minimal kernel, ABI, and user-space applications to experiment with OS development on constrained hardware.
+This project provides a minimal kernel, syscall table, and user-space applications to experiment with kernel development on constrained hardware.
 
 ## Status
 

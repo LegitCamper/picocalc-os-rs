@@ -1,14 +1,14 @@
 use alloc::{string::ToString, vec::Vec};
 use core::{ffi::c_char, ptr, sync::atomic::Ordering};
-use embassy_rp::clocks::{clk_sys_freq, RoscRng};
+use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
 use userlib_sys::{
-    keyboard::*, AllocAbi, AudioBufferReady, CLayout, CPixel, DeallocAbi, DrawIterAbi, FileLen,
-    GenRand, GetMsAbi, ListDir, PrintAbi, ReadFile, RngRequest, SendAudioBuffer, SleepMsAbi,
-    WriteFile, AUDIO_BUFFER_SAMPLES,
+    AUDIO_BUFFER_SAMPLES, Alloc, AudioBufferReady, CLayout, CPixel, Dealloc, DrawIter, FileLen,
+    GenRand, GetMs, ListDir, Print, ReadFile, RngRequest, SendAudioBuffer, SleepMs, WriteFile,
+    keyboard::*,
 };
 
 #[cfg(feature = "psram")]
@@ -24,7 +24,7 @@ use crate::{
     storage::{Dir, File, SDCARD},
 };
 
-const _: AllocAbi = alloc;
+const _: Alloc = alloc;
 pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
     // SAFETY: caller guarantees layout is valid
     unsafe {
@@ -40,7 +40,7 @@ pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
     }
 }
 
-const _: DeallocAbi = dealloc;
+const _: Dealloc = dealloc;
 pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
     // SAFETY: caller guarantees ptr and layout are valid
     #[cfg(feature = "psram")]
@@ -54,7 +54,7 @@ pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
     }
 }
 
-const _: PrintAbi = print;
+const _: Print = print;
 pub extern "C" fn print(ptr: *const u8, len: usize) {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let slice = unsafe { core::slice::from_raw_parts(ptr, len) };
@@ -68,7 +68,7 @@ pub extern "C" fn print(ptr: *const u8, len: usize) {
     }
 }
 
-const _: SleepMsAbi = sleep;
+const _: SleepMs = sleep;
 pub extern "C" fn sleep(ms: u64) {
     let cycles_per_ms = clk_sys_freq() / 1000;
     let total_cycles = ms * cycles_per_ms as u64;
@@ -80,14 +80,14 @@ pub extern "C" fn sleep(ms: u64) {
 
 pub static mut MS_SINCE_LAUNCH: Option<Instant> = None;
 
-const _: GetMsAbi = get_ms;
+const _: GetMs = get_ms;
 pub extern "C" fn get_ms() -> u64 {
     Instant::now()
         .duration_since(unsafe { MS_SINCE_LAUNCH.unwrap() })
         .as_millis()
 }
 
-const _: DrawIterAbi = draw_iter;
+const _: DrawIter = draw_iter;
 pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
     // SAFETY: caller guarantees `ptr` is valid for `len` bytes
     let cpixels = unsafe { core::slice::from_raw_parts(cpixels, len) };
@@ -101,7 +101,7 @@ pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
 
 pub static mut KEY_CACHE: Queue<KeyEvent, 32> = Queue::new();
 
-const _: GetKeyAbi = get_key;
+const _: GetKey = get_key;
 pub extern "C" fn get_key() -> KeyEventC {
     if let Some(event) = unsafe { KEY_CACHE.dequeue() } {
         event.into()

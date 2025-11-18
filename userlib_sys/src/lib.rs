@@ -12,12 +12,12 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const ABI_CALL_TABLE_COUNT: usize = 14;
-const _: () = assert!(ABI_CALL_TABLE_COUNT == CallTable::COUNT);
+pub const SYS_CALL_TABLE_COUNT: usize = 14;
+const _: () = assert!(SYS_CALL_TABLE_COUNT == SyscallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
 #[repr(u8)]
-pub enum CallTable {
+pub enum SyscallTable {
     Alloc = 0,
     Dealloc = 1,
     PrintString = 2,
@@ -36,7 +36,7 @@ pub enum CallTable {
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".syscall_table")]
-pub static mut CALL_ABI_TABLE: [usize; ABI_CALL_TABLE_COUNT] = [0; ABI_CALL_TABLE_COUNT];
+pub static mut SYS_CALL_TABLE: [usize; SYS_CALL_TABLE_COUNT] = [0; SYS_CALL_TABLE_COUNT];
 
 #[cfg(feature = "alloc")]
 #[repr(C)]
@@ -62,46 +62,46 @@ impl From<Layout> for CLayout {
     }
 }
 
-pub type AllocAbi = extern "C" fn(layout: CLayout) -> *mut u8;
+pub type Alloc = extern "C" fn(layout: CLayout) -> *mut u8;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn alloc(layout: CLayout) -> *mut u8 {
-    let f: AllocAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::Alloc as usize]) };
+    let f: Alloc = unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::Alloc as usize]) };
     f(layout)
 }
 
-pub type DeallocAbi = extern "C" fn(ptr: *mut u8, layout: CLayout);
+pub type Dealloc = extern "C" fn(ptr: *mut u8, layout: CLayout);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dealloc(ptr: *mut u8, layout: CLayout) {
-    let f: DeallocAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::Dealloc as usize]) };
+    let f: Dealloc =
+        unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::Dealloc as usize]) };
     f(ptr, layout)
 }
 
-pub type PrintAbi = extern "C" fn(ptr: *const u8, len: usize);
+pub type Print = extern "C" fn(ptr: *const u8, len: usize);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn print(ptr: *const u8, len: usize) {
-    let f: PrintAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::PrintString as usize]) };
+    let f: Print =
+        unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::PrintString as usize]) };
     f(ptr, len);
 }
 
-pub type SleepMsAbi = extern "C" fn(ms: u64);
+pub type SleepMs = extern "C" fn(ms: u64);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sleep(ms: u64) {
-    let f: SleepMsAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::SleepMs as usize]) };
+    let f: SleepMs =
+        unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::SleepMs as usize]) };
     f(ms);
 }
 
-pub type GetMsAbi = extern "C" fn() -> u64;
+pub type GetMs = extern "C" fn() -> u64;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn get_ms() -> u64 {
-    let f: GetMsAbi = unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::GetMs as usize]) };
+    let f: GetMs = unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::GetMs as usize]) };
     f()
 }
 
@@ -139,17 +139,17 @@ impl Into<Pixel<Rgb565>> for CPixel {
     }
 }
 
-pub type DrawIterAbi = extern "C" fn(ptr: *const CPixel, len: usize);
+pub type DrawIter = extern "C" fn(ptr: *const CPixel, len: usize);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn draw_iter(ptr: *const CPixel, len: usize) {
-    let f: DrawIterAbi =
-        unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::DrawIter as usize]) };
+    let f: DrawIter =
+        unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::DrawIter as usize]) };
     f(ptr, len);
 }
 
 pub mod keyboard {
-    use crate::{CALL_ABI_TABLE, CallTable};
+    use crate::{SYS_CALL_TABLE, SyscallTable};
 
     bitflags::bitflags! {
         #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
@@ -367,12 +367,12 @@ pub mod keyboard {
         }
     }
 
-    pub type GetKeyAbi = extern "C" fn() -> KeyEventC;
+    pub type GetKey = extern "C" fn() -> KeyEventC;
 
     #[unsafe(no_mangle)]
     pub extern "C" fn get_key() -> KeyEventC {
-        let f: GetKeyAbi =
-            unsafe { core::mem::transmute(CALL_ABI_TABLE[CallTable::GetKey as usize]) };
+        let f: GetKey =
+            unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::GetKey as usize]) };
         f()
     }
 }
@@ -389,7 +389,7 @@ pub type GenRand = extern "C" fn(req: &mut RngRequest);
 #[unsafe(no_mangle)]
 pub extern "C" fn gen_rand(req: &mut RngRequest) {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::GenRand as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::GenRand as usize];
         let f: GenRand = core::mem::transmute(ptr);
         f(req)
     }
@@ -412,7 +412,7 @@ pub extern "C" fn list_dir(
     max_entry_str_len: usize,
 ) -> usize {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::ListDir as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::ListDir as usize];
         let f: ListDir = core::mem::transmute(ptr);
         f(str, len, entries, entry_count, max_entry_str_len)
     }
@@ -435,7 +435,7 @@ pub extern "C" fn read_file(
     buf_len: usize,
 ) -> usize {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::ReadFile as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::ReadFile as usize];
         let f: ReadFile = core::mem::transmute(ptr);
         f(str, len, read_from, buf, buf_len)
     }
@@ -453,7 +453,7 @@ pub extern "C" fn write_file(
     buf_len: usize,
 ) {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::WriteFile as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::WriteFile as usize];
         let f: WriteFile = core::mem::transmute(ptr);
         f(str, len, write_from, buf, buf_len)
     }
@@ -464,7 +464,7 @@ pub type FileLen = extern "C" fn(str: *const u8, len: usize) -> usize;
 #[unsafe(no_mangle)]
 pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::FileLen as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::FileLen as usize];
         let f: FileLen = core::mem::transmute(ptr);
         f(str, len)
     }
@@ -475,7 +475,7 @@ pub type AudioBufferReady = extern "C" fn() -> bool;
 #[allow(unused)]
 pub fn audio_buffer_ready() -> bool {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::AudioBufferReady as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::AudioBufferReady as usize];
         let f: AudioBufferReady = core::mem::transmute(ptr);
         f()
     }
@@ -489,7 +489,7 @@ pub type SendAudioBuffer = extern "C" fn(ptr: *const u8, len: usize);
 #[allow(unused)]
 pub fn send_audio_buffer(buf: *const u8, len: usize) {
     unsafe {
-        let ptr = CALL_ABI_TABLE[CallTable::SendAudioBuffer as usize];
+        let ptr = SYS_CALL_TABLE[SyscallTable::SendAudioBuffer as usize];
         let f: SendAudioBuffer = core::mem::transmute(ptr);
         f(buf, len)
     }

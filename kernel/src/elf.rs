@@ -1,8 +1,7 @@
 use crate::{
-    abi,
     storage::{File, SDCARD},
+    syscalls,
 };
-use userlib_sys::{CallTable, EntryFn};
 use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
 use core::ptr;
@@ -17,6 +16,7 @@ use goblin::{
     elf32::{header, reloc::Rel, section_header::SectionHeader, sym::Sym},
 };
 use strum::IntoEnumIterator;
+use userlib_sys::{EntryFn, SyscallTable};
 
 const ELF32_HDR_SIZE: usize = 52;
 
@@ -70,7 +70,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
                 }
             }
 
-            patch_abi(&elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
+            patch_syscalls(&elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
 
             // entry pointer is base_ptr + (entry - min_vaddr)
             let entry_ptr: EntryFn = unsafe {
@@ -150,7 +150,7 @@ fn apply_relocations(
     Ok(())
 }
 
-fn patch_abi(
+fn patch_syscalls(
     elf_header: &Header,
     base: *mut u8,
     min_vaddr: u32,
@@ -188,27 +188,27 @@ fn patch_abi(
                 }
 
                 let symbol_name = core::str::from_utf8(&name).unwrap();
-                if symbol_name == "CALL_ABI_TABLE" {
+                if symbol_name == stringify!(SYS_CALL_TABLE) {
                     let table_base =
                         unsafe { base.add((sym.st_value as usize) - min_vaddr as usize) }
                             as *mut usize;
 
-                    for (idx, call) in CallTable::iter().enumerate() {
+                    for (idx, call) in SyscallTable::iter().enumerate() {
                         let ptr = match call {
-                            CallTable::Alloc => abi::alloc as usize,
-                            CallTable::Dealloc => abi::dealloc as usize,
-                            CallTable::PrintString => abi::print as usize,
-                            CallTable::SleepMs => abi::sleep as usize,
-                            CallTable::GetMs => abi::get_ms as usize,
-                            CallTable::DrawIter => abi::draw_iter as usize,
-                            CallTable::GetKey => abi::get_key as usize,
-                            CallTable::GenRand => abi::gen_rand as usize,
-                            CallTable::ListDir => abi::list_dir as usize,
-                            CallTable::ReadFile => abi::read_file as usize,
-                            CallTable::WriteFile => abi::write_file as usize,
-                            CallTable::FileLen => abi::file_len as usize,
-                            CallTable::AudioBufferReady => abi::audio_buffer_ready as usize,
-                            CallTable::SendAudioBuffer => abi::send_audio_buffer as usize,
+                            SyscallTable::Alloc => syscalls::alloc as usize,
+                            SyscallTable::Dealloc => syscalls::dealloc as usize,
+                            SyscallTable::PrintString => syscalls::print as usize,
+                            SyscallTable::SleepMs => syscalls::sleep as usize,
+                            SyscallTable::GetMs => syscalls::get_ms as usize,
+                            SyscallTable::DrawIter => syscalls::draw_iter as usize,
+                            SyscallTable::GetKey => syscalls::get_key as usize,
+                            SyscallTable::GenRand => syscalls::gen_rand as usize,
+                            SyscallTable::ListDir => syscalls::list_dir as usize,
+                            SyscallTable::ReadFile => syscalls::read_file as usize,
+                            SyscallTable::WriteFile => syscalls::write_file as usize,
+                            SyscallTable::FileLen => syscalls::file_len as usize,
+                            SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
+                            SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
                         };
                         unsafe {
                             table_base.add(idx as usize).write(ptr);

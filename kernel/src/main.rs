@@ -8,7 +8,6 @@
 
 extern crate alloc;
 
-mod abi;
 mod audio;
 mod display;
 mod elf;
@@ -16,6 +15,7 @@ mod framebuffer;
 mod peripherals;
 mod scsi;
 mod storage;
+mod syscalls;
 mod ui;
 mod usb;
 mod utils;
@@ -31,12 +31,12 @@ mod psram;
 use crate::{heap::HEAP, heap::init_qmi_psram_heap, psram::init_psram, psram::init_psram_qmi};
 
 use crate::{
-    abi::{KEY_CACHE, MS_SINCE_LAUNCH},
     audio::audio_handler,
     display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
+    syscalls::{KEY_CACHE, MS_SINCE_LAUNCH},
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
 use bumpalo::Bump;
