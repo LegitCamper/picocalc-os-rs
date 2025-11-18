@@ -6,8 +6,8 @@ extern crate alloc;
 pub use alloc::format;
 use core::alloc::{GlobalAlloc, Layout};
 use rand_core::RngCore;
+use userlib_sys::{RngRequest, keyboard::KeyEvent};
 pub use userlib_sys::{keyboard, print};
-use userlib_sys::{keyboard::KeyEvent, RngRequest};
 
 #[global_allocator]
 static ALLOC: Alloc = Alloc;
@@ -48,11 +48,11 @@ pub mod display {
     use core::sync::atomic::{AtomicBool, Ordering};
 
     use embedded_graphics::{
+        Pixel,
         geometry::{Dimensions, Point},
         pixelcolor::Rgb565,
         prelude::{DrawTarget, Size},
         primitives::Rectangle,
-        Pixel,
     };
     use userlib_sys::CPixel;
 
@@ -269,7 +269,7 @@ pub mod fs {
 }
 
 pub mod audio {
-    pub use userlib_sys::{audio_buffer_ready, AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES};
+    pub use userlib_sys::{AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES, audio_buffer_ready};
 
     pub fn send_audio_buffer(buf: &[u8]) {
         userlib_sys::send_audio_buffer(buf.as_ptr(), buf.len())

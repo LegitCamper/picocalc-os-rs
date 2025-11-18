@@ -39,7 +39,6 @@ use crate::{
     storage::{SDCARD, SdCard},
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
-use userlib_sys::EntryFn;
 use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
@@ -73,6 +72,7 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
 use static_cell::StaticCell;
 use talc::*;
+use userlib_sys::EntryFn;
 use {defmt_rtt as _, panic_probe as _};
 
 embassy_rp::bind_interrupts!(struct Irqs {
