@@ -204,6 +204,9 @@ fn patch_syscalls(
                             SyscallTable::ReadFile => syscalls::read_file as usize,
                             SyscallTable::WriteFile => syscalls::write_file as usize,
                             SyscallTable::FileLen => syscalls::file_len as usize,
+                            SyscallTable::ReconfigureAudioSampleRate => {
+                                syscalls::reconfigure_audio_sample_rate as usize
+                            }
                             SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
                             SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
                         };

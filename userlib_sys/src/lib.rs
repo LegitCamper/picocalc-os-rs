@@ -12,7 +12,7 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const SYS_CALL_TABLE_COUNT: usize = 14;
+pub const SYS_CALL_TABLE_COUNT: usize = 15;
 const _: () = assert!(SYS_CALL_TABLE_COUNT == SyscallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
@@ -30,8 +30,9 @@ pub enum SyscallTable {
     ReadFile = 9,
     WriteFile = 10,
     FileLen = 11,
-    AudioBufferReady = 12,
-    SendAudioBuffer = 13,
+    ReconfigureAudioSampleRate = 12,
+    AudioBufferReady = 13,
+    SendAudioBuffer = 14,
 }
 
 #[unsafe(no_mangle)]
@@ -470,6 +471,17 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
         let ptr = SYS_CALL_TABLE[SyscallTable::FileLen as usize];
         let f: FileLen = core::mem::transmute(ptr);
         f(str, len)
+    }
+}
+
+pub type ReconfigureAudioSampleRate = extern "C" fn(sample_rate: u32);
+
+#[allow(unused)]
+pub fn reconfigure_audio_sample_rate(sample_rate: u32) {
+    unsafe {
+        let ptr = SYS_CALL_TABLE[SyscallTable::ReconfigureAudioSampleRate as usize];
+        let f: ReconfigureAudioSampleRate = core::mem::transmute(ptr);
+        f(sample_rate)
     }
 }
 

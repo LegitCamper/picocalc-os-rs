@@ -7,8 +7,8 @@ use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
 use userlib_sys::{
     AUDIO_BUFFER_SAMPLES, Alloc, AudioBufferReady, CLayout, CPixel, Dealloc, DrawIter, FileLen,
-    GenRand, GetMs, ListDir, Print, ReadFile, RngRequest, SendAudioBuffer, SleepMs, WriteFile,
-    keyboard::*,
+    GenRand, GetMs, ListDir, Print, ReadFile, ReconfigureAudioSampleRate, RngRequest,
+    SendAudioBuffer, SleepMs, WriteFile, keyboard::*,
 };
 
 #[cfg(feature = "psram")]
@@ -18,7 +18,7 @@ use crate::heap::HEAP;
 use core::alloc::GlobalAlloc;
 
 use crate::{
-    audio::{AUDIO_BUFFER, AUDIO_BUFFER_READY, AUDIO_BUFFER_WRITTEN},
+    audio::{AUDIO_BUFFER, AUDIO_BUFFER_READY, AUDIO_BUFFER_SAMPLE_RATE, AUDIO_BUFFER_WRITTEN},
     display::FRAMEBUFFER,
     framebuffer::FB_PAUSED,
     storage::{Dir, File, SDCARD},
@@ -331,6 +331,11 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
         });
     }
     len as usize
+}
+
+const _: ReconfigureAudioSampleRate = reconfigure_audio_sample_rate;
+pub extern "C" fn reconfigure_audio_sample_rate(sample_rate: u32) {
+    AUDIO_BUFFER_SAMPLE_RATE.store(sample_rate, Ordering::Release);
 }
 
 const _: AudioBufferReady = audio_buffer_ready;

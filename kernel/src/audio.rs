@@ -1,5 +1,5 @@
 use crate::Audio;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use embassy_futures::{join::join, yield_now};
 use embassy_rp::{
     Peri,
@@ -23,9 +23,12 @@ const SILENCE: u8 = u8::MAX / 2;
 pub static mut AUDIO_BUFFER: [u8; AUDIO_BUFFER_SAMPLES * 2] = [SILENCE; AUDIO_BUFFER_SAMPLES * 2];
 static mut AUDIO_BUFFER_1: [u8; AUDIO_BUFFER_SAMPLES * 2] = [SILENCE; AUDIO_BUFFER_SAMPLES * 2];
 
+// atomics for user applications to signal changes to audio buffers
 pub static AUDIO_BUFFER_READY: AtomicBool = AtomicBool::new(true);
 pub static AUDIO_BUFFER_WRITTEN: AtomicBool = AtomicBool::new(false);
+pub static AUDIO_BUFFER_SAMPLE_RATE: AtomicU32 = AtomicU32::new(SAMPLE_RATE_HZ);
 
+/// resets audio buffers after user applications are unloaded
 pub fn clear_audio_buffers() {
     unsafe {
         AUDIO_BUFFER.fill(SILENCE);
@@ -41,8 +44,29 @@ pub async fn audio_handler(mut audio: Audio) {
     let mut pwm_pio_right =
         PioPwmAudio::new(audio.dma1, &mut audio.pio, audio.sm1, audio.right, &prg);
 
+    // enable sms at the same time to ensure they are synced
+    audio.pio.apply_sm_batch(|pio| {
+        pio.set_enable(&mut pwm_pio_right.sm, true);
+        pio.set_enable(&mut pwm_pio_left.sm, true);
+    });
+
+    let mut sample_rate = SAMPLE_RATE_HZ;
+
     loop {
         unsafe {
+            let new_sample_rate = AUDIO_BUFFER_SAMPLE_RATE.load(Ordering::Acquire);
+            if new_sample_rate != sample_rate {
+                sample_rate = new_sample_rate;
+                pwm_pio_left.reconfigure(sample_rate);
+                pwm_pio_right.reconfigure(sample_rate);
+
+                // restart sms at the same time to ensure they are synced
+                audio.pio.apply_sm_batch(|pio| {
+                    pio.restart(&mut pwm_pio_right.sm);
+                    pio.restart(&mut pwm_pio_left.sm);
+                });
+            }
+
             if AUDIO_BUFFER_WRITTEN.load(Ordering::Acquire) {
                 write_samples(&mut pwm_pio_left, &mut pwm_pio_right, &AUDIO_BUFFER_1).await;
                 AUDIO_BUFFER_1.fill(SILENCE);
@@ -130,6 +154,11 @@ struct PioPwmAudio<'d, PIO: Instance, const SM: usize> {
 }
 
 impl<'d, PIO: Instance, const SM: usize> PioPwmAudio<'d, PIO, SM> {
+    fn get_sm_divider(sample_rate: u32) -> u32 {
+        let target_clock = (u8::MAX as u32 + 1) * sample_rate;
+        clk_sys_freq() / target_clock
+    }
+
     fn new(
         dma: Peri<'d, impl Channel>,
         pio: &mut Common<'d, PIO>,
@@ -151,16 +180,17 @@ impl<'d, PIO: Instance, const SM: usize> PioPwmAudio<'d, PIO, SM> {
         cfg.use_program(&prg.0, &[&pin]);
         sm.set_config(&cfg);
 
-        let target_clock = (u8::MAX as u32 + 1) * SAMPLE_RATE_HZ;
-        let divider = (clk_sys_freq() / target_clock).to_fixed();
-        sm.set_clock_divider(divider);
-
-        sm.set_enable(true);
+        sm.set_clock_divider(Self::get_sm_divider(SAMPLE_RATE_HZ).to_fixed());
 
         Self {
             dma: dma.into(),
             sm,
         }
+    }
+
+    fn reconfigure(&mut self, sample_rate: u32) {
+        self.sm
+            .set_clock_divider(Self::get_sm_divider(sample_rate).to_fixed());
     }
 }
 
