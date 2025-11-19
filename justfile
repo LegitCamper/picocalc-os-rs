@@ -1,9 +1,9 @@
 target := "thumbv8m.main-none-eabihf"
 
 kernel-dev board:
-    cargo run --bin kernel --features {{board}}  --features fps
+    cargo run --bin kernel --features {{board}}  --features fps --features defmt
 kernel-release-probe board:
-    cargo run --bin kernel --profile release --features {{board}}  --features fps
+    cargo run --bin kernel --profile release --features {{board}} --features fps
 kernel-release board:
     cargo build --bin kernel --release --no-default-features --features {{board}}
     elf2uf2-rs -d target/{{target}}/release/kernel

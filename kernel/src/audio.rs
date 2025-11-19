@@ -1,6 +1,6 @@
 use crate::Audio;
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::join::join;
+use embassy_futures::{join::join, yield_now};
 use embassy_rp::{
     Peri,
     clocks::clk_sys_freq,
@@ -17,16 +17,16 @@ pub const SAMPLE_RATE_HZ: u32 = 22_050;
 const AUDIO_BUFFER_SAMPLES: usize = 1024;
 const _: () = assert!(AUDIO_BUFFER_SAMPLES == userlib_sys::AUDIO_BUFFER_SAMPLES);
 
+const SILENCE: u8 = u8::MAX / 2;
+
 // 8bit stereo interleaved PCM audio buffers
-pub static mut AUDIO_BUFFER: [u8; AUDIO_BUFFER_SAMPLES * 2] = [0; AUDIO_BUFFER_SAMPLES * 2];
-static mut AUDIO_BUFFER_1: [u8; AUDIO_BUFFER_SAMPLES * 2] = [0; AUDIO_BUFFER_SAMPLES * 2];
+pub static mut AUDIO_BUFFER: [u8; AUDIO_BUFFER_SAMPLES * 2] = [SILENCE; AUDIO_BUFFER_SAMPLES * 2];
+static mut AUDIO_BUFFER_1: [u8; AUDIO_BUFFER_SAMPLES * 2] = [SILENCE; AUDIO_BUFFER_SAMPLES * 2];
 
 pub static AUDIO_BUFFER_READY: AtomicBool = AtomicBool::new(true);
 
 #[embassy_executor::task]
 pub async fn audio_handler(mut audio: Audio) {
-    const SILENCE_VALUE: u8 = u8::MAX / 2;
-
     let prg = PioPwmAudioProgram8Bit::new(&mut audio.pio);
     let mut pwm_pio_left =
         PioPwmAudio::new(audio.dma0, &mut audio.pio, audio.sm0, audio.left, &prg);
@@ -34,14 +34,16 @@ pub async fn audio_handler(mut audio: Audio) {
         PioPwmAudio::new(audio.dma1, &mut audio.pio, audio.sm1, audio.right, &prg);
 
     loop {
-        write_samples(&mut pwm_pio_left, &mut pwm_pio_right, unsafe {
-            &AUDIO_BUFFER_1
-        })
-        .await;
-        unsafe { &mut AUDIO_BUFFER_1 }.fill(SILENCE_VALUE);
-
-        unsafe { core::mem::swap(&mut AUDIO_BUFFER, &mut AUDIO_BUFFER_1) };
-        AUDIO_BUFFER_READY.store(true, Ordering::Release)
+        unsafe {
+            // if AUDIO_BUFFER.iter().any(|s| *s != SILENCE) {
+            write_samples(&mut pwm_pio_left, &mut pwm_pio_right, &AUDIO_BUFFER_1).await;
+            AUDIO_BUFFER_1.fill(SILENCE);
+            core::mem::swap(&mut AUDIO_BUFFER, &mut AUDIO_BUFFER_1);
+            AUDIO_BUFFER_READY.store(true, Ordering::Release)
+            // } else {
+            //     yield_now().await;
+            // }
+        }
     }
 }
 
@@ -81,17 +83,27 @@ struct PioPwmAudioProgram8Bit<'d, PIO: Instance>(LoadedProgram<'d, PIO>);
 /// Writes one sample to pwm as high and low time
 impl<'d, PIO: Instance> PioPwmAudioProgram8Bit<'d, PIO> {
     fn new(common: &mut Common<'d, PIO>) -> Self {
-        // only uses 16 bits top for high, bottom for low
-        // allows two samples per word
+        // only uses 16 bits top for pwm high, bottom for pwm low
+        // allows storing two samples per word
         let prg = pio_asm!(
-            "out x, 8", // pwm high time
-            "out y, 8", // pwm low time
+            ".side_set 1",
+
+            "check:",
+            // "set x, 0 side 1",
+            // "set y, 0 side 0",
+            "pull ifempty noblock side 1", // gets new osr or loads 0 into x, gets second sample if osr not empty
+            "out x, 8 side 0", // pwm high time
+            "out y, 8 side 1", // pwm low time
+            "jmp x!=y play_sample side 0", // x & y are never equal unless osr was empty
+            // play silence for 10 cycles
+            "set x, 5 side 1",
+            "set y, 5 side 0",
+
+            "play_sample:"
             "loop_high:",
-            "set pins, 1",       // keep pin high
-            "jmp x-- loop_high", // decrement X until 0
+            "jmp x-- loop_high side 1", // keep pwm high, decrement X until 0
             "loop_low:",
-            "set pins, 0",      // keep pin low
-            "jmp y-- loop_low", // decrement Y until 0
+            "jmp y-- loop_low side 0", // keep pwm low, decrement Y until 0
         );
 
         let prg = common.load_program(&prg.program);
@@ -121,15 +133,15 @@ impl<'d, PIO: Instance, const SM: usize> PioPwmAudio<'d, PIO, SM> {
         cfg.set_set_pins(&[&pin]);
         cfg.fifo_join = FifoJoin::TxOnly;
         let shift_cfg = ShiftConfig {
-            auto_fill: true,
+            auto_fill: false,
             ..Default::default()
         };
         cfg.shift_out = shift_cfg;
-        cfg.use_program(&prg.0, &[]);
+        cfg.use_program(&prg.0, &[&pin]);
         sm.set_config(&cfg);
 
         let target_clock = (u8::MAX as u32 + 1) * SAMPLE_RATE_HZ;
-        let divider = (clk_sys_freq() / (target_clock * 2)).to_fixed();
+        let divider = (clk_sys_freq() / target_clock).to_fixed();
         sm.set_clock_divider(divider);
 
         sm.set_enable(true);
