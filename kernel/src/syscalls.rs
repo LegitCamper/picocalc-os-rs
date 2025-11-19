@@ -18,7 +18,7 @@ use crate::heap::HEAP;
 use core::alloc::GlobalAlloc;
 
 use crate::{
-    audio::{AUDIO_BUFFER, AUDIO_BUFFER_READY},
+    audio::{AUDIO_BUFFER, AUDIO_BUFFER_READY, AUDIO_BUFFER_WRITTEN},
     display::FRAMEBUFFER,
     framebuffer::FB_PAUSED,
     storage::{Dir, File, SDCARD},
@@ -350,6 +350,7 @@ pub extern "C" fn send_audio_buffer(ptr: *const u8, len: usize) {
     if buf.len() == AUDIO_BUFFER_SAMPLES * 2 {
         AUDIO_BUFFER_READY.store(false, Ordering::Release);
         unsafe { AUDIO_BUFFER.copy_from_slice(buf) };
+        AUDIO_BUFFER_WRITTEN.store(true, Ordering::Release);
     } else {
         #[cfg(feature = "defmt")]
         defmt::warn!(

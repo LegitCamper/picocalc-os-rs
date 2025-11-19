@@ -35,7 +35,7 @@ mod psram;
 use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
-    audio::audio_handler,
+    audio::{AUDIO_BUFFER_WRITTEN, audio_handler, clear_audio_buffers},
     display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
     scsi::MSC_SHUTDOWN,
@@ -226,6 +226,9 @@ async fn userland_task() {
 
         // enable kernel ui
         {
+            AUDIO_BUFFER_WRITTEN.store(false, Ordering::Release);
+            clear_audio_buffers();
+
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
             unsafe { FRAMEBUFFER.as_mut().unwrap().clear(Rgb565::BLACK).unwrap() };

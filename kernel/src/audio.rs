@@ -24,6 +24,14 @@ pub static mut AUDIO_BUFFER: [u8; AUDIO_BUFFER_SAMPLES * 2] = [SILENCE; AUDIO_BU
 static mut AUDIO_BUFFER_1: [u8; AUDIO_BUFFER_SAMPLES * 2] = [SILENCE; AUDIO_BUFFER_SAMPLES * 2];
 
 pub static AUDIO_BUFFER_READY: AtomicBool = AtomicBool::new(true);
+pub static AUDIO_BUFFER_WRITTEN: AtomicBool = AtomicBool::new(false);
+
+pub fn clear_audio_buffers() {
+    unsafe {
+        AUDIO_BUFFER.fill(SILENCE);
+        AUDIO_BUFFER_1.fill(SILENCE);
+    }
+}
 
 #[embassy_executor::task]
 pub async fn audio_handler(mut audio: Audio) {
@@ -35,14 +43,14 @@ pub async fn audio_handler(mut audio: Audio) {
 
     loop {
         unsafe {
-            // if AUDIO_BUFFER.iter().any(|s| *s != SILENCE) {
-            write_samples(&mut pwm_pio_left, &mut pwm_pio_right, &AUDIO_BUFFER_1).await;
-            AUDIO_BUFFER_1.fill(SILENCE);
-            core::mem::swap(&mut AUDIO_BUFFER, &mut AUDIO_BUFFER_1);
-            AUDIO_BUFFER_READY.store(true, Ordering::Release)
-            // } else {
-            //     yield_now().await;
-            // }
+            if AUDIO_BUFFER_WRITTEN.load(Ordering::Acquire) {
+                write_samples(&mut pwm_pio_left, &mut pwm_pio_right, &AUDIO_BUFFER_1).await;
+                AUDIO_BUFFER_1.fill(SILENCE);
+                core::mem::swap(&mut AUDIO_BUFFER, &mut AUDIO_BUFFER_1);
+                AUDIO_BUFFER_READY.store(true, Ordering::Release)
+            } else {
+                yield_now().await;
+            }
         }
     }
 }
@@ -53,29 +61,31 @@ async fn write_samples<PIO: Instance>(
     buf: &[u8],
 ) {
     // pack two samples per word
-    let mut packed_buf_left: [u32; AUDIO_BUFFER_SAMPLES / 2] = [0; AUDIO_BUFFER_SAMPLES / 2];
-    let mut packed_buf_right: [u32; AUDIO_BUFFER_SAMPLES / 2] = [0; AUDIO_BUFFER_SAMPLES / 2];
+    static mut PACKED_BUF_L: [u32; AUDIO_BUFFER_SAMPLES / 2] = [0; AUDIO_BUFFER_SAMPLES / 2];
+    static mut PACKED_BUF_R: [u32; AUDIO_BUFFER_SAMPLES / 2] = [0; AUDIO_BUFFER_SAMPLES / 2];
 
-    for ((pl, pr), sample) in packed_buf_left
-        .iter_mut()
-        .zip(packed_buf_right.iter_mut())
-        .zip(buf.chunks(4))
-    {
-        *pl = pack_u8_samples(sample[0], sample[2]);
-        *pr = pack_u8_samples(sample[1], sample[3]);
+    unsafe {
+        for ((pl, pr), sample) in PACKED_BUF_L
+            .iter_mut()
+            .zip(PACKED_BUF_R.iter_mut())
+            .zip(buf.chunks(4))
+        {
+            *pl = pack_u8_samples(sample[0], sample[2]);
+            *pr = pack_u8_samples(sample[1], sample[3]);
+        }
+
+        let left_fut = left
+            .sm
+            .tx()
+            .dma_push(left.dma.reborrow(), &PACKED_BUF_L, false);
+
+        let right_fut = right
+            .sm
+            .tx()
+            .dma_push(right.dma.reborrow(), &PACKED_BUF_R, false);
+
+        join(left_fut, right_fut).await;
     }
-
-    let left_fut = left
-        .sm
-        .tx()
-        .dma_push(left.dma.reborrow(), &packed_buf_left, false);
-
-    let right_fut = right
-        .sm
-        .tx()
-        .dma_push(right.dma.reborrow(), &packed_buf_right, false);
-
-    join(left_fut, right_fut).await;
 }
 
 struct PioPwmAudioProgram8Bit<'d, PIO: Instance>(LoadedProgram<'d, PIO>);
@@ -88,22 +98,24 @@ impl<'d, PIO: Instance> PioPwmAudioProgram8Bit<'d, PIO> {
         let prg = pio_asm!(
             ".side_set 1",
 
+            "set x, 0 side 1",
+            "set y, 0 side 0",
+            ".wrap_target",
+
             "check:",
-            // "set x, 0 side 1",
-            // "set y, 0 side 0",
             "pull ifempty noblock side 1", // gets new osr or loads 0 into x, gets second sample if osr not empty
             "out x, 8 side 0", // pwm high time
             "out y, 8 side 1", // pwm low time
             "jmp x!=y play_sample side 0", // x & y are never equal unless osr was empty
-            // play silence for 10 cycles
-            "set x, 5 side 1",
-            "set y, 5 side 0",
+            "set x, 1 side 1",
+            "set y, 1 side 0",
 
             "play_sample:"
             "loop_high:",
             "jmp x-- loop_high side 1", // keep pwm high, decrement X until 0
             "loop_low:",
             "jmp y-- loop_low side 0", // keep pwm low, decrement Y until 0
+            ".wrap"
         );
 
         let prg = common.load_program(&prg.program);
@@ -130,7 +142,6 @@ impl<'d, PIO: Instance, const SM: usize> PioPwmAudio<'d, PIO, SM> {
         sm.set_pin_dirs(Direction::Out, &[&pin]);
 
         let mut cfg = Config::default();
-        cfg.set_set_pins(&[&pin]);
         cfg.fifo_join = FifoJoin::TxOnly;
         let shift_cfg = ShiftConfig {
             auto_fill: false,
