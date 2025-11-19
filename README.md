@@ -14,7 +14,7 @@ Current focus is on exanding applications and porting software, finding bugs in 
 - **`userlib_sys/`** – C FFI bindings for kernel syscall
 - **`userlib/`** – Rust wrapper on top of `userlib_sys` 
 - **`picolib/`** – Built with ```just newlib```, and provides libc symbols when linking with C libraries 
-- **`user-apps/`** – Collection of userspace programs (gif player, wav player, calculator, snake, etc.)
+- **`user_apps/`** – Collection of userspace programs (gif player, wav player, calculator, snake, etc.)
 
 ## Features
 
