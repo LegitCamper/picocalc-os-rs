@@ -2,24 +2,24 @@
 
 extern crate alloc;
 
-use abi::{
-    display::Display,
-    get_key,
-    keyboard::{KeyCode, KeyState},
-};
 use alloc::vec::Vec;
 use embedded_graphics::{
-    Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_10X20},
+    mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb565,
     prelude::{Dimensions, DrawTarget, Point, Primitive, RgbColor},
     primitives::{PrimitiveStyle, Rectangle},
-    text::{Alignment, Text, renderer::TextRenderer},
+    text::{renderer::TextRenderer, Alignment, Text},
+    Drawable,
 };
 use embedded_layout::{
     align::{horizontal, vertical},
     layout::linear::{FixedMargin, LinearLayout},
     prelude::*,
+};
+use userlib::{
+    display::Display,
+    get_key,
+    keyboard::{KeyCode, KeyState},
 };
 
 #[derive(Debug)]
@@ -51,15 +51,14 @@ impl<'a> SelectionUi<'a> {
         let selection;
         loop {
             let key = get_key();
-            if key.state == KeyState::Pressed {
-                if let Some(s) = self.update(display, key.key)? {
+            if key.state == KeyState::Pressed
+                && let Some(s) = self.update(display, key.key)? {
                     selection = Some(s);
                     display
                         .clear(Rgb565::BLACK)
-                        .map_err(|e| SelectionUiError::DisplayError(e))?;
+                        .map_err(SelectionUiError::DisplayError)?;
                     break;
                 }
-            }
         }
         Ok(selection)
     }
@@ -100,7 +99,7 @@ impl<'a> SelectionUi<'a> {
             Rectangle::new(bounds.top_left, bounds.size)
                 .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
                 .draw(display)
-                .map_err(|e| SelectionUiError::DisplayError(e))?;
+                .map_err(SelectionUiError::DisplayError)?;
         }
 
         let mut views: Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
@@ -119,7 +118,7 @@ impl<'a> SelectionUi<'a> {
 
         layout
             .draw(display)
-            .map_err(|e| SelectionUiError::DisplayError(e))?;
+            .map_err(SelectionUiError::DisplayError)?;
 
         // draw selected box
         if let Some(selected_bounds) = layout.inner().get(self.selection) {
@@ -127,7 +126,7 @@ impl<'a> SelectionUi<'a> {
             Rectangle::new(selected_bounds.top_left, selected_bounds.size)
                 .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
                 .draw(display)
-                .map_err(|e| SelectionUiError::DisplayError(e))?;
+                .map_err(SelectionUiError::DisplayError)?;
 
             self.last_bounds = Some(selected_bounds);
         }
@@ -136,13 +135,19 @@ impl<'a> SelectionUi<'a> {
     }
 }
 
-pub fn draw_text_center<'a, S>(
+pub fn draw_text_center<S>(
     display: &mut Display,
-    text: &'a str,
+    text: &str,
     style: S,
 ) -> Result<Point, <Display as DrawTarget>::Error>
 where
     S: TextRenderer<Color = <Display as DrawTarget>::Color>,
 {
-    Text::with_alignment(text, Point::zero(), style, Alignment::Center).draw(display)
+    Text::with_alignment(
+        text,
+        display.bounding_box().center(),
+        style,
+        Alignment::Center,
+    )
+    .draw(display)
 }

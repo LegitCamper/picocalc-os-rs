@@ -22,8 +22,8 @@ impl Region {
 
     fn contains(&self, address: usize) -> bool {
         let start = self.start.load(Ordering::Relaxed);
-        let end = self.start.load(Ordering::Relaxed);
-        (start..start + end).contains(&address)
+        let end = start + self.size.load(Ordering::Relaxed);
+        (start..end).contains(&address)
     }
 
     fn new(start: usize, size: usize) -> Self {

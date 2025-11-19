@@ -1,7 +1,7 @@
 use num_enum::TryFromPrimitive;
 
 /// THE CODE BELOW ORIGINATES FROM: https://github.com/apohrebniak/usbd-storage/blob/master/usbd-storage/src/subclass/scsi.rs
-
+///
 /// SCSI device subclass code
 pub const SUBCLASS_SCSI: u8 = 0x06; // SCSI Transparent command set
 
@@ -91,6 +91,7 @@ pub enum ScsiCommand {
     },
 }
 
+#[allow(clippy::enum_variant_names)]
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, TryFromPrimitive)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

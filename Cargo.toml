@@ -2,14 +2,15 @@
 resolver = "3"
 members = [
   "kernel",
-  "abi_sys",
-  "abi",
+  "userlib_sys",
+  "userlib",
   "selection_ui",
-  "user-apps/calculator",
-  "user-apps/snake",
-  "user-apps/gallery",
-  "user-apps/gif",
-  "user-apps/gboy",
+  "user_apps/calculator",
+  "user_apps/snake",
+  "user_apps/gallery",
+  "user_apps/gif",
+  "user_apps/wav_player",
+  "user_apps/gboy",
 ]
 
 [profile.release]

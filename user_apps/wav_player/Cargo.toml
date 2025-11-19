@@ -1,0 +1,11 @@
+[package]
+name = "wav_player"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+userlib = { path = "../../userlib" }
+selection_ui = { path = "../../selection_ui" }
+embedded-graphics = "0.8.1"
+rand = { version = "0.9.0", default-features = false }
+embedded-audio = { git = "https://github.com/LegitCamper/embedded-audio" }

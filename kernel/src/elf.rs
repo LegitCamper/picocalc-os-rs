@@ -1,9 +1,7 @@
 use crate::{
-    abi,
     storage::{File, SDCARD},
+    syscalls,
 };
-use abi_sys::CallTable;
-use abi_sys::EntryFn;
 use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
 use core::ptr;
@@ -18,6 +16,7 @@ use goblin::{
     elf32::{header, reloc::Rel, section_header::SectionHeader, sym::Sym},
 };
 use strum::IntoEnumIterator;
+use userlib_sys::{EntryFn, SyscallTable};
 
 const ELF32_HDR_SIZE: usize = 52;
 
@@ -40,7 +39,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
             let mut ph_buf = vec![0_u8; elf_header.e_phentsize as usize];
 
             let (total_size, min_vaddr, _max_vaddr) =
-                total_loadable_size(&mut file, &elf_header, &mut ph_buf);
+                total_loadable_size(&mut file, elf_header, &mut ph_buf);
 
             let bump = Bump::with_capacity(total_size);
             let base = bump.alloc_slice_fill_default::<u8>(total_size);
@@ -53,25 +52,22 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Option<(EntryFn, Bump)>
                 let ph = cast_phdr(&ph_buf);
 
                 let seg_offset = (ph.p_vaddr - min_vaddr) as usize;
-                let mut segment = &mut base[seg_offset..seg_offset + ph.p_memsz as usize];
+                let segment = &mut base[seg_offset..seg_offset + ph.p_memsz as usize];
 
                 if ph.p_type == PT_LOAD {
-                    load_segment(&mut file, &ph, &mut segment).unwrap();
+                    load_segment(&mut file, &ph, segment).unwrap();
                 }
             }
 
             for i in 0..elf_header.e_shnum {
                 let sh = read_section(&mut file, elf_header, i.into());
 
-                match sh.sh_type {
-                    SHT_REL => {
-                        apply_relocations(&sh, min_vaddr, base.as_mut_ptr(), &mut file).unwrap();
-                    }
-                    _ => {}
+                if sh.sh_type == SHT_REL {
+                    apply_relocations(&sh, min_vaddr, base.as_mut_ptr(), &mut file).unwrap();
                 }
             }
 
-            patch_abi(&elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
+            patch_syscalls(elf_header, base.as_mut_ptr(), min_vaddr, &mut file).unwrap();
 
             // entry pointer is base_ptr + (entry - min_vaddr)
             let entry_ptr: EntryFn = unsafe {
@@ -151,14 +147,14 @@ fn apply_relocations(
     Ok(())
 }
 
-fn patch_abi(
+fn patch_syscalls(
     elf_header: &Header,
     base: *mut u8,
     min_vaddr: u32,
     file: &mut File,
 ) -> Result<(), ()> {
     for i in 1..=elf_header.e_shnum {
-        let sh = read_section(file, &elf_header, i.into());
+        let sh = read_section(file, elf_header, i.into());
 
         // find the symbol table
         if sh.sh_type == SHT_SYMTAB {
@@ -173,7 +169,7 @@ fn patch_abi(
                     &symtab_buf[i * sh.sh_entsize as usize..(i + 1) * sh.sh_entsize as usize];
                 let sym = cast_sym(sym_bytes);
 
-                let str_sh = read_section(file, &elf_header, sh.sh_link);
+                let str_sh = read_section(file, elf_header, sh.sh_link);
 
                 let mut name = Vec::new();
                 file.seek_from_start(str_sh.sh_offset + sym.st_name)
@@ -189,28 +185,33 @@ fn patch_abi(
                 }
 
                 let symbol_name = core::str::from_utf8(&name).unwrap();
-                if symbol_name == "CALL_ABI_TABLE" {
+                if symbol_name == stringify!(SYS_CALL_TABLE) {
                     let table_base =
                         unsafe { base.add((sym.st_value as usize) - min_vaddr as usize) }
                             as *mut usize;
 
-                    for (idx, call) in CallTable::iter().enumerate() {
+                    for (idx, call) in SyscallTable::iter().enumerate() {
                         let ptr = match call {
-                            CallTable::Alloc => abi::alloc as usize,
-                            CallTable::Dealloc => abi::dealloc as usize,
-                            CallTable::PrintString => abi::print as usize,
-                            CallTable::SleepMs => abi::sleep as usize,
-                            CallTable::GetMs => abi::get_ms as usize,
-                            CallTable::DrawIter => abi::draw_iter as usize,
-                            CallTable::GetKey => abi::get_key as usize,
-                            CallTable::GenRand => abi::gen_rand as usize,
-                            CallTable::ListDir => abi::list_dir as usize,
-                            CallTable::ReadFile => abi::read_file as usize,
-                            CallTable::WriteFile => abi::write_file as usize,
-                            CallTable::FileLen => abi::file_len as usize,
+                            SyscallTable::Alloc => syscalls::alloc as usize,
+                            SyscallTable::Dealloc => syscalls::dealloc as usize,
+                            SyscallTable::PrintString => syscalls::print as usize,
+                            SyscallTable::SleepMs => syscalls::sleep as usize,
+                            SyscallTable::GetMs => syscalls::get_ms as usize,
+                            SyscallTable::DrawIter => syscalls::draw_iter as usize,
+                            SyscallTable::GetKey => syscalls::get_key as usize,
+                            SyscallTable::GenRand => syscalls::gen_rand as usize,
+                            SyscallTable::ListDir => syscalls::list_dir as usize,
+                            SyscallTable::ReadFile => syscalls::read_file as usize,
+                            SyscallTable::WriteFile => syscalls::write_file as usize,
+                            SyscallTable::FileLen => syscalls::file_len as usize,
+                            SyscallTable::ReconfigureAudioSampleRate => {
+                                syscalls::reconfigure_audio_sample_rate as usize
+                            }
+                            SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
+                            SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
                         };
                         unsafe {
-                            table_base.add(idx as usize).write(ptr);
+                            table_base.add(idx).write(ptr);
                         }
                     }
                     return Ok(());
@@ -232,7 +233,7 @@ fn total_loadable_size(
         file.seek_from_start(elf_header.e_phoff + (elf_header.e_phentsize * i) as u32)
             .unwrap();
         file.read(ph_buf).unwrap();
-        let ph = cast_phdr(&ph_buf);
+        let ph = cast_phdr(ph_buf);
 
         if ph.p_type == PT_LOAD {
             if ph.p_vaddr < min_vaddr {

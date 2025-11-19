@@ -1,26 +1,27 @@
 # PicoCalc OS (Rust)
 
-A simple operating system for the **Clockwork PicoCalc**, written in Rust.  
-This project provides a minimal kernel, ABI, and user-space applications to experiment with OS development on constrained hardware.
+A simple kernel and applications for the **Clockwork PicoCalc**, written in Rust.  
+This project provides a minimal kernel, syscall table, and user-space applications to experiment with kernel development on constrained hardware.
 
 ## Status
 
 Basic synchronous applications are working great.  
-Current focus is on **expanding the ABI syscalls** and **fixing the MSC/USB-SCSI driver** to make application development easier and smoother.
+Current focus is on exanding applications and porting software, finding bugs in ffi, and making sure the kernel is as stable as possible.
 
 ## Project Structure
 
-- **`kernel/`** – The core OS kernel (task scheduling, drivers, memory, etc.)
-- **`abi_sys/`** – Shared application binary interface definitions for kernel ↔ userspace (Repr "C")
-- **`abi/`** – Rust focused ABI helpers and abstractions for easier development
-- **`user-apps/`** – Collection of userspace programs (calculator, snake, etc.)
+- **`kernel/`** – The core OS kernel
+- **`userlib_sys/`** – C FFI bindings for kernel syscall
+- **`userlib/`** – Rust wrapper on top of `userlib_sys` 
+- **`picolib/`** – Built with ```just newlib```, and provides libc symbols when linking with C libraries 
+- **`user-apps/`** – Collection of userspace programs (gif player, wav player, calculator, snake, etc.)
 
 ## Features
 
 - Minimal Rust-based kernel targeting the PicoCalc
-- Custom ABI for safe communication between kernel and applications
+- Custom ABI for *Mostly* safe communication between kernel and applications
 - Support for multiple user-space applications
-- Hardware drivers tailored for the PicoCalc
+- Hardware drivers tailored for the PicoCalc( Audio, Display, Keyboard, ans Storage )
 
 ## Getting Started
 

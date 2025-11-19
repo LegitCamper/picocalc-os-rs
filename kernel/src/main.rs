@@ -8,14 +8,19 @@
 
 extern crate alloc;
 
-mod abi;
+mod audio;
 mod display;
 mod elf;
 mod framebuffer;
+// TODO: NEED TO UPDATE MCU TO TEST BATTERY READS
+#[allow(unused)]
 mod peripherals;
+#[allow(unused)]
 mod scsi;
 mod storage;
+mod syscalls;
 mod ui;
+#[allow(unused)]
 mod usb;
 mod utils;
 
@@ -27,20 +32,17 @@ mod heap;
 mod psram;
 
 #[cfg(feature = "psram")]
-use crate::{heap::HEAP, heap::init_qmi_psram_heap, psram::init_psram, psram::init_psram_qmi};
+use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
-    abi::{KEY_CACHE, MS_SINCE_LAUNCH},
+    audio::{AUDIO_BUFFER_WRITTEN, audio_handler, clear_audio_buffers},
     display::{FRAMEBUFFER, display_handler, init_display},
-    peripherals::{
-        conf_peripherals,
-        keyboard::{KeyState, read_keyboard_fifo},
-    },
+    peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
     scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
+    syscalls::{KEY_CACHE, MS_SINCE_LAUNCH},
     ui::{SELECTIONS, clear_selection, ui_handler},
 };
-use abi_sys::EntryFn;
 use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
@@ -55,9 +57,9 @@ use embassy_rp::{
     peripherals::{
         DMA_CH0, DMA_CH1, DMA_CH3, DMA_CH4, I2C1, PIN_2, PIN_3, PIN_6, PIN_7, PIN_10, PIN_11,
         PIN_12, PIN_13, PIN_14, PIN_15, PIN_16, PIN_17, PIN_18, PIN_19, PIN_20, PIN_21, PIN_22,
-        PIO0, SPI0, SPI1, USB, WATCHDOG,
+        PIN_26, PIN_27, PIO0, SPI0, SPI1, USB, WATCHDOG,
     },
-    pio,
+    pio::{self, Common, Pio, StateMachine},
     spi::{self, Spi},
     usb as embassy_rp_usb,
     watchdog::{ResetReason, Watchdog},
@@ -74,6 +76,7 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::SdCard as SdmmcSdCard;
 use static_cell::StaticCell;
 use talc::*;
+use userlib_sys::EntryFn;
 use {defmt_rtt as _, panic_probe as _};
 
 embassy_rp::bind_interrupts!(struct Irqs {
@@ -103,7 +106,7 @@ async fn watchdog_task(mut watchdog: Watchdog) {
             ResetReason::Forced => "forced",
             ResetReason::TimedOut => "timed out",
         };
-        #[cfg(feature = "debug")]
+        #[cfg(feature = "defmt")]
         defmt::error!("Watchdog reset reason: {}", _reason);
     }
 
@@ -119,10 +122,12 @@ async fn watchdog_task(mut watchdog: Watchdog) {
 static ENABLE_UI: AtomicBool = AtomicBool::new(true);
 static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
+const OVERCLOCK: u32 = 300_000_000;
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = if cfg!(feature = "overclock") {
-        let clocks = ClockConfig::system_freq(300_000_000).unwrap();
+        let clocks = ClockConfig::system_freq(OVERCLOCK).unwrap();
         let config = Config::new(clocks);
         embassy_rp::init(config)
     } else {
@@ -149,6 +154,19 @@ async fn main(_spawner: Spawner) {
         data: p.PIN_14,
         reset: p.PIN_15,
     };
+    let Pio {
+        common, sm0, sm1, ..
+    } = Pio::new(p.PIO0, Irqs);
+
+    let audio = Audio {
+        pio: common,
+        sm0,
+        dma0: p.DMA_CH3,
+        left: p.PIN_26,
+        sm1,
+        dma1: p.DMA_CH4,
+        right: p.PIN_27,
+    };
     let sd = Sd {
         spi: p.SPI0,
         clk: p.PIN_18,
@@ -157,15 +175,15 @@ async fn main(_spawner: Spawner) {
         cs: p.PIN_17,
         det: p.PIN_22,
     };
-    let psram = Psram {
-        pio: p.PIO0,
-        sclk: p.PIN_21,
-        mosi: p.PIN_2,
-        miso: p.PIN_3,
-        cs: p.PIN_20,
-        dma1: p.DMA_CH3,
-        dma2: p.DMA_CH4,
-    };
+    // let psram = Psram {
+    //     pio: p.PIO0,
+    //     sclk: p.PIN_21,
+    //     mosi: p.PIN_2,
+    //     miso: p.PIN_3,
+    //     cs: p.PIN_20,
+    //     dma1: p.DMA_CH3,
+    //     dma2: p.DMA_CH4,
+    // };
     let mcu = Mcu {
         i2c: p.I2C1,
         clk: p.PIN_7,
@@ -175,7 +193,7 @@ async fn main(_spawner: Spawner) {
     executor0.run(|spawner| {
         spawner
             .spawn(kernel_task(
-                spawner, p.WATCHDOG, display, sd, psram, mcu, p.USB,
+                spawner, p.WATCHDOG, display, audio, sd, mcu, p.USB,
             ))
             .unwrap()
     });
@@ -208,6 +226,9 @@ async fn userland_task() {
 
         // enable kernel ui
         {
+            AUDIO_BUFFER_WRITTEN.store(false, Ordering::Release);
+            clear_audio_buffers();
+
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
             unsafe { FRAMEBUFFER.as_mut().unwrap().clear(Rgb565::BLACK).unwrap() };
@@ -228,6 +249,15 @@ struct Display {
     cs: Peri<'static, PIN_13>,
     data: Peri<'static, PIN_14>,
     reset: Peri<'static, PIN_15>,
+}
+struct Audio {
+    pio: Common<'static, PIO0>,
+    dma0: Peri<'static, DMA_CH3>,
+    sm0: StateMachine<'static, PIO0, 0>,
+    left: Peri<'static, PIN_26>,
+    dma1: Peri<'static, DMA_CH4>,
+    sm1: StateMachine<'static, PIO0, 1>,
+    right: Peri<'static, PIN_27>,
 }
 struct Sd {
     spi: Peri<'static, SPI0>,
@@ -298,7 +328,7 @@ async fn setup_display(display: Display, spawner: Spawner) {
 async fn setup_qmi_psram() {
     Timer::after_millis(250).await;
     let psram_qmi_size = init_psram_qmi(&embassy_rp::pac::QMI, &embassy_rp::pac::XIP_CTRL);
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     defmt::info!("size:  {}", psram_qmi_size);
     Timer::after_millis(100).await;
 
@@ -330,8 +360,9 @@ async fn kernel_task(
     spawner: Spawner,
     watchdog: Peri<'static, WATCHDOG>,
     display: Display,
+    audio: Audio,
     sd: Sd,
-    _psram: Psram,
+    // _psram: Psram,
     mcu: Mcu,
     usb: Peri<'static, USB>,
 ) {
@@ -339,7 +370,7 @@ async fn kernel_task(
         .spawn(watchdog_task(Watchdog::new(watchdog)))
         .unwrap();
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     defmt::info!("Clock: {}", embassy_rp::clocks::clk_sys_freq());
 
     setup_mcu(mcu).await;
@@ -355,6 +386,8 @@ async fn kernel_task(
     Timer::after_millis(100).await;
     setup_display(display, spawner).await;
     setup_sd(sd).await;
+
+    spawner.spawn(audio_handler(audio)).unwrap();
 
     let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
     // spawner.spawn(usb_handler(usb)).unwrap();

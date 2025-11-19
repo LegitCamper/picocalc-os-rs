@@ -1,0 +1,10 @@
+[package]
+name = "userlib"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+userlib_sys = { path = "../userlib_sys" }
+embedded-graphics = "0.8.1"
+once_cell = { version = "1", default-features = false }
+rand_core = "0.9.3"

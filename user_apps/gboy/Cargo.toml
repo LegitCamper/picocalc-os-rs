@@ -1,0 +1,13 @@
+[package]
+name = "gboy"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+bindgen = "0.71.0"
+cc = "1.2.44"
+
+[dependencies]
+userlib = { path = "../../userlib" }
+selection_ui = { path = "../../selection_ui" }
+embedded-graphics = "0.8.1"

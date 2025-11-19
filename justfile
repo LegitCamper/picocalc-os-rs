@@ -1,15 +1,17 @@
+target := "thumbv8m.main-none-eabihf"
+
 kernel-dev board:
-    cargo run --bin kernel --features {{board}}  --features fps
+    cargo run --bin kernel --features {{board}}  --features fps --features defmt
 kernel-release-probe board:
-    cargo run --bin kernel --profile release --features {{board}}  --features fps
+    cargo run --bin kernel --profile release --features {{board}} --features fps
 kernel-release board:
     cargo build --bin kernel --release --no-default-features --features {{board}}
-    elf2uf2-rs -d target/thumbv8m.main-none-eabihf/release/kernel
+    elf2uf2-rs -d target/{{target}}/release/kernel
 
 binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
 
 cbindgen:
-    cbindgen abi_sys --output abi_sys.h -q
+    cbindgen userlib_sys --output userlib_sys.h -q
 
 newlib:
     #!/bin/bash
@@ -39,10 +41,11 @@ userapps: cbindgen
     just userapp snake
     just userapp gallery
     just userapp gif
+    just userapp wav_player
     just userapp gboy
 
 copy-userapp app:
-    cp ./target/thumbv8m.main-none-eabihf/release-binary/{{app}} /run/media/$(whoami)/PICOCALC/{{app}}.bin
+    cp ./target/{{target}}/release-binary/{{app}} /run/media/$(whoami)/PICOCALC/{{app}}.bin
 
 copy-userapps:
     #!/bin/bash
@@ -51,6 +54,8 @@ copy-userapps:
     just copy-userapp snake
     just copy-userapp gallery
     just copy-userapp gif
+    just copy-userapp wav_player
+    just copy-userapp gboy
 
     DEV=$(lsblk -o LABEL,NAME -nr | awk -v L="PICOCALC" '$1==L {print "/dev/" $2}')
     udisksctl unmount -b "$DEV"

@@ -9,8 +9,8 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_sdmmc::{
-    Block, BlockCount, BlockDevice, BlockIdx, Directory, SdCard as SdmmcSdCard, TimeSource,
-    Timestamp, Volume, VolumeIdx, VolumeManager, sdcard::Error,
+    Block, BlockDevice, BlockIdx, Directory, SdCard as SdmmcSdCard, TimeSource, Timestamp,
+    VolumeIdx, VolumeManager, sdcard::Error,
 };
 use embedded_sdmmc::{File as SdFile, LfnBuffer, Mode, ShortFileName};
 
@@ -21,7 +21,6 @@ pub const MAX_VOLUMES: usize = 1;
 type Device = ExclusiveDevice<Spi<'static, SPI0, Blocking>, Output<'static>, embassy_time::Delay>;
 type SD = SdmmcSdCard<Device, Delay>;
 type VolMgr = VolumeManager<SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
-type Vol<'a> = Volume<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 pub type Dir<'a> = Directory<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 pub type File<'a> = SdFile<'a, SD, DummyTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
 
@@ -43,7 +42,7 @@ pub struct FileName {
 
 impl PartialOrd for FileName {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.long_name.cmp(&other.long_name))
+        Some(self.cmp(other))
     }
 }
 
@@ -67,10 +66,7 @@ impl SdCard {
             DummyTimeSource {},
             5000,
         );
-        Self {
-            det: det,
-            volume_mgr,
-        }
+        Self { det, volume_mgr }
     }
 
     /// Returns true if an SD card is inserted.
@@ -84,17 +80,6 @@ impl SdCard {
 
         self.volume_mgr.device(|sd| {
             result = sd.num_bytes().unwrap_or(0);
-            DummyTimeSource {}
-        });
-
-        result
-    }
-
-    pub fn num_blocks(&self) -> u32 {
-        let mut result = 0;
-
-        self.volume_mgr.device(|sd| {
-            result = sd.num_blocks().unwrap_or(BlockCount(0)).0;
             DummyTimeSource {}
         });
 

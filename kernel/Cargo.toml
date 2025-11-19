@@ -11,7 +11,7 @@ doctest = false
 bench = false
 
 [features]
-default = ["rp235x", "defmt"]
+default = ["rp235x"]
 pimoroni2w = ["rp235x", "psram"]
 # rp2040 = ["embassy-rp/rp2040"] # unsupported, ram too small for fb
 rp235x = ["embassy-rp/rp235xb"]
@@ -82,6 +82,8 @@ embedded-graphics = { version = "0.8.1" }
 embedded-text = "0.7.2"
 embedded-layout = "0.4.2"
 
+micromath = "2.1.0"
+fixed = "1.29.0"
 strum = { version = "0.27.2", default-features = false }
 rand = { version = "0.9.0", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
@@ -97,4 +99,4 @@ embedded-alloc = { version = "0.6.0", features = [
 ], optional = true }
 bumpalo = "3.19.0"
 
-abi_sys = { path = "../abi_sys" }
+userlib_sys = { path = "../userlib_sys" }
