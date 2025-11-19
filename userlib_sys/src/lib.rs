@@ -217,7 +217,7 @@ pub mod keyboard {
                 1 => KeyState::Pressed,
                 2 => KeyState::Hold,
                 3 => KeyState::Released,
-                0 | _ => KeyState::Idle,
+                _ => KeyState::Idle,
             }
         }
     }
