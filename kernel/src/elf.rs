@@ -8,12 +8,12 @@ use core::ptr;
 use embedded_sdmmc::ShortFileName;
 use goblin::{
     elf::{
-        header::header32::Header,
+        header::{EM_ARM, ET_DYN, EV_CURRENT, header32::Header},
         program_header::program_header32::{PT_LOAD, ProgramHeader},
         reloc::R_ARM_RELATIVE,
         section_header::{SHT_REL, SHT_SYMTAB},
     },
-    elf32::{header, reloc::Rel, section_header::SectionHeader, sym::Sym},
+    elf32::{reloc::Rel, section_header::SectionHeader, sym::Sym},
 };
 use strum::IntoEnumIterator;
 use userlib_sys::{EntryFn, SyscallTable};
@@ -22,6 +22,8 @@ const ELF32_HDR_SIZE: usize = 52;
 
 #[derive(Debug)]
 pub enum LoadError {
+    WrongMachine,
+    InvalidElf,
     FailedToReadFile,
     ElfIsNotPie,
     UnknownRelocationType,
@@ -39,10 +41,7 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<(EntryFn, Bump),
             .map_err(|_| LoadError::FailedToReadFile)?;
         let elf_header = Header::from_bytes(&header_buf);
 
-        // reject non-PIE
-        if elf_header.e_type != header::ET_DYN {
-            return Err(LoadError::ElfIsNotPie);
-        }
+        validate_header(&elf_header)?;
 
         let mut ph_buf = vec![0_u8; elf_header.e_phentsize as usize];
 
@@ -87,6 +86,19 @@ pub async unsafe fn load_binary(name: &ShortFileName) -> Result<(EntryFn, Bump),
     })
     .await
     .map_err(|_| LoadError::FailedToReadFile)?
+}
+
+fn validate_header(h: &Header) -> Result<(), LoadError> {
+    if h.e_type != ET_DYN {
+        return Err(LoadError::ElfIsNotPie);
+    }
+    if h.e_machine != EM_ARM {
+        return Err(LoadError::WrongMachine);
+    }
+    if h.e_version as u8 != EV_CURRENT {
+        return Err(LoadError::InvalidElf);
+    }
+    Ok(())
 }
 
 fn load_segment(file: &mut File, ph: &ProgramHeader, segment: &mut [u8]) -> Result<(), LoadError> {
