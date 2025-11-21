@@ -5,6 +5,9 @@
 #![allow(static_mut_refs)]
 #![feature(allocator_api)]
 #![feature(slice_ptr_get)]
+#![deny(warnings)]
+#![deny(clippy::redundant_clone)]
+#![deny(clippy::unwrap_used)]
 
 extern crate alloc;
 
