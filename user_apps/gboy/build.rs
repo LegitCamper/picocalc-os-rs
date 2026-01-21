@@ -50,6 +50,9 @@ fn bindgen() {
         .define("ENABLE_LCD", None)
         .file("peanut_gb_stub.c")
         .include("Peanut-GB")
+        .include("../../picolibc/newlib/libc/include")
+        .include("../../picolibc/build/newlib/libc/include")
+        .include("../../picolibc/build")
         // optimization flags
         .flag("-Ofast")
         .flag("-fdata-sections")

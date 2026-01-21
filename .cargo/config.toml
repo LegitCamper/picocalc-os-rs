@@ -1,5 +1,5 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip RP2350"
+runner = "probe-rs run --chip RP2350xa"
 # runner = "elf2uf2-rs -d"
 
 [build]
