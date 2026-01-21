@@ -52,6 +52,13 @@ impl Ord for FileName {
     }
 }
 
+#[derive(Debug)]
+pub enum SdCardError {
+    Volume0Missing,
+    RootDirMissing,
+    FileOpenFailed,
+}
+
 pub struct SdCard {
     det: Input<'static>,
     volume_mgr: VolMgr,
@@ -104,30 +111,37 @@ impl SdCard {
         res.map_err(|_| ())
     }
 
-    pub fn access_root_dir(&mut self, mut access: impl FnMut(Dir)) {
-        let volume0 = self.volume_mgr.open_volume(VolumeIdx(0)).unwrap();
-        let root_dir = volume0.open_root_dir().unwrap();
+    pub fn access_root_dir<R>(
+        &mut self,
+        mut access: impl FnMut(Dir) -> R,
+    ) -> Result<R, SdCardError> {
+        let volume0 = self
+            .volume_mgr
+            .open_volume(VolumeIdx(0))
+            .map_err(|_| SdCardError::Volume0Missing)?;
+        let root_dir = volume0
+            .open_root_dir()
+            .map_err(|_| SdCardError::RootDirMissing)?;
 
-        access(root_dir);
+        Ok(access(root_dir))
     }
 
-    pub async fn read_file<T>(
+    pub async fn read_file<R>(
         &mut self,
         name: &ShortFileName,
-        mut access: impl FnMut(File) -> T,
-    ) -> Result<T, ()> {
-        let mut res = Err(());
+        mut access: impl FnMut(File) -> R,
+    ) -> Result<R, SdCardError> {
         self.access_root_dir(|root_dir| {
-            if let Ok(file) = root_dir.open_file_in_dir(name, Mode::ReadOnly) {
-                res = Ok(access(file));
-            }
-        });
+            let file = root_dir
+                .open_file_in_dir(name, Mode::ReadOnly)
+                .map_err(|_| SdCardError::FileOpenFailed)?;
 
-        res
+            Ok(access(file))
+        })?
     }
 
     /// Returns a Vec of file names (long format) that match the given extension (e.g., "BIN")
-    pub fn list_files_by_extension(&mut self, ext: &str) -> Result<Vec<FileName>, ()> {
+    pub fn list_files_by_extension(&mut self, ext: &str) -> Result<Vec<FileName>, SdCardError> {
         let mut result = Vec::new();
 
         // Only proceed if card is inserted
@@ -151,7 +165,7 @@ impl SdCard {
                 }
             })
             .unwrap()
-        });
+        })?;
 
         Ok(result)
     }

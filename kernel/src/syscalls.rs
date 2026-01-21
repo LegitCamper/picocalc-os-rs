@@ -190,7 +190,7 @@ pub extern "C" fn list_dir(
     let sd = guard.as_mut().unwrap();
 
     let mut wrote = 0;
-    sd.access_root_dir(|root| {
+    let _ = sd.access_root_dir(|root| {
         if dirs[0].is_empty() && dirs.len() >= 2 {
             unsafe {
                 if dir == "/" {
@@ -264,7 +264,7 @@ pub extern "C" fn read_file(
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
-        sd.access_root_dir(|root| {
+        let _ = sd.access_root_dir(|root| {
             if let Ok(result) = recurse_file(&root, &components[1..count], |file| {
                 file.seek_from_start(start_from as u32).unwrap_or(());
                 file.read(buf).unwrap()
@@ -303,7 +303,7 @@ pub extern "C" fn write_file(
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
-        sd.access_root_dir(|root| {
+        let _ = sd.access_root_dir(|root| {
             recurse_file(&root, &components[1..count], |file| {
                 file.seek_from_start(start_from as u32).unwrap();
                 file.write(buf).unwrap()
@@ -324,7 +324,7 @@ pub extern "C" fn file_len(str: *const u8, len: usize) -> usize {
     let mut guard = SDCARD.get().try_lock().expect("Failed to get sdcard");
     let sd = guard.as_mut().unwrap();
     if !file.is_empty() {
-        sd.access_root_dir(|root| {
+        let _ = sd.access_root_dir(|root| {
             if let Ok(result) = recurse_file(&root, &file[1..], |file| file.length()) {
                 len = result
             }
