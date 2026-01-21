@@ -32,4 +32,4 @@ just userapps
 # copy the build applications from target/thumbv8m.main-none-eabihf/release-binary/application to the sdcard and rename them to app.bin
 
 # has builds for the official rp2350 board and the pimoroni2w board
-just kernel-release rp235x # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged
+just kernel-release rp235xa # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged

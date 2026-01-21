@@ -10,11 +10,14 @@ test = false
 doctest = false
 bench = false
 
+[profile.release]
+debug = true
+
 [features]
-default = ["rp235x"]
-pimoroni2w = ["rp235x", "psram"]
+default = ["rp235xa"]
+pimoroni2w = ["rp235xa", "psram"]
 # rp2040 = ["embassy-rp/rp2040"] # unsupported, ram too small for fb
-rp235x = ["embassy-rp/rp235xb"]
+rp235xa = ["embassy-rp/rp235xa"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 psram = ["dep:embedded-alloc"]
 overclock = []
@@ -63,15 +66,16 @@ cyw43 = { version = "0.3.0", features = [
 cyw43-pio = { version = "0.3.0", optional = true }
 
 critical-section = "1.2.0"
+cortex-m = { version = "0.7.7", features = ["inline-asm"] }
+cortex-m-rt = "0.7.5"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+portable-atomic = { version = "1.11", features = ["critical-section"] }
+assign-resources = "0.5.0"
+
 embedded-hal-bus = { version = "0.3.0", features = ["async"] }
 embedded-hal = "0.2.7"
 embedded-hal_2 = { package = "embedded-hal", version = "1.0.0" }
 embedded-hal-async = "1.0.0"
-cortex-m = { version = "0.7.7" }
-cortex-m-rt = "0.7.5"
-panic-probe = "0.3"
-portable-atomic = { version = "1.11", features = ["critical-section"] }
-assign-resources = "0.5.0"
 
 defmt = { version = "1.0.1", optional = true }
 defmt-rtt = "1.1.0"

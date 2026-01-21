@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-#[cfg(all(feature = "rp235x", not(feature = "pimoroni2w")))]
+#[cfg(all(feature = "rp235xa", not(feature = "pimoroni2w")))]
 const MEMORY: &[u8] = include_bytes!("rp2350.x");
 #[cfg(feature = "pimoroni2w")]
 const MEMORY: &'static [u8] = include_bytes!("rp2350.x");

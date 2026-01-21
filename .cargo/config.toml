@@ -4,7 +4,7 @@ runner = "probe-rs run --chip RP2350"
 
 [build]
 # target = "thumbv6m-none-eabi" # rp2040: Cortex-M0 and Cortex-M0+
-target = "thumbv8m.main-none-eabihf" # rp235x: Cortex-M33
+target = "thumbv8m.main-none-eabihf" # rp235xa: Cortex-M33
 
 [env]
 DEFMT_LOG = "info"
