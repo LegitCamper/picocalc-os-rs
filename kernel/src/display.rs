@@ -12,11 +12,11 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
 
 #[cfg(feature = "psram")]
-use crate::heap::HEAP;
-#[cfg(feature = "psram")]
-use core::alloc::{GlobalAlloc, Layout};
-#[cfg(feature = "psram")]
-use embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor};
+use {
+    crate::heap::HEAP,
+    core::alloc::{GlobalAlloc, Layout},
+    embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor},
+};
 
 #[cfg(feature = "fps")]
 pub use framebuffer::fps::{FPS_CANVAS, FPS_COUNTER};
