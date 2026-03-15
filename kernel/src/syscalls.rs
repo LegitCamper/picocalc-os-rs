@@ -1,8 +1,8 @@
 use alloc::{string::ToString, vec::Vec};
-use core::{ffi::c_char, ptr, sync::atomic::Ordering};
+use core::{ffi::c_char, ptr, slice, sync::atomic::Ordering};
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
-use embedded_graphics::draw_target::DrawTarget;
+use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
 use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
 use userlib_sys::{
@@ -89,13 +89,16 @@ pub extern "C" fn get_ms() -> u64 {
 
 const _: DrawIter = draw_iter;
 pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
-    // SAFETY: caller guarantees `ptr` is valid for `len` bytes
-    let cpixels = unsafe { core::slice::from_raw_parts(cpixels, len) };
-
-    let iter = cpixels.iter().copied().map(|c: CPixel| c.into());
+    let pixels: &[Pixel<Rgb565>] = unsafe { slice::from_raw_parts(cpixels.cast(), len) };
 
     FB_PAUSED.store(true, Ordering::Release);
-    unsafe { FRAMEBUFFER.as_mut().unwrap().draw_iter(iter).unwrap() }
+    unsafe {
+        FRAMEBUFFER
+            .as_mut()
+            .unwrap()
+            .draw_iter(pixels.iter().copied())
+            .unwrap()
+    }
     FB_PAUSED.store(false, Ordering::Release);
 }
 
