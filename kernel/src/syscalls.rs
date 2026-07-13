@@ -2,13 +2,19 @@ use alloc::{string::ToString, vec::Vec};
 use core::{ffi::c_char, ptr, slice, sync::atomic::Ordering};
 use embassy_rp::clocks::{RoscRng, clk_sys_freq};
 use embassy_time::Instant;
-use embedded_graphics::{Pixel, draw_target::DrawTarget, pixelcolor::Rgb565};
+use embedded_graphics::{
+    Pixel,
+    draw_target::DrawTarget,
+    geometry::{Point, Size},
+    pixelcolor::{Rgb565, raw::RawU16},
+    primitives::Rectangle,
+};
 use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
 use userlib_sys::{
-    AUDIO_BUFFER_SAMPLES, Alloc, AudioBufferReady, CLayout, CPixel, Dealloc, DrawIter, FileLen,
-    GenRand, GetMs, ListDir, Print, ReadFile, ReconfigureAudioSampleRate, RngRequest,
-    SendAudioBuffer, SleepMs, WriteFile, keyboard::*,
+    AUDIO_BUFFER_SAMPLES, Alloc, AudioBufferReady, Blit, CLayout, CPixel, Dealloc, DrawIter,
+    FileLen, FillRect, GenRand, GetMs, ListDir, Print, ReadFile, ReconfigureAudioSampleRate,
+    RngRequest, SendAudioBuffer, SleepMs, WriteFile, keyboard::*,
 };
 
 #[cfg(feature = "psram")]
@@ -97,6 +103,44 @@ pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
             .as_mut()
             .unwrap()
             .draw_iter(pixels.iter().copied())
+            .unwrap()
+    }
+    FB_PAUSED.store(false, Ordering::Release);
+}
+
+const _: FillRect = fill_rect;
+pub extern "C" fn fill_rect(x: u16, y: u16, w: u16, h: u16, color: u16) {
+    let area = Rectangle::new(
+        Point::new(x as i32, y as i32),
+        Size::new(w as u32, h as u32),
+    );
+    let color: Rgb565 = RawU16::new(color).into();
+
+    FB_PAUSED.store(true, Ordering::Release);
+    unsafe {
+        FRAMEBUFFER
+            .as_mut()
+            .unwrap()
+            .fill_solid(&area, color)
+            .unwrap()
+    }
+    FB_PAUSED.store(false, Ordering::Release);
+}
+
+const _: Blit = blit;
+pub extern "C" fn blit(x: u16, y: u16, w: u16, h: u16, colors: *const u16, len: usize) {
+    let area = Rectangle::new(
+        Point::new(x as i32, y as i32),
+        Size::new(w as u32, h as u32),
+    );
+    let raw: &[u16] = unsafe { slice::from_raw_parts(colors, len) };
+
+    FB_PAUSED.store(true, Ordering::Release);
+    unsafe {
+        FRAMEBUFFER
+            .as_mut()
+            .unwrap()
+            .fill_contiguous(&area, raw.iter().map(|&c| RawU16::new(c).into()))
             .unwrap()
     }
     FB_PAUSED.store(false, Ordering::Release);

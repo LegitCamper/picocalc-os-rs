@@ -16,7 +16,7 @@ use goblin::{
     elf32::{reloc::Rel, section_header::SectionHeader, sym::Sym},
 };
 use strum::IntoEnumIterator;
-use userlib_sys::{EntryFn, SyscallTable};
+use userlib_sys::{EntryFn, SYS_CALL_TABLE_COUNT, SyscallTable};
 
 const ELF32_HDR_SIZE: usize = 52;
 
@@ -28,6 +28,7 @@ pub enum LoadError {
     ElfIsNotPie,
     UnknownRelocationType,
     SyscallTableNotFound,
+    SyscallTableSizeMismatch,
 }
 
 pub async unsafe fn load_binary(name: &ShortFileName) -> Result<(EntryFn, Bump), LoadError> {
@@ -212,6 +213,15 @@ fn patch_syscalls(
 
                 let symbol_name = core::str::from_utf8(&name).expect("symbol was not utf8");
                 if symbol_name == stringify!(SYS_CALL_TABLE) {
+                    // The binary was linked against a different SyscallTable
+                    // than this kernel (e.g. built before a syscall was
+                    // added) -- writing the full table would overrun its
+                    // `.syscall_table` array and corrupt whatever follows it.
+                    let expected_size = SYS_CALL_TABLE_COUNT * size_of::<usize>();
+                    if sym.st_size as usize != expected_size {
+                        return Err(LoadError::SyscallTableSizeMismatch);
+                    }
+
                     let table_base =
                         unsafe { base.add((sym.st_value as usize) - min_vaddr as usize) }
                             as *mut usize;
@@ -235,6 +245,8 @@ fn patch_syscalls(
                             }
                             SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
                             SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
+                            SyscallTable::FillRect => syscalls::fill_rect as usize,
+                            SyscallTable::Blit => syscalls::blit as usize,
                         };
                         unsafe {
                             table_base.add(idx).write(ptr);

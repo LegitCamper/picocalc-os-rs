@@ -12,7 +12,7 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const SYS_CALL_TABLE_COUNT: usize = 15;
+pub const SYS_CALL_TABLE_COUNT: usize = 17;
 const _: () = assert!(SYS_CALL_TABLE_COUNT == SyscallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
@@ -33,6 +33,8 @@ pub enum SyscallTable {
     ReconfigureAudioSampleRate = 12,
     AudioBufferReady = 13,
     SendAudioBuffer = 14,
+    FillRect = 15,
+    Blit = 16,
 }
 
 #[unsafe(no_mangle)]
@@ -150,6 +152,27 @@ pub extern "C" fn draw_iter(ptr: *const CPixel, len: usize) {
     let f: DrawIter =
         unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::DrawIter as usize]) };
     f(ptr, len);
+}
+
+/// Fills an axis-aligned rectangle with a single color in one call, instead
+/// of marshaling it as a stream of individual `CPixel`s through `draw_iter`.
+pub type FillRect = extern "C" fn(x: u16, y: u16, w: u16, h: u16, color: u16);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fill_rect(x: u16, y: u16, w: u16, h: u16, color: u16) {
+    let f: FillRect =
+        unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::FillRect as usize]) };
+    f(x, y, w, h, color);
+}
+
+/// Writes a row-major block of raw RGB565 colors into a rectangle in one
+/// call, instead of marshaling it pixel-by-pixel through `draw_iter`.
+pub type Blit = extern "C" fn(x: u16, y: u16, w: u16, h: u16, colors: *const u16, len: usize);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn blit(x: u16, y: u16, w: u16, h: u16, colors: *const u16, len: usize) {
+    let f: Blit = unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::Blit as usize]) };
+    f(x, y, w, h, colors, len);
 }
 
 pub mod keyboard {

@@ -329,7 +329,10 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
 
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
                     let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
-                    let raw_color = RawU16::from(color).into_inner();
+                    // Stored pre-swapped so a full/partial draw can hand the
+                    // buffer straight to the display as raw bytes, see
+                    // `ST7365P::write_words_buffered`.
+                    let raw_color = RawU16::from(color).into_inner().swap_bytes();
                     if self.fb[idx] != raw_color {
                         self.fb[idx] = raw_color;
                         changed = true;
@@ -377,7 +380,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                     if drawable_area.contains(p) {
                         if let Some(color) = colors.next() {
                             let idx = (p.y as usize * SCREEN_WIDTH) + (p.x as usize);
-                            let raw_color = RawU16::from(color).into_inner();
+                            let raw_color = RawU16::from(color).into_inner().swap_bytes();
                             if self.fb[idx] != raw_color {
                                 self.fb[idx] = raw_color;
                                 changed = true;
@@ -414,7 +417,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
             self.size().width as u16 - 1,
             self.size().height as u16 - 1,
             core::iter::repeat_n(
-                RawU16::from(color).into_inner(),
+                RawU16::from(color).into_inner().swap_bytes(),
                 (self.size().width * self.size().height) as usize,
             ),
         )?;
@@ -517,7 +520,9 @@ pub mod fps {
                 }
 
                 let index = (point.y as usize) * FPS_CANVAS_WIDTH + point.x as usize;
-                self.canvas[index] = color.into_storage();
+                // Pre-swapped to match the main framebuffer's storage, since
+                // this canvas is copied directly into it (see draw_fps_into_fb).
+                self.canvas[index] = color.into_storage().swap_bytes();
             }
             Ok(())
         }

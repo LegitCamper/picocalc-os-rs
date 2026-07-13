@@ -50,7 +50,10 @@ pub mod display {
     use embedded_graphics::{
         Pixel,
         geometry::{Dimensions, Point},
-        pixelcolor::Rgb565,
+        pixelcolor::{
+            Rgb565,
+            raw::{RawData, RawU16},
+        },
         prelude::{DrawTarget, Size},
         primitives::Rectangle,
     };
@@ -117,6 +120,111 @@ pub mod display {
 
             if count > 0 {
                 userlib_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
+            }
+
+            Ok(())
+        }
+
+        // One `fill_rect` syscall instead of decomposing the area into
+        // individual pixels through `draw_iter` (the default impl this
+        // overrides), e.g. for game backgrounds and UI panels.
+        fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+            let drawable = area.intersection(&self.bounding_box());
+            if drawable.size.width == 0 || drawable.size.height == 0 {
+                return Ok(());
+            }
+
+            userlib_sys::fill_rect(
+                drawable.top_left.x as u16,
+                drawable.top_left.y as u16,
+                drawable.size.width as u16,
+                drawable.size.height as u16,
+                RawU16::from(color).into_inner(),
+            );
+
+            Ok(())
+        }
+
+        // Batches contiguous rows into `blit` calls instead of decomposing
+        // the area into individual pixels through `draw_iter` (the default
+        // impl this overrides), e.g. for images and animation frames. Every
+        // row within the screen-clipped area shares the same horizontal
+        // clip, so runs of rows are batched into a single rectangular blit.
+        fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+        where
+            I: IntoIterator<Item = Self::Color>,
+        {
+            let drawable = area.intersection(&self.bounding_box());
+            if drawable.size.width == 0 || drawable.size.height == 0 {
+                return Ok(());
+            }
+
+            let area_width = area.size.width;
+            let area_height = area.size.height;
+            let clip_w = drawable.size.width as usize;
+            let clip_x0 = drawable.top_left.x;
+            let clip_y0 = drawable.top_left.y;
+            let clip_y1 = clip_y0 + drawable.size.height as i32;
+
+            const CHUNK_LEN: usize = 4096;
+            static mut CHUNK: [u16; CHUNK_LEN] = [0; CHUNK_LEN];
+            let rows_per_chunk = (CHUNK_LEN / clip_w).max(1);
+
+            let mut colors = colors.into_iter();
+            let mut chunk_count = 0usize;
+            let mut chunk_row0 = clip_y0;
+
+            for y in 0..area_height {
+                let py = area.top_left.y + y as i32;
+                let row_in_bounds = py >= clip_y0 && py < clip_y1;
+
+                for x in 0..area_width {
+                    let px = area.top_left.x + x as i32;
+                    let in_bounds = row_in_bounds && px >= clip_x0 && px < clip_x0 + clip_w as i32;
+
+                    let Some(color) = colors.next() else {
+                        break;
+                    };
+
+                    if in_bounds {
+                        if chunk_count == 0 {
+                            chunk_row0 = py;
+                        }
+                        unsafe { CHUNK[chunk_count] = RawU16::from(color).into_inner() };
+                        chunk_count += 1;
+                    }
+                }
+
+                if row_in_bounds {
+                    let rows_buffered = chunk_count / clip_w;
+                    if rows_buffered >= rows_per_chunk {
+                        unsafe {
+                            userlib_sys::blit(
+                                clip_x0 as u16,
+                                chunk_row0 as u16,
+                                clip_w as u16,
+                                rows_buffered as u16,
+                                CHUNK.as_ptr(),
+                                chunk_count,
+                            );
+                        }
+                        chunk_count = 0;
+                    }
+                }
+            }
+
+            if chunk_count > 0 {
+                let rows_buffered = chunk_count / clip_w;
+                unsafe {
+                    userlib_sys::blit(
+                        clip_x0 as u16,
+                        chunk_row0 as u16,
+                        clip_w as u16,
+                        rows_buffered as u16,
+                        CHUNK.as_ptr(),
+                        chunk_count,
+                    );
+                }
             }
 
             Ok(())
