@@ -6,7 +6,8 @@ use embedded_graphics::draw_target::DrawTarget;
 use embedded_sdmmc::LfnBuffer;
 use heapless::spsc::Queue;
 use userlib_sys::{
-    AUDIO_BUFFER_SAMPLES, Alloc, AudioBufferReady, CLayout, CPixel, Dealloc, DrawIter, FileLen,
+    AUDIO_BUFFER_SAMPLES, Alloc, AudioBufferReady, CLayout, CPixel, Dealloc, DrawIter, DrawRect,
+    FileLen,
     GenRand, GetMs, ListDir, Print, ReadFile, ReconfigureAudioSampleRate, RngRequest,
     SendAudioBuffer, SleepMs, WriteFile, keyboard::*,
 };
@@ -96,6 +97,22 @@ pub extern "C" fn draw_iter(cpixels: *const CPixel, len: usize) {
 
     FB_PAUSED.store(true, Ordering::Release);
     unsafe { FRAMEBUFFER.as_mut().unwrap().draw_iter(iter).unwrap() }
+    FB_PAUSED.store(false, Ordering::Release);
+}
+
+const _: DrawRect = draw_rect;
+pub extern "C" fn draw_rect(x: u16, y: u16, w: u16, h: u16, ptr: *const u16, len: usize) {
+    if (w as usize) * (h as usize) > len {
+        #[cfg(feature = "defmt")]
+        defmt::warn!("draw_rect buffer too small: {} < {}x{}", len, w, h);
+        return;
+    }
+
+    // SAFETY: caller guarantees `ptr` is valid for `len` u16s
+    let pixels = unsafe { core::slice::from_raw_parts(ptr, len) };
+
+    FB_PAUSED.store(true, Ordering::Release);
+    unsafe { FRAMEBUFFER.as_mut().unwrap().blit(x, y, w, h, pixels) };
     FB_PAUSED.store(false, Ordering::Release);
 }
 

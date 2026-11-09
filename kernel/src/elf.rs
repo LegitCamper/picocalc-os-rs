@@ -235,6 +235,7 @@ fn patch_syscalls(
                             }
                             SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
                             SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
+                            SyscallTable::DrawRect => syscalls::draw_rect as usize,
                         };
                         unsafe {
                             table_base.add(idx).write(ptr);

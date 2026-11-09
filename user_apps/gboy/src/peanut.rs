@@ -2,27 +2,41 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::{DISPLAY, GAME_ROM, RAM};
+use crate::RAM;
 
 #[allow(unused)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use embedded_graphics::{pixelcolor::Rgb565, prelude::Point, Drawable};
-use userlib::{display::Pixel565, println};
+use userlib::{
+    display::{SCREEN_HEIGHT, SCREEN_WIDTH},
+    println,
+};
 
 pub const GBOY_WIDTH: usize = 160;
 pub const GBOY_HEIGHT: usize = 144;
 
+// centered on the 320x320 panel
+const X_OFF: usize = (SCREEN_WIDTH - GBOY_WIDTH) / 2;
+const Y_OFF: usize = (SCREEN_HEIGHT - GBOY_HEIGHT) / 2;
+const _: () = assert!(X_OFF + GBOY_WIDTH <= SCREEN_WIDTH);
+const _: () = assert!(Y_OFF + GBOY_HEIGHT <= SCREEN_HEIGHT);
+
+/// Rom bytes, cached as a slice so the per-byte read callback is a single
+/// bounds compare instead of an `Option` unwrap + panic path.
+pub static mut ROM: &[u8] = &[];
+
 pub unsafe extern "C" fn gb_rom_read(_gb: *mut gb_s, addr: u32) -> u8 {
-    unsafe { GAME_ROM.as_ref().unwrap()[addr as usize] }
+    unsafe { ROM.get(addr as usize).copied().unwrap_or(0xFF) }
 }
 
 pub unsafe extern "C" fn gb_cart_ram_read(_gb: *mut gb_s, addr: u32) -> u8 {
-    unsafe { RAM[addr as usize] }
+    unsafe { RAM.get(addr as usize).copied().unwrap_or(0xFF) }
 }
 
 pub unsafe extern "C" fn gb_cart_ram_write(_gb: *mut gb_s, addr: u32, val: u8) {
-    unsafe { RAM[addr as usize] = val }
+    if let Some(slot) = unsafe { RAM.get_mut(addr as usize) } {
+        *slot = val;
+    }
 }
 
 pub unsafe extern "C" fn gb_error(_gb: *mut gb_s, err: gb_error_e, addr: u16) {
@@ -33,70 +47,48 @@ pub unsafe extern "C" fn gb_error(_gb: *mut gb_s, err: gb_error_e, addr: u16) {
         3 => "INVALID WRITE",
         4 => "HALT FOREVER",
         5 => "INVALID MAX",
-        _ => unreachable!(),
+        _ => "BAD ERROR CODE",
     };
 
     println!("PeanutGB error: {}, addr: {}", e, addr);
 }
 
-const NUM_PALETTES: usize = 3;
-const SHADES_PER_PALETTE: usize = 4;
+/// Pack to the panel's native Rgb565 word once, at compile time.
+/// `Rgb565::new` takes pre-scaled 5/6/5 channels and silently masks wider
+/// values, which is why the old 8-bit palette rendered wrong.
+const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
+    ((r as u16 & 0x1F) << 11) | ((g as u16 & 0x3F) << 5) | (b as u16 & 0x1F)
+}
 
-const PALETTES: [[Rgb565; SHADES_PER_PALETTE]; NUM_PALETTES] = [
-    [
-        Rgb565::new(8, 24, 32),
-        Rgb565::new(52, 104, 86),
-        Rgb565::new(136, 192, 112),
-        Rgb565::new(224, 248, 208),
-    ], // BG
-    [
-        Rgb565::new(8, 24, 32),
-        Rgb565::new(52, 104, 86),
-        Rgb565::new(136, 192, 112),
-        Rgb565::new(224, 248, 208),
-    ], // OBJ0
-    [
-        Rgb565::new(8, 24, 32),
-        Rgb565::new(52, 104, 86),
-        Rgb565::new(136, 192, 112),
-        Rgb565::new(224, 248, 208),
-    ], // OBJ1
+/// Classic DMG green shades, darkest first.
+const PALETTE: [u16; 4] = [
+    rgb565(0x08 >> 3, 0x18 >> 2, 0x20 >> 3),
+    rgb565(0x34 >> 3, 0x68 >> 2, 0x56 >> 3),
+    rgb565(0x88 >> 3, 0xC0 >> 2, 0x70 >> 3),
+    rgb565(0xE0 >> 3, 0xF8 >> 2, 0xD0 >> 3),
 ];
 
 pub unsafe extern "C" fn lcd_draw_line(_gb: *mut gb_s, pixels: *const u8, line: u8) {
-    if line < GBOY_HEIGHT as u8 {
-        let pixels = unsafe { core::slice::from_raw_parts(pixels, GBOY_WIDTH) };
-        let y = line as u16;
-
-        for (x, &p) in pixels.iter().enumerate() {
-            let palette_idx = ((p & 0xF0) >> 4) as usize;
-            let shade_idx = (p & 0x03) as usize;
-
-            let color = PALETTES
-                .get(palette_idx)
-                .and_then(|pal| pal.get(shade_idx))
-                .copied()
-                .unwrap_or(Rgb565::new(0, 0, 0));
-
-            // let sx = (x as u16) * 2;
-            // let sy = y * 2;
-
-            // draw_color(color, sx, sy);
-            // draw_color(color, sx + 1, sy);
-            // draw_color(color, sx, sy + 1);
-            // draw_color(color, sx + 1, sy + 1);
-            //
-            draw_color(color, x as u16, y as u16);
-        }
+    if line as usize >= GBOY_HEIGHT {
+        return;
     }
-}
 
-fn draw_color(color: Rgb565, x: u16, y: u16) {
-    let mut pixel = Pixel565::default();
-    pixel.0 = Point::new(x.into(), y.into());
-    pixel.1 = color;
+    // SAFETY: Peanut-GB always hands us a full LCD_WIDTH scanline
+    let src = unsafe { core::slice::from_raw_parts(pixels, GBOY_WIDTH) };
 
+    let mut row = [0_u16; GBOY_WIDTH];
+    for (dst, &p) in row.iter_mut().zip(src) {
+        *dst = PALETTE[(p & 0x03) as usize];
+    }
+
+    // one syscall per scanline instead of one per pixel
     unsafe {
-        pixel.draw(&mut *DISPLAY).unwrap();
-    }
+        (*crate::DISPLAY).blit(
+            X_OFF as u16,
+            (Y_OFF + line as usize) as u16,
+            GBOY_WIDTH as u16,
+            1,
+            &row,
+        )
+    };
 }

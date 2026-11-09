@@ -12,7 +12,7 @@ use strum::{EnumCount, EnumIter};
 
 pub type EntryFn = fn();
 
-pub const SYS_CALL_TABLE_COUNT: usize = 15;
+pub const SYS_CALL_TABLE_COUNT: usize = 16;
 const _: () = assert!(SYS_CALL_TABLE_COUNT == SyscallTable::COUNT);
 
 #[derive(Clone, Copy, EnumIter, EnumCount)]
@@ -33,6 +33,7 @@ pub enum SyscallTable {
     ReconfigureAudioSampleRate = 12,
     AudioBufferReady = 13,
     SendAudioBuffer = 14,
+    DrawRect = 15,
 }
 
 #[unsafe(no_mangle)]
@@ -150,6 +151,63 @@ pub extern "C" fn draw_iter(ptr: *const CPixel, len: usize) {
     let f: DrawIter =
         unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::DrawIter as usize]) };
     f(ptr, len);
+}
+
+/// Blits a row-major `Rgb565` rect (raw `u16`) straight into the kernel
+/// framebuffer. Much cheaper than `draw_iter` per pixel: no per-pixel
+/// coordinates cross the ABI.
+pub type DrawRect =
+    extern "C" fn(x: u16, y: u16, w: u16, h: u16, ptr: *const u16, len: usize);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn draw_rect(x: u16, y: u16, w: u16, h: u16, ptr: *const u16, len: usize) {
+    let f: DrawRect =
+        unsafe { core::mem::transmute(SYS_CALL_TABLE[SyscallTable::DrawRect as usize]) };
+    f(x, y, w, h, ptr, len);
+}
+
+/// Visible part of a blit rect after clipping to a `screen_w` x `screen_h`
+/// panel, as `(width, height)`. `None` means fully offscreen.
+///
+/// Shared by the app side and the kernel so both agree on what a partially
+/// offscreen blit means.
+pub const fn blit_clip(
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    screen_w: u16,
+    screen_h: u16,
+) -> Option<(u16, u16)> {
+    if w == 0 || h == 0 || x >= screen_w || y >= screen_h {
+        return None;
+    }
+    let vis_w = if w > screen_w - x { screen_w - x } else { w };
+    let vis_h = if h > screen_h - y { screen_h - y } else { h };
+    Some((vis_w, vis_h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::blit_clip;
+
+    #[test]
+    fn blit_clip_keeps_fully_visible_rect() {
+        assert_eq!(blit_clip(80, 88, 160, 144, 320, 320), Some((160, 144)));
+    }
+
+    #[test]
+    fn blit_clip_truncates_rect_crossing_right_and_bottom_edges() {
+        assert_eq!(blit_clip(300, 310, 160, 144, 320, 320), Some((20, 10)));
+    }
+
+    #[test]
+    fn blit_clip_rejects_offscreen_or_empty_rect() {
+        assert_eq!(blit_clip(320, 0, 16, 16, 320, 320), None);
+        assert_eq!(blit_clip(0, 320, 16, 16, 320, 320), None);
+        assert_eq!(blit_clip(0, 0, 0, 16, 320, 320), None);
+        assert_eq!(blit_clip(0, 0, 16, 0, 320, 320), None);
+    }
 }
 
 pub mod keyboard {

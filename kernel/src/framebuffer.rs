@@ -12,6 +12,7 @@ use embedded_graphics::{
 use embedded_hal_2::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
 use st7365p_lcd::ST7365P;
+use userlib_sys::blit_clip;
 
 #[cfg(feature = "fps")]
 use fps::{FPS_CANVAS, FPS_CANVAS_HEIGHT, FPS_CANVAS_WIDTH, FPS_CANVAS_X, FPS_CANVAS_Y};
@@ -42,6 +43,39 @@ impl<'a> AtomicFrameBuffer<'a> {
             fb: buffer,
             dirty_tiles: core::array::from_fn(|_| AtomicBool::new(true)),
             batch_tile_buf: [0; MAX_BATCH_TILES * TILE_SIZE * TILE_SIZE],
+        }
+    }
+
+    /// Row-major blit of raw `Rgb565` data. Copies whole rows with
+    /// `copy_from_slice` and marks tiles dirty once, rather than running the
+    /// per-pixel `DrawTarget` path.
+    pub fn blit(&mut self, x: u16, y: u16, w: u16, h: u16, pixels: &[u16]) {
+        // a partially offscreen rect still blits its visible part
+        let Some((vis_w, vis_h)) =
+            blit_clip(x, y, w, h, SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16)
+        else {
+            return;
+        };
+        let (x, y, w) = (x as usize, y as usize, w as usize);
+        let (vis_w, vis_h) = (vis_w as usize, vis_h as usize);
+
+        let mut changed = false;
+        for row in 0..vis_h {
+            let src = &pixels[row * w..row * w + vis_w];
+            let dst_start = (y + row) * SCREEN_WIDTH + x;
+            let dst = &mut self.fb[dst_start..dst_start + vis_w];
+
+            if dst != src {
+                dst.copy_from_slice(src);
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.mark_tiles_dirty(Rectangle::new(
+                Point::new(x as i32, y as i32),
+                Size::new(vis_w as u32, vis_h as u32),
+            ));
         }
     }
 

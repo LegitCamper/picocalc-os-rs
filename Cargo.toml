@@ -27,6 +27,10 @@ debug = false
 opt-level = "z"
 panic = "unwind"
 
+# Emulators are cycle-bound, not flash-bound: size-opt costs ~2x here.
+[profile.release-binary.package.gboy]
+opt-level = 3
+
 [profile.dev]
 lto = true
 opt-level = "s"

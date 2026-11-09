@@ -24,7 +24,7 @@ mod peanut;
 use peanut::gb_run_frame;
 
 use crate::peanut::{
-    JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
+    ROM, JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
     JOYPAD_UP, gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_get_rom_name, gb_get_save_size,
     gb_init, gb_init_lcd, gb_reset, gb_rom_read, gb_s, lcd_draw_line,
 };
@@ -92,11 +92,14 @@ pub fn main() {
     assert!(size == read);
     println!("Rom size: {}", read);
 
-    let mut gb = MaybeUninit::<gb_s>::uninit();
+    // hand the rom to the hot read callback as a plain slice
+    unsafe { ROM = GAME_ROM.as_ref().unwrap().as_slice() };
+
+    let mut gb_uninit = MaybeUninit::<gb_s>::uninit();
 
     let init_status = unsafe {
         gb_init(
-            gb.as_mut_ptr(),
+            gb_uninit.as_mut_ptr(),
             Some(gb_rom_read),
             Some(gb_cart_ram_read),
             Some(gb_cart_ram_write),
@@ -105,27 +108,33 @@ pub fn main() {
         )
     };
     println!("gb init status: {}", init_status);
+    assert!(init_status == 0, "gb_init failed");
+
+    // `assume_init()` copies the whole ~26KB `gb_s` by value; every such copy
+    // was both a huge memcpy and a write to a temporary that got discarded
+    // (which is why joypad input never reached the emulator).
+    let gb: &mut gb_s = unsafe { gb_uninit.assume_init_mut() };
 
     unsafe {
-        load_save(&mut gb.assume_init());
-    }
-
-    unsafe {
-        gb_init_lcd(gb.as_mut_ptr(), Some(lcd_draw_line));
-
-        // enable frame skip
-        // gb.assume_init().direct.set_frame_skip(!true); // active low
+        load_save(gb);
+        gb_init_lcd(gb, Some(lcd_draw_line));
     };
+
+    // `direct` is a bitfield bindgen renders opaquely, so the joypad byte is
+    // reached by offset. Hold the pointer once instead of recomputing it.
+    // ponytail: offset 2 is tied to Peanut-GB's `gb_direct` layout; if that
+    // struct changes, switch to a C accessor in peanut_gb_stub.c.
+    let joypad_ptr = unsafe { (&raw mut gb.direct).cast::<u8>().add(2) };
 
     loop {
         let event = get_key();
         let button = match event.key {
             KeyCode::Esc => {
-                unsafe { write_save(&mut gb.assume_init()) };
+                unsafe { write_save(gb) };
                 break;
             }
             KeyCode::Char('r') => {
-                unsafe { gb_reset(gb.as_mut_ptr()) };
+                unsafe { gb_reset(gb) };
                 continue;
             }
             KeyCode::Tab => JOYPAD_START as u8,
@@ -140,23 +149,18 @@ pub fn main() {
         };
 
         if button != 0 {
+            // joypad bits are active low
             unsafe {
-                // bindgen incorrectly generates direct so manual manipulation is required :(
-                let direct_ptr = &mut gb.assume_init().direct as *mut _ as *mut u8;
-                let joypad_ptr = direct_ptr.add(2); // this is the joypad bitfield byte
-
-                if let KeyState::Pressed = event.state {
-                    *joypad_ptr &= !button;
-                } else if let KeyState::Released = event.state {
-                    *joypad_ptr |= button;
+                match event.state {
+                    KeyState::Pressed | KeyState::Hold => *joypad_ptr &= !button,
+                    KeyState::Released => *joypad_ptr |= button,
+                    KeyState::Idle => {}
                 }
-
-                println!("joypad: {:b}", *joypad_ptr);
             }
         }
 
         unsafe {
-            gb_run_frame(gb.as_mut_ptr());
+            gb_run_frame(gb);
         }
     }
 }

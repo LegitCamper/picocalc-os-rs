@@ -84,6 +84,24 @@ pub mod display {
         }
     }
 
+    impl Display {
+        /// Blit raw row-major `Rgb565` pixels in one syscall.
+        ///
+        /// Use this for anything bigger than a handful of pixels; the
+        /// `DrawTarget` impl costs a syscall per `BUF_SIZE` pixels *and*
+        /// ships coordinates for every pixel.
+        pub fn blit(&mut self, x: u16, y: u16, w: u16, h: u16, pixels: &[u16]) {
+            assert!(
+                pixels.len() >= w as usize * h as usize,
+                "blit buffer too small: {} < {}x{}",
+                pixels.len(),
+                w,
+                h
+            );
+            userlib_sys::draw_rect(x, y, w, h, pixels.as_ptr(), pixels.len());
+        }
+    }
+
     impl Dimensions for Display {
         fn bounding_box(&self) -> Rectangle {
             Rectangle {
