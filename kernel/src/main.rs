@@ -18,12 +18,10 @@ mod framebuffer;
 // TODO: NEED TO UPDATE MCU TO TEST BATTERY READS
 #[allow(unused)]
 mod peripherals;
-#[allow(unused)]
-mod scsi;
+mod mtp;
 mod storage;
 mod syscalls;
 mod ui;
-#[allow(unused)]
 mod usb;
 mod utils;
 
@@ -41,10 +39,11 @@ use crate::{
     audio::{AUDIO_BUFFER_WRITTEN, audio_handler, clear_audio_buffers},
     display::{FRAMEBUFFER, display_handler, init_display},
     peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
-    scsi::MSC_SHUTDOWN,
+    mtp::{MTP_RESUME, MTP_SHUTDOWN},
     storage::{SDCARD, SdCard},
     syscalls::{KEY_CACHE, MS_SINCE_LAUNCH},
     ui::{SELECTIONS, clear_selection, ui_handler},
+    usb::usb_handler,
 };
 use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -219,7 +218,7 @@ async fn userland_task() {
 
             clear_selection().await;
 
-            MSC_SHUTDOWN.signal(());
+            MTP_SHUTDOWN.signal(());
         }
 
         unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
@@ -234,6 +233,8 @@ async fn userland_task() {
 
             ENABLE_UI.store(true, Ordering::Release);
             UI_CHANGE.signal(());
+
+            MTP_RESUME.signal(());
             unsafe { FRAMEBUFFER.as_mut().unwrap().clear(Rgb565::BLACK).unwrap() };
 
             let mut selections = SELECTIONS.lock().await;
@@ -392,8 +393,9 @@ async fn kernel_task(
 
     spawner.spawn(audio_handler(audio)).unwrap();
 
-    let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    // spawner.spawn(usb_handler(usb)).unwrap();
+    spawner
+        .spawn(usb_handler(embassy_rp_usb::Driver::new(usb, Irqs)))
+        .unwrap();
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);

@@ -1,4 +1,4 @@
-use crate::{scsi::MassStorageClass, storage::SdCard};
+use crate::mtp::MtpClass;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::select;
 use embassy_rp::{peripherals::USB, usb::Driver};
@@ -28,11 +28,10 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
         &mut control_buf,
     );
 
-    let temp_sd: Option<SdCard> = None;
-    let mut scsi = MassStorageClass::new(&mut builder, temp_sd);
+    let mut mtp = MtpClass::new(&mut builder);
     let usb = builder.build();
 
-    select(run(usb), scsi.poll()).await;
+    select(run(usb), mtp.run()).await;
 }
 
 async fn run<'d>(mut usb: UsbDevice<'d, Driver<'d, USB>>) -> ! {
