@@ -15,9 +15,9 @@ use userlib::{
     display::Display,
     format,
     fs::{Entries, file_len, list_dir, read_file, write_file},
-    get_key,
+    get_key, get_ms,
     keyboard::{KeyCode, KeyState},
-    println,
+    println, sleep,
 };
 
 mod peanut;
@@ -26,7 +26,8 @@ use peanut::gb_run_frame;
 use crate::peanut::{
     ROM, JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
     JOYPAD_UP, gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_get_rom_name, gb_get_save_size,
-    gb_init, gb_init_lcd, gb_reset, gb_rom_read, gb_s, lcd_draw_line,
+    gb_init, gb_init_lcd, gb_reset, gb_rom_read, gb_s, gb_set_frame_skip, gb_set_joypad,
+    lcd_draw_line,
 };
 
 static mut DISPLAY: LazyCell<Display> = LazyCell::new(|| Display::take().unwrap());
@@ -46,6 +47,8 @@ pub extern "Rust" fn _start() {
 }
 
 const GAME_PATH: &'static str = "/games/gameboy";
+// 4194304 Hz / 70224 cycles per frame = 59.73 Hz
+const FRAME_MS: u64 = 1000 / 60;
 
 static mut GAME_ROM: Option<Vec<u8>> = None;
 
@@ -120,11 +123,13 @@ pub fn main() {
         gb_init_lcd(gb, Some(lcd_draw_line));
     };
 
-    // `direct` is a bitfield bindgen renders opaquely, so the joypad byte is
-    // reached by offset. Hold the pointer once instead of recomputing it.
-    // ponytail: offset 2 is tied to Peanut-GB's `gb_direct` layout; if that
-    // struct changes, switch to a C accessor in peanut_gb_stub.c.
-    let joypad_ptr = unsafe { (&raw mut gb.direct).cast::<u8>().add(2) };
+    // joypad bits are active low; all released
+    let mut joypad: u8 = 0xFF;
+    unsafe { gb_set_joypad(gb, joypad) };
+
+    // skip rendering every other frame when we fall behind
+    let mut frame_skip = false;
+    let mut next_frame = get_ms();
 
     loop {
         let event = get_key();
@@ -149,18 +154,34 @@ pub fn main() {
         };
 
         if button != 0 {
-            // joypad bits are active low
-            unsafe {
-                match event.state {
-                    KeyState::Pressed | KeyState::Hold => *joypad_ptr &= !button,
-                    KeyState::Released => *joypad_ptr |= button,
-                    KeyState::Idle => {}
-                }
+            match event.state {
+                KeyState::Pressed | KeyState::Hold => joypad &= !button,
+                KeyState::Released => joypad |= button,
+                KeyState::Idle => {}
             }
+            unsafe { gb_set_joypad(gb, joypad) };
         }
 
-        unsafe {
-            gb_run_frame(gb);
+        unsafe { gb_run_frame(gb) };
+
+        // pace to the real gameboy's ~59.7Hz; only skip frames when behind
+        next_frame += FRAME_MS;
+        let now = get_ms();
+        if now < next_frame {
+            if frame_skip {
+                frame_skip = false;
+                unsafe { gb_set_frame_skip(gb, false) };
+            }
+            sleep(next_frame - now);
+        } else {
+            if !frame_skip {
+                frame_skip = true;
+                unsafe { gb_set_frame_skip(gb, true) };
+            }
+            // too far behind to catch up; resync instead of spiralling
+            if now - next_frame > 10 * FRAME_MS {
+                next_frame = now;
+            }
         }
     }
 }

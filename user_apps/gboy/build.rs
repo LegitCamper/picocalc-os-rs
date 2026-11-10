@@ -31,7 +31,8 @@ fn main() {
 
 fn bindgen() {
     let bindings = bindgen::Builder::default()
-        .header("Peanut-GB/peanut_gb.h")
+        .header("peanut_gb_stub.c")
+        .clang_arg("-IPeanut-GB")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .disable_nested_struct_naming()
         .clang_arg("-I../../picolibc/newlib/libc/include/")
@@ -48,6 +49,10 @@ fn bindgen() {
     cc::Build::new()
         .define("PEANUT_GB_IS_LITTLE_ENDIAN", None)
         .define("ENABLE_LCD", None)
+        // we only read the 2 shade bits; skip the palette tagging work
+        .define("PEANUT_GB_12_COLOUR", "0")
+        // drops a qsort of sprites on every scanline
+        .define("PEANUT_GB_HIGH_LCD_ACCURACY", "0")
         .file("peanut_gb_stub.c")
         .include("Peanut-GB")
         .include("../../picolibc/newlib/libc/include")
