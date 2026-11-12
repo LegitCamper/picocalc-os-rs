@@ -16,7 +16,9 @@ kernel through a table of `extern "C"` function pointers.
 - `userlib/` — safe Rust wrapper over `userlib_sys` that apps use.
 - `selection_ui/` — shared list-picker widget for apps.
 - `user_apps/*` — the apps (calculator, snake, gallery, gif, wav_player).
-- `picolibc/` — git submodule, libc for C code (`just newlib`).
+- `user_apps/picolibc/` — app-only libc submodule (`just newlib`); not used by kernel.
+- `tools/build/` — shared Just recipes, Cargo build script, and C header config.
+- `user_apps/doom/` — Doom-specific build/check scripts and linker layout.
 
 ## Commands
 

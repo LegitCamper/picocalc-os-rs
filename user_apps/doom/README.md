@@ -13,7 +13,7 @@ Requirements: the repository's Rust toolchain (for `rust-lld`), Python 3,
 a C compiler with AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ```sh
-git submodule update --init picolibc user_apps/doom/doomgeneric
+git submodule update --init user_apps/picolibc user_apps/doom/doomgeneric
 just newlib
 just doom
 ./user_apps/doom/sizes.sh
@@ -22,7 +22,7 @@ cargo build -p kernel --release --no-default-features --features pimoroni2w
 
 `PICOLIBC` may point to an existing PIC picolibc install prefix containing
 `include/` and `lib/libc.a`. The default is
-`picolibc/build/install/usr/local/picolibc/thumbv8m_main_fp-none-eabi`.
+`user_apps/picolibc/build/install/usr/local/picolibc/thumbv8m_main_fp-none-eabi`.
 The existing `just newlib` recipe configures `-Db_pie=true` and
 `-Dtinystdio=false`; do not substitute the toolchain's non-PIC libc.
 

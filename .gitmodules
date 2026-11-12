@@ -1,5 +1,5 @@
 [submodule "picolibc"]
-	path = picolibc
+	path = user_apps/picolibc
 	url = https://github.com/picolibc/picolibc
 [submodule "user-apps/gboy/Peanut-GB"]
 	path = user-apps/gboy/Peanut-GB

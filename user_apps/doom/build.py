@@ -12,7 +12,7 @@ REPO = ROOT.parent.parent
 OUT = REPO / "target" / "doom"
 CC = os.environ.get("CC_ARM", "arm-none-eabi-gcc")
 PICOLIBC = Path(os.environ.get("PICOLIBC", str(
-    REPO / "picolibc/build/install/usr/local/picolibc/thumbv8m_main_fp-none-eabi")))
+    REPO / "user_apps/picolibc/build/install/usr/local/picolibc/thumbv8m_main_fp-none-eabi")))
 FLAGS = ["-Os", "-mcpu=cortex-m33", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv5-sp-d16",
          "-fPIE", "-ffunction-sections", "-fdata-sections", "-fno-strict-aliasing",
          "-fno-stack-protector", "-std=gnu11", "-D_DEFAULT_SOURCE", "-DNORMALUNIX",
