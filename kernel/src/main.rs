@@ -246,8 +246,10 @@ async fn userland_task() {
             },
         );
         #[cfg(feature = "defmt")]
-        defmt::info!("Executing Binary");
+        defmt::info!("Executing Binary: image={:#x}, size={}", image.start, image.len);
         entry();
+        #[cfg(feature = "defmt")]
+        defmt::info!("Binary returned");
         user_memory::finish();
 
         // enable kernel ui

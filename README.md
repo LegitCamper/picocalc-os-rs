@@ -42,6 +42,24 @@ just userapps
 just kernel-release rp235xa # keep in mind that latest is required because of https://github.com/JoNil/elf2uf2-rs/pull/41 
 ```
 
+## Doom Game Data
+
+Doom requires a **pimoroni2w board with 8 MiB PSRAM** and your own trusted
+Doom shareware IWAD. Copy it as `DOOM1.WAD` into the **SD card root**, next to
+`DOOM.BIN`, not inside a `doom/` folder:
+
+```text
+SD Card/
+  DOOM.BIN    (built as target/doom/doom.bin)
+  DOOM1.WAD  (Doom shareware game data)
+```
+
+Over USB MTP, the destination is **PicoCalc > SD Card > DOOM1.WAD**.
+The app opens `/doom1.wad`; FAT filenames are case-insensitive.
+The WAD is not bundled or downloaded by the build. Renaming another game's
+WAD does not make it compatible. A missing WAD prevents Doom from starting.
+See [Doom build and run instructions](user_apps/doom/README.md).
+
 ## USB File Transfer
 
 USB exposes an MTP device named **PicoCalc**, with storage named **SD Card**.

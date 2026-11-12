@@ -64,9 +64,13 @@ break maps or overrun renderer buffers. Default renderer capacities remain.
 The shrink patch still permits overrides for experiments, not supported gameplay.
 
 The kernel loader owns one aligned, zero-filled image allocation per launch and
-frees it on load failure or app return. With `psram` the image lives in the XIP
-window and `MAX_IMAGE_SIZE` is 640 KiB; without it, images stay in the SRAM
-arena under the original 250 KiB ceiling. Merely widening a linker window would
+frees it on load failure or app return. Images up to 250 KiB stay in SRAM,
+including on PSRAM boards, so Rust apps can use exclusive atomics such as the
+display singleton's compare-exchange. Larger images require `psram` and live in
+the XIP window under the 640 KiB `MAX_IMAGE_SIZE` ceiling; those apps must not
+use exclusive atomics in their image storage. Doom uses this larger-image path.
+An SRAM allocation failure does not silently move an ordinary app to PSRAM.
+Merely widening a linker window would
 not move an image out of SRAM. PSRAM exhaustion returns null rather than
 panicking; Doom reports a failed private-heap allocation and returns without
 starting the engine. Syscall reads are checked with `get_last_error`, so a
