@@ -299,10 +299,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
 
                 if (x as usize) < SCREEN_WIDTH && (y as usize) < SCREEN_HEIGHT {
                     let idx = (y as usize) * SCREEN_WIDTH + (x as usize);
-                    // Stored pre-swapped so a full/partial draw can hand the
-                    // buffer straight to the display as raw bytes, see
-                    // `ST7365P::write_words_buffered`.
-                    let raw_color = RawU16::from(color).into_inner().swap_bytes();
+                    let raw_color = RawU16::from(color).into_inner();
                     if self.fb[idx] != raw_color {
                         self.fb[idx] = raw_color;
                         self.dirty_tiles
@@ -344,7 +341,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
                 };
                 skip = 0;
                 let index = row as usize * SCREEN_WIDTH + column as usize;
-                let raw_color = RawU16::from(color).into_inner().swap_bytes();
+                let raw_color = RawU16::from(color).into_inner();
                 if self.fb[index] != raw_color {
                     self.fb[index] = raw_color;
                     self.dirty_tiles[(row as usize / TILE_SIZE) * NUM_TILE_COLS
@@ -368,7 +365,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
         ) else {
             return Ok(());
         };
-        let raw_color = RawU16::from(color).into_inner().swap_bytes();
+        let raw_color = RawU16::from(color).into_inner();
         for row in top..top + height {
             let start = row as usize * SCREEN_WIDTH + left as usize;
             self.fb[start..start + width as usize].fill(raw_color);
@@ -381,7 +378,7 @@ impl<'a> DrawTarget for AtomicFrameBuffer<'a> {
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.fb.fill(RawU16::from(color).into_inner().swap_bytes());
+        self.fb.fill(RawU16::from(color).into_inner());
         self.dirty_tiles.fill(true);
 
         Ok(())
@@ -481,7 +478,7 @@ pub mod fps {
                 let index = (point.y as usize) * FPS_CANVAS_WIDTH + point.x as usize;
                 // Pre-swapped to match the main framebuffer's storage, since
                 // this canvas is copied directly into it (see draw_fps_into_fb).
-                self.canvas[index] = color.into_storage().swap_bytes();
+                self.canvas[index] = color.into_storage();
             }
             Ok(())
         }

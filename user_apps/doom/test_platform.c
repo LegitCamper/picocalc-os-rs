@@ -11,6 +11,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "i_system.h"
+#include "d_event.h"
+
+void I_GetEvent(void);
 
 #define open port_open
 #define close port_close
@@ -35,7 +38,19 @@ void port_exit(int status) __attribute__((noreturn));
 int myargc;
 char **myargv;
 struct color colors[256];
-void D_DoomMain(void) { I_Quit(); assert(!"I_Quit returned after engine cleanup"); }
+static int quit_from_keyboard;
+void D_DoomMain(void)
+{
+    assert(myargc == 6 && strcmp(myargv[3], "-nomusic") == 0);
+    if (quit_from_keyboard) {
+        int pressed;
+        unsigned char key;
+        DG_GetKey(&pressed, &key);
+        assert(!"quit key returned to engine");
+    }
+    I_Quit();
+    assert(!"I_Quit returned after engine cleanup");
+}
 void doomgeneric_Tick(void) { assert(0); }
 
 static unsigned char wad[28] = { 'I', 'W', 'A', 'D', 1, 0, 0, 0, 12 };
@@ -60,7 +75,7 @@ static void *mock_alloc(struct kernel_layout layout)
 static void mock_free(void *pointer, struct kernel_layout layout)
 {
     assert(pointer == arena && layout.size == HEAP_BYTES && layout.alignment == 8);
-    assert(engine_cleaned == 1);
+    assert((size_t)engine_cleaned == deallocations + 1);
     ++deallocations;
 }
 
@@ -94,7 +109,10 @@ static void mock_print(const uint8_t *buffer, size_t length)
 static void mock_key(struct kernel_key *output)
 {
     assert(output != NULL);
-    *output = events[event_index++];
+    assert(event_index < sizeof(events) / sizeof(events[0]));
+    struct kernel_key event = events[event_index++];
+    const uint8_t wire[] = { event.key, event.state, event.mods };
+    memcpy(output, wire, sizeof(wire));
 }
 static uint64_t mock_time(void) { return UINT64_C(0x10000002a); }
 static void mock_sleep(uint64_t milliseconds) { slept = milliseconds; }
@@ -106,9 +124,13 @@ static void mock_fill(uint16_t left, uint16_t top, uint16_t width, uint16_t heig
 static void mock_blit(uint16_t left, uint16_t top, uint16_t width, uint16_t height,
                       const uint16_t *pixels, size_t length)
 {
+    static const uint16_t expected[] = {
+        0x0000, 0xf800, 0x07e0, 0x001f, 0xffff, 0xffe0, 0xf81f, 0x07ff,
+    };
     assert(left == 0 && top == frame_rows + 60 && width == 320 && height == 4);
     assert(length == 1280);
-    for (size_t index = 0; index < length; ++index) assert(pixels[index] == 0xf800);
+    for (size_t index = 0; index < length; ++index)
+        assert(pixels[index] == expected[index % 8]);
     frame_rows += height;
 }
 
@@ -171,23 +193,63 @@ int main(void)
     assert(sbrk(1) == (void *)-1 && errno == ENOMEM);
     heap_used = 0;
 
-    assert(doom_key('Z') == KEY_FIRE && doom_key(' ') == KEY_USE);
-    assert(doom_key(0xb5) == KEY_UPARROW && doom_key(0xb1) == KEY_ESCAPE);
-    assert(doom_key(0x81) == KEY_F1 && doom_key(0x90) == KEY_F10);
-    events[0] = (struct kernel_key){ 0xb5, 2, 0 };
-    events[1] = (struct kernel_key){ 0xb5, 1, 0 };
-    events[2] = (struct kernel_key){ 0xb5, 3, 0 };
+    static const unsigned char bindings[][2] = {
+        {'w', KEY_UPARROW}, {'W', KEY_UPARROW}, {'s', KEY_DOWNARROW},
+        {'a', KEY_LEFTARROW}, {'d', KEY_RIGHTARROW},
+        {0x01, KEY_UPARROW}, {0x02, KEY_DOWNARROW},
+        {0x03, KEY_LEFTARROW}, {0x04, KEY_RIGHTARROW},
+        {0xb5, KEY_UPARROW}, {0xb6, KEY_DOWNARROW},
+        {0xb4, KEY_LEFTARROW}, {0xb7, KEY_RIGHTARROW},
+        {0x05, KEY_ENTER}, {0x0a, KEY_ENTER}, {0x0d, KEY_ENTER},
+        {'Z', KEY_FIRE}, {0xa5, KEY_FIRE}, {0x06, KEY_FIRE},
+        {' ', KEY_USE}, {0x07, KEY_USE}, {'q', KEY_STRAFE_L},
+        {',', KEY_STRAFE_L}, {0x11, KEY_STRAFE_L}, {'e', KEY_STRAFE_R},
+        {'.', KEY_STRAFE_R}, {0x12, KEY_STRAFE_R},
+        {0xa1, KEY_RALT}, {0xa2, KEY_RSHIFT}, {0xa3, KEY_RSHIFT},
+        {'m', KEY_ESCAPE}, {'M', KEY_ESCAPE}, {0x08, KEY_BACKSPACE},
+        {0x09, KEY_TAB}, {'1', '1'}, {'7', '7'},
+        {0x81, KEY_F1}, {0x90, KEY_F10},
+    };
     int pressed;
     unsigned char key;
-    assert(DG_GetKey(&pressed, &key) == 1 && pressed == 1 && key == KEY_UPARROW);
-    assert(DG_GetKey(&pressed, &key) == 1 && pressed == 0 && key == KEY_UPARROW);
-    assert(DG_GetKey(&pressed, &key) == 0);
+    for (size_t index = 0; index < sizeof(bindings) / sizeof(bindings[0]); ++index) {
+        event_index = 0;
+        events[0] = (struct kernel_key){ bindings[index][0], 2, 0 };
+        events[1] = (struct kernel_key){ bindings[index][0], 1, 0 };
+        events[2] = (struct kernel_key){ bindings[index][0], 3, 0 };
+        assert(DG_GetKey(&pressed, &key) == 1 && pressed == 1 && key == bindings[index][1]);
+        assert(DG_GetKey(&pressed, &key) == 1 && pressed == 0 && key == bindings[index][1]);
+        assert(DG_GetKey(&pressed, &key) == 0);
+    }
     assert(DG_GetTicksMs() == 42);
+    event_index = 0;
+    events[0] = (struct kernel_key){ 0x0a, 1, 0 };
+    events[1] = (struct kernel_key){ 0x0a, 3, 0 };
+    events[2] = (struct kernel_key){ 0xb5, 1, 0 };
+    events[3] = (struct kernel_key){ 0xb5, 3, 0 };
+    I_GetEvent();
+    event_t *event = D_PopEvent();
+    assert(event && event->type == ev_keydown && event->data1 == KEY_ENTER);
+    event = D_PopEvent();
+    assert(event && event->type == ev_keyup && event->data1 == KEY_ENTER);
+    I_GetEvent();
+    event = D_PopEvent();
+    assert(event && event->type == ev_keydown && event->data1 == KEY_UPARROW);
+    event = D_PopEvent();
+    assert(event && event->type == ev_keyup && event->data1 == KEY_UPARROW);
+    assert(D_PopEvent() == NULL);
     DG_SleepMs(17); assert(slept == 17);
     DG_Init();
     DG_ScreenBuffer = calloc(320 * 200, 1);
     assert(DG_ScreenBuffer);
-    colors[0].r = 255;
+    colors[1].r = 255;
+    colors[2].g = 255;
+    colors[3].b = 255;
+    colors[4].r = colors[4].g = colors[4].b = 255;
+    colors[5].r = colors[5].g = 255;
+    colors[6].r = colors[6].b = 255;
+    colors[7].g = colors[7].b = 255;
+    for (size_t index = 0; index < 320 * 200; ++index) DG_ScreenBuffer[index] = index % 8;
     DG_DrawFrame(); assert(frame_rows == 200);
     free(DG_ScreenBuffer);
     allocation_error = 1;
@@ -199,5 +261,18 @@ int main(void)
     I_AtExit(engine_cleanup, false);
     port_start();
     assert(allocations == 2 && deallocations == 1 && heap_base == NULL && engine_cleaned == 1);
+    quit_from_keyboard = 1;
+    static const unsigned char quit_keys[] = { 0xb1, 0x1b, 0xd0 };
+    for (size_t index = 0; index < sizeof(quit_keys); ++index) {
+        memset(events, 0, sizeof(events));
+        events[0] = (struct kernel_key){ quit_keys[index], 3, 0 };
+        event_index = 0;
+        assert(DG_GetKey(&pressed, &key) == 0);
+        events[0] = (struct kernel_key){ quit_keys[index], 1, 0 };
+        event_index = 0;
+        port_start();
+        assert(allocations == index + 3 && deallocations == index + 2 && heap_base == NULL);
+        assert((size_t)engine_cleaned == index + 2);
+    }
     puts("Doom bridge: file I/O, WAD bounds, keys, RGB565, timing, heap bounds, exit cleanup pass");
 }

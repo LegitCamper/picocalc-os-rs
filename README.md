@@ -60,6 +60,12 @@ The WAD is not bundled or downloaded by the build. Renaming another game's
 WAD does not make it compatible. A missing WAD prevents Doom from starting.
 See [Doom build and run instructions](user_apps/doom/README.md).
 
+Doom controls: **M** opens the menu; arrows and **Enter** select New Game,
+episode, and difficulty. Arrows or **W/S/A/D** move/turn, **Q/E** strafe,
+**Z/Ctrl** fires, **Space** uses doors, **Shift** runs, **Tab** opens the map,
+and **1-7** choose weapons. **Escape/Break quits to the kernel.** Stereo sound
+effects are enabled; music is not. See the Doom README for full controls.
+
 ## USB File Transfer
 
 USB exposes an MTP device named **PicoCalc**, with storage named **SD Card**.

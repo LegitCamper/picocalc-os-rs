@@ -1,10 +1,12 @@
 # Doom for PicoCalc
 
-Single-player, silent Doom port targeting **pimoroni2w with 8 MiB XIP PSRAM**.
+Single-player Doom port with stereo sound effects targeting
+**pimoroni2w with 8 MiB XIP PSRAM**.
 Builds a Cortex-M33 hard-float PIE ELF with the kernel's 18-entry syscall ABI,
 including `get_last_error` status reporting and the out-pointer `get_key`.
-Cross-linking, loader compatibility checks, and host bridge tests pass. Gameplay
-and performance on physical hardware have not been verified.
+Cross-linking, loader compatibility checks, and host bridge tests cover the port.
+Display and framerate have user-reported hardware confirmation; updated keyboard
+delivery and audio still need on-device verification.
 
 ## Build and run
 
@@ -32,6 +34,8 @@ Flash the rebuilt kernel using the normal board workflow. Put
 No game data is included or downloaded. Directory/lump ranges are checked before
 startup, but this does not make the legacy engine safe for malicious WAD contents.
 Other IWADs, PWADs, and arbitrary paths are not supported by this initial port.
+`just userapps` does not build Doom: use `just doom`, then replace `DOOM.BIN`
+with `target/doom/doom.bin`. Do not copy an older binary from `release-binary/`.
 Do not use `objcopy -O binary` or strip all symbols: the kernel needs ELF sections
 and the `SYS_CALL_TABLE` symbol. The build strips debug data only.
 
@@ -41,10 +45,10 @@ Measured with ARM GCC 16.2.0 and the existing PIC picolibc build:
 
 | Resource | Bytes |
 | --- | ---: |
-| Loaded ELF span, including BSS and relocations | 520,176 |
+| Loaded ELF span, including BSS and relocations | 521,944 |
 | Bounded libc heap, including Doom's 2 MiB zone | 3,145,728 |
 | Existing kernel framebuffer | 204,800 |
-| Combined allocation budget, excluding allocator metadata | 3,870,704 |
+| Combined allocation budget, excluding allocator metadata | 3,872,472 |
 
 The build reads the kernel's PSRAM `MAX_IMAGE_SIZE` ceiling and checks a 4 MiB
 image/heap/framebuffer budget, so a kernel-side change cannot silently diverge.
@@ -77,14 +81,47 @@ starting the engine. Syscall reads are checked with `get_last_error`, so a
 rejected read is an error instead of apparent zeroed WAD data.
 The shared `user_apps/memory.x` is unchanged; Doom has its own linker script.
 
-## Controls and limits
+## How to play
 
-- Arrows: move/turn; Z or Ctrl: fire; Space: use.
-- Comma/period: strafe; Shift: run; Alt: strafe modifier.
-- Enter: confirm; Escape: menu; Tab: automap; number keys: weapons.
-- F1-F10 map to Doom's function keys. Break returns immediately to the kernel.
+From the title screen, press **M** to open the menu. Select **New Game** with
+Up/Down and press **Enter**. Choose the shareware episode and difficulty,
+confirming each with Enter. **Escape quits the app**, not just the menu.
+
+| Action | Keys |
+| --- | --- |
+| Move forward / backward | Up / Down or W / S |
+| Turn left / right | Left / Right or A / D |
+| Strafe left / right | Q / E or comma / period |
+| Fire | Z or Ctrl |
+| Use: open doors, activate switches | Space |
+| Run | Hold Shift while moving |
+| Strafe modifier | Hold Alt with Left / Right |
+| Choose weapon | Number keys 1-7; weapon must be owned |
+| Automap | Tab |
+| Open / close menu, cancel | M |
+| Menu navigation / confirm | Arrows / Enter; W/S/A/D also navigate |
+| Menu back | Backspace |
+| Quit to kernel | Escape or Break, including from menus |
+
+Joystick direction events also move/turn; center confirms. Auxiliary left/right
+button events fire/use; second left/right button events strafe. These aliases
+only apply to hardware or firmware that emits those events. F1-F10 retain Doom's
+function-key actions; F4 opens sound options. Save/load actions are unsupported.
+
+Keyboard ABI uses three bytes in order: key, state, modifiers. State is explicitly
+8-bit in both Rust and C. The old C bridge assumed a 12-byte event and read state
+at offset 4 instead of offset 1, making every received key appear idle.
+
+## Audio and limits
+
+- Eight simultaneous WAD PCM sound effects, mixed into unsigned 8-bit stereo at
+  22,050 Hz through the existing kernel audio API. Gunshots, doors, enemies, and
+  menu effects are enabled; adjust SFX volume through F4 / Sound Options.
+- Music is disabled with `-nomusic`; MUS/MIDI synthesis is not implemented.
+- Mixing respects kernel backpressure without blocking gameplay. First-use
+  effects load from SD; slow frames or SD reads can cause audio gaps.
 - Display: 320x200, centered vertically in the 320x320 panel.
-- No sound, music, networking, saves, screenshots, or persistent settings.
+- No networking, saves, screenshots, or persistent settings.
   Save requests show a read-only notice. Unsupported file operations return
   errors rather than pretending data was saved. The kernel has no checked
   truncate/rename/write-result interface for safe save replacement yet.
@@ -99,8 +136,11 @@ The shared `user_apps/memory.x` is unchanged; Doom has its own linker script.
 
 `sizes.sh` builds the actual app and runs `check.py`. Builds patch temporary
 copies, never the submodule worktree. `check.py` tests read/seek/EOF/error paths,
-read-only writes, WAD bounds, heap exhaustion, keyboard events, RGB565 output,
-timing, allocation failure, and cleanup under host sanitizers. The shutdown check
+read-only writes, WAD bounds, heap exhaustion, raw three-byte keyboard events
+through Doom's actual event queue, RGB565 output, timing, allocation failure,
+and cleanup under host sanitizers. Audio checks exercise the engine dispatcher,
+PCM validation, stereo mixing, resampling, clipping, shared sample lifetime,
+backpressure, rejected submissions, and shutdown. The shutdown check
 links the patched engine's actual `I_Quit`/`I_AtExit`, not a simulated engine exit.
 It also checks ARM/Thumb/hard-float PIE,
 segment budget, no imports/TLS/interpreter, only `R_ARM_RELATIVE` relocations,

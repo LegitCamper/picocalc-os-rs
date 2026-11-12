@@ -43,6 +43,7 @@ def main():
         sources = [source / name.replace(".o", ".c") for name in names
                    if name not in ("doomgeneric.o", "doomgeneric_xlib.o")]
         sources.append(ROOT / "picocalc.c")
+        sources.append(ROOT / "sound.c")
         objects = []
         for path in sources:
             target = staging / (path.stem + ".o")

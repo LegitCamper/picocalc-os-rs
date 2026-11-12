@@ -15,7 +15,7 @@ cbindgen:
     cbindgen userlib_sys --config tools/build/cbindgen.toml --output target/generated/userlib_sys.h -q
 
 check-header: cbindgen
-    printf '#include "userlib_sys.h"\n' | cc -std=c11 -x c -Itarget/generated -fsyntax-only -
+    printf '#include <stddef.h>\n#include "userlib_sys.h"\n_Static_assert(sizeof(struct KeyEventC) == 3, "key event size");\n_Static_assert(offsetof(struct KeyEventC, state) == 1, "key state offset");\n_Static_assert(offsetof(struct KeyEventC, mods) == 2, "key modifiers offset");\n' | cc -std=c11 -x c -Itarget/generated -fsyntax-only -
     printf '#include "userlib_sys.h"\n' | c++ -std=c++17 -x c++ -Itarget/generated -fsyntax-only -
 
 newlib:
@@ -170,6 +170,7 @@ copy-userapps:
 # Host-only logic; no probe or SD card needed.
 test:
     cargo test -p userlib_sys -p userlib -p selection_ui -p tinygif --target x86_64-unknown-linux-gnu
+    python3 tests/test_framebuffer.py
     rustc --edition 2024 --test kernel/src/elf_format.rs -o target/elf-format-tests
     target/elf-format-tests
     rustc --edition 2024 --test user_apps/wav_player/src/wav_format.rs -o target/wav-format-tests

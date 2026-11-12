@@ -13,6 +13,7 @@
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #include "i_video.h"
+#include "i_system.h"
 #include "m_argv.h"
 
 #define HEAP_BYTES (3 * 1024 * 1024)
@@ -32,13 +33,14 @@
 #define FILE_COUNT 4
 
 struct kernel_layout { size_t size, alignment; };
-struct kernel_key { uint8_t key; int state; uint8_t mods; };
+struct kernel_key { uint8_t key, state, mods; };
 
 __attribute__((section(".syscall_table"), used))
 uintptr_t SYS_CALL_TABLE[SYS_CALL_COUNT];
 
-_Static_assert(offsetof(struct kernel_key, state) == 4, "KeyEventC state ABI");
-_Static_assert(sizeof(struct kernel_key) == 12, "KeyEventC size ABI");
+_Static_assert(offsetof(struct kernel_key, state) == 1, "KeyEventC state ABI");
+_Static_assert(offsetof(struct kernel_key, mods) == 2, "KeyEventC mods ABI");
+_Static_assert(sizeof(struct kernel_key) == 3, "KeyEventC size ABI");
 _Static_assert(DOOMGENERIC_RESX == 320 && DOOMGENERIC_RESY == 200, "panel size");
 
 static jmp_buf exit_context;
@@ -240,18 +242,18 @@ static unsigned char doom_key(unsigned char key)
     if (key >= 'A' && key <= 'Z') key += 'a' - 'A';
     if (key >= 0x81 && key <= 0x89) return KEY_F1 + key - 0x81;
     switch (key) {
-        case 0x01: case 0xb5: return KEY_UPARROW;
-        case 0x02: case 0xb6: return KEY_DOWNARROW;
-        case 0x03: case 0xb4: return KEY_LEFTARROW;
-        case 0x04: case 0xb7: return KEY_RIGHTARROW;
-        case 0x0a: return KEY_ENTER;
+        case 0x01: case 0xb5: case 'w': return KEY_UPARROW;
+        case 0x02: case 0xb6: case 's': return KEY_DOWNARROW;
+        case 0x03: case 0xb4: case 'a': return KEY_LEFTARROW;
+        case 0x04: case 0xb7: case 'd': return KEY_RIGHTARROW;
+        case 0x05: case 0x0a: case 0x0d: return KEY_ENTER;
         case 0x08: return KEY_BACKSPACE;
-        case 0xb1: return KEY_ESCAPE;
+        case 'm': return KEY_ESCAPE;
         case 0x90: return KEY_F10;
-        case 0xa5: case 'z': return KEY_FIRE;
-        case ' ': return KEY_USE;
-        case ',': return KEY_STRAFE_L;
-        case '.': return KEY_STRAFE_R;
+        case 0x06: case 0xa5: case 'z': return KEY_FIRE;
+        case 0x07: case ' ': return KEY_USE;
+        case 0x11: case 'q': case ',': return KEY_STRAFE_L;
+        case 0x12: case 'e': case '.': return KEY_STRAFE_R;
         case 0xa1: return KEY_RALT;
         case 0xa2: case 0xa3: return KEY_RSHIFT;
         default: return key < 0x80 ? key : 0;
@@ -265,7 +267,10 @@ int DG_GetKey(int *pressed, unsigned char *key)
         ((void (*)(struct kernel_key *))SYS_CALL_TABLE[SYS_GET_KEY])(&event);
         if (event.state == 0) return 0;
         if (event.state != 1 && event.state != 3) continue;
-        if (event.key == 0xd0 && event.state == 1) exit(0);
+        if (event.key == 0xb1 || event.key == 0x1b || event.key == 0xd0) {
+            if (event.state == 1) I_Quit();
+            continue;
+        }
         *key = doom_key(event.key);
         if (!*key) continue;
         *pressed = event.state == 1;
@@ -319,7 +324,7 @@ void _start(void)
         return;
     }
     if (setjmp(exit_context) == 0) {
-        char *arguments[] = { "doom", "-iwad", WAD_PATH, "-nosound", "-mb", "2" };
+        char *arguments[] = { "doom", "-iwad", WAD_PATH, "-nomusic", "-mb", "2" };
         myargc = sizeof(arguments) / sizeof(arguments[0]);
         myargv = arguments;
         DG_Init();

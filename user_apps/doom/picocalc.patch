@@ -42,3 +42,26 @@ diff --git a/doomgeneric/m_menu.c b/doomgeneric/m_menu.c
      if (!usergame)
      {
  	M_StartMessage(DEH_String(SAVEDEAD),NULL,false);
+diff --git a/doomgeneric/i_sound.c b/doomgeneric/i_sound.c
+--- a/doomgeneric/i_sound.c
++++ b/doomgeneric/i_sound.c
+@@ -78,6 +78,6 @@
+ {
+-    #ifdef FEATURE_SOUND
++    #if defined(FEATURE_SOUND) || defined(PICOCALC)
+     &DG_sound_module,
+     #endif
+     NULL,
+ };
+diff --git a/doomgeneric/i_sound.h b/doomgeneric/i_sound.h
+--- a/doomgeneric/i_sound.h
++++ b/doomgeneric/i_sound.h
+@@ -239,5 +239,7 @@
+ void I_InitTimidityConfig(void);
+-#ifdef FEATURE_SOUND
++#if defined(FEATURE_SOUND) || defined(PICOCALC)
+ extern sound_module_t DG_sound_module;
++#endif
++#ifdef FEATURE_SOUND
+ extern music_module_t DG_music_module;
+ #endif

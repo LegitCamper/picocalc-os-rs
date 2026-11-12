@@ -87,17 +87,22 @@ def main():
     slots = dict((name, int(value)) for name, value in re.findall(r"(\w+) = (\d+)", table))
     assert len(slots) == SLOT_COUNT and {name: slots[name] for name in (
         "Alloc", "Dealloc", "PrintString", "SleepMs", "GetMs", "GetKey", "ReadFile", "FileLen",
-        "FillRect", "Blit", "GetLastError"
+        "FillRect", "Blit", "GetLastError", "ReconfigureAudioSampleRate",
+        "AudioBufferReady", "SendAudioBuffer"
     )} == {"Alloc": 0, "Dealloc": 1, "PrintString": 2, "SleepMs": 3, "GetMs": 4,
            "GetKey": 6, "ReadFile": 9, "FileLen": 11, "FillRect": 15, "Blit": 16,
-           "GetLastError": 17}
+           "GetLastError": 17, "ReconfigureAudioSampleRate": 12,
+           "AudioBufferReady": 13, "SendAudioBuffer": 14}
     with tempfile.TemporaryDirectory(prefix="picocalc-doom-test-") as temporary:
         staging = Path(temporary)
         source = staging / "doomgeneric"
         source.mkdir()
-        shutil.copyfile(ROOT / "doomgeneric/doomgeneric/i_system.c", source / "i_system.c")
+        for name in ("i_system.c", "i_sound.c", "i_sound.h"):
+            shutil.copyfile(ROOT / "doomgeneric/doomgeneric" / name, source / name)
         for patch in ("shrink-tunables.patch", "picocalc.patch"):
-            subprocess.run(["git", "apply", "--include=doomgeneric/i_system.c", str(ROOT / patch)],
+            subprocess.run(["git", "apply", "--include=doomgeneric/i_system.c",
+                            "--include=doomgeneric/i_sound.c", "--include=doomgeneric/i_sound.h",
+                            str(ROOT / patch)],
                            cwd=staging, check=True)
         compiler = os.environ.get("CC", "cc")
         engine = str(staging / "i_system.o")
@@ -106,11 +111,32 @@ def main():
                         "-DPICOCALC", "-Dexit=port_exit", "-I" + str(ROOT / "doomgeneric/doomgeneric"),
                         "-c", str(source / "i_system.c"), "-o", engine], check=True)
         executable = str(Path(temporary) / "test_platform")
+        input_objects = []
+        for name in ("i_input", "d_event"):
+            target = str(staging / (name + ".o"))
+            subprocess.run([compiler, "-std=gnu11", "-fsanitize=address,undefined",
+                            "-ffunction-sections", "-fdata-sections",
+                            "-I" + str(ROOT / "doomgeneric/doomgeneric"), "-c",
+                            str(ROOT / "doomgeneric/doomgeneric" / (name + ".c")),
+                            "-o", target], check=True)
+            input_objects.append(target)
         subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                         "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-DCMAP256",
                         "-DDOOMGENERIC_RESX=320", "-DDOOMGENERIC_RESY=200",
                         "-I" + str(ROOT / "doomgeneric/doomgeneric"), str(ROOT / "test_platform.c"),
-                        engine, "-Wl,--gc-sections", "-o", executable], check=True)
+                        engine, *input_objects, "-Wl,--gc-sections", "-o", executable], check=True)
+        subprocess.run([executable], check=True)
+        sound = str(staging / "i_sound.o")
+        subprocess.run([compiler, "-std=gnu11", "-fsanitize=address,undefined",
+                        "-ffunction-sections", "-fdata-sections", "-DPICOCALC",
+                        "-I" + str(source), "-I" + str(ROOT / "doomgeneric/doomgeneric"),
+                        "-c", str(source / "i_sound.c"), "-o", sound], check=True)
+        executable = str(staging / "test_sound")
+        subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+                        "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-DPICOCALC",
+                        "-I" + str(source), "-I" + str(ROOT / "doomgeneric/doomgeneric"),
+                        str(ROOT / "test_sound.c"), sound, "-Wl,--gc-sections", "-o", executable],
+                       check=True)
         subprocess.run([executable], check=True)
     check_elf((REPO / "target/doom/doom.bin").read_bytes())
 
