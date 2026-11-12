@@ -2,8 +2,9 @@ use crate::{
     storage::{File, SDCARD},
     syscalls,
 };
-use bumpalo::Bump;
-use core::alloc::Layout;
+#[cfg(feature = "psram")]
+use core::alloc::GlobalAlloc;
+use core::{alloc::Layout, ptr::NonNull};
 use embedded_sdmmc::ShortFileName;
 use strum::IntoEnumIterator;
 use userlib_sys::{EntryFn, SYS_CALL_TABLE_COUNT, SyscallTable};
@@ -13,12 +14,61 @@ mod format;
 pub use format::LoadError;
 use format::{Header, Image, ProgramHeader, SectionHeader};
 
+/// Owns one loaded app image. PSRAM boards keep it in the XIP window so images
+/// larger than the SRAM arena fit; other boards use the ordinary kernel heap.
+pub struct ProgramImage {
+    pointer: NonNull<u8>,
+    layout: Layout,
+}
+
+impl ProgramImage {
+    fn zeroed(layout: Layout) -> Result<Self, LoadError> {
+        if layout.size() == 0 {
+            return Err(LoadError::InvalidElf);
+        }
+        // SAFETY: layout is nonempty; both allocators are initialized before load.
+        let pointer = unsafe {
+            #[cfg(feature = "psram")]
+            {
+                crate::heap::HEAP.alloc_zeroed(layout)
+            }
+            #[cfg(not(feature = "psram"))]
+            {
+                alloc::alloc::alloc_zeroed(layout)
+            }
+        };
+        let pointer = NonNull::new(pointer).ok_or(LoadError::OutOfMemory)?;
+        Ok(Self { pointer, layout })
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: the allocation is live, zero-initialized and uniquely borrowed here.
+        unsafe { core::slice::from_raw_parts_mut(self.pointer.as_ptr(), self.layout.size()) }
+    }
+}
+
+// SAFETY: ProgramImage uniquely owns a heap allocation with no thread-affine
+// state, so moving it from the loader on core0 to the app runner on core1 is sound.
+unsafe impl Send for ProgramImage {}
+
+impl Drop for ProgramImage {
+    fn drop(&mut self) {
+        // SAFETY: this allocation came from the same allocator with this layout.
+        unsafe {
+            #[cfg(feature = "psram")]
+            crate::heap::HEAP.dealloc(self.pointer.as_ptr(), self.layout);
+            #[cfg(not(feature = "psram"))]
+            alloc::alloc::dealloc(self.pointer.as_ptr(), self.layout);
+        }
+    }
+}
+
 /// # Safety
 /// The entry point contains untrusted native code, not an isolated process.
-/// Keep the returned arena alive until execution has finished.
+/// Keep the returned image alive until execution has finished.
 pub async unsafe fn load_binary(
     name: &ShortFileName,
-) -> Result<(EntryFn, Bump, userlib_sys::memory::Region), LoadError> {
+) -> Result<(EntryFn, ProgramImage, userlib_sys::memory::Region), LoadError> {
     let mut sd_lock = SDCARD.get().lock().await;
     let sd = sd_lock.as_mut().ok_or(LoadError::FailedToReadFile)?;
     sd.read_file(name, |mut file| {
@@ -40,17 +90,9 @@ pub async unsafe fn load_binary(
         let image = Image::new(segments, header.entry)?;
         let layout = Layout::from_size_align(image.size, image.alignment)
             .map_err(|_| LoadError::InvalidElf)?;
-        let bump = Bump::try_with_capacity(0).map_err(|_| LoadError::OutOfMemory)?;
-        bump.set_allocation_limit(Some(format::MAX_ALLOCATION));
-        let allocation = bump
-            .try_alloc_layout(layout)
-            .map_err(|_| LoadError::OutOfMemory)?;
-        // SAFETY: allocation owns image.size bytes until bump is dropped. Initialize
-        // all bytes, including BSS and holes, before constructing the mutable slice.
-        let base = unsafe {
-            allocation.as_ptr().write_bytes(0, image.size);
-            core::slice::from_raw_parts_mut(allocation.as_ptr(), image.size)
-        };
+        let mut owned = ProgramImage::zeroed(layout)?;
+        // Zeroed on allocation, so BSS and inter-segment holes start cleared.
+        let base = owned.as_mut_slice();
         for segment in segments {
             let range = image.range(segment.address, segment.file_size, 0)?;
             read_at(&mut file, segment.offset, &mut base[range])?;
@@ -83,7 +125,7 @@ pub async unsafe fn load_binary(
             start: base.as_ptr() as usize,
             len: base.len(),
         };
-        Ok((entry, bump, region))
+        Ok((entry, owned, region))
     })
     .await
     .map_err(|_| LoadError::FailedToReadFile)?

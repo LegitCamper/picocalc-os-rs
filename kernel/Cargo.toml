@@ -101,6 +101,5 @@ talc = "4.4.3"
 embedded-alloc = { version = "0.6.0", features = [
   "allocator_api",
 ], optional = true }
-bumpalo = "3.19.0"
 
 userlib_sys = { path = "../userlib_sys" }

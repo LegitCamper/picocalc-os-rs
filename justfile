@@ -40,6 +40,9 @@ newlib:
 userapp app:
      {{binary-args}} cargo build --bin {{app}} --profile release-binary
 
+doom:
+    python3 user_apps/doom/build.py
+
 userapps: cbindgen
     just userapp calculator
     just userapp snake

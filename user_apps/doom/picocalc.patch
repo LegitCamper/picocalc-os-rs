@@ -1,0 +1,44 @@
+diff --git a/doomgeneric/i_system.c b/doomgeneric/i_system.c
+--- a/doomgeneric/i_system.c
++++ b/doomgeneric/i_system.c
+@@ -260,6 +260,8 @@ void I_Quit (void)
+ #if ORIGCODE
+     SDL_Quit();
+ 
+     exit(0);
++#elif defined(PICOCALC)
++    exit(0);
+ #endif
+ }
+diff --git a/doomgeneric/i_video.c b/doomgeneric/i_video.c
+--- a/doomgeneric/i_video.c
++++ b/doomgeneric/i_video.c
+@@ -321,5 +321,9 @@
+ void I_FinishUpdate (void)
+ {
++#ifdef PICOCALC
++    DG_ScreenBuffer = I_VideoBuffer;
++    DG_DrawFrame();
++#else
+     int y;
+     int x_offset, y_offset, x_offset_end;
+     unsigned char *line_in, *line_out;
+@@ -369,4 +373,5 @@
+ 	DG_DrawFrame();
++#endif
+ }
+ 
+ //
+diff --git a/doomgeneric/m_menu.c b/doomgeneric/m_menu.c
+--- a/doomgeneric/m_menu.c
++++ b/doomgeneric/m_menu.c
+@@ -650,5 +650,9 @@
+ void M_SaveGame (int choice)
+ {
++#ifdef PICOCALC
++    M_StartMessage("SAVING DISABLED: READ-ONLY PORT", NULL, false);
++    return;
++#endif
+     if (!usergame)
+     {
+ 	M_StartMessage(DEH_String(SAVEDEAD),NULL,false);

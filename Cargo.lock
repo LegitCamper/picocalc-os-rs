@@ -1424,7 +1424,6 @@ dependencies = [
  "assign-resources",
  "bitflags 2.10.0",
  "bt-hci",
- "bumpalo",
  "cortex-m",
  "cortex-m-rt",
  "critical-section",

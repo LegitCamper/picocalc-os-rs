@@ -9,8 +9,11 @@ pub const MAX_PROGRAM_HEADERS: usize = 32;
 pub const MAX_RELOCATIONS: u32 = 8192;
 pub const MAX_SYMBOLS: u32 = 8192;
 // ponytail: match app linker RAM ceiling; larger apps need a larger linker region and budget.
+// PSRAM boards load images into the 8 MiB XIP window, so they allow the larger doom ceiling.
+#[cfg(not(feature = "psram"))]
 pub const MAX_IMAGE_SIZE: usize = 250 * 1024;
-pub const MAX_ALLOCATION: usize = MAX_IMAGE_SIZE + 64 * 1024;
+#[cfg(feature = "psram")]
+pub const MAX_IMAGE_SIZE: usize = 640 * 1024;
 pub const PT_LOAD: u32 = 1;
 pub const PF_X: u32 = 1;
 pub const PF_W: u32 = 2;

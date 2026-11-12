@@ -36,6 +36,7 @@ mod psram;
 #[cfg(feature = "psram")]
 use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
+use crate::elf::ProgramImage;
 use crate::{
     audio::audio_handler,
     display::{FRAMEBUFFER, display_handler, init_display},
@@ -46,7 +47,6 @@ use crate::{
     ui::{SELECTIONS, clear_selection, ui_handler},
     usb::usb_handler,
 };
-use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
 use embassy_futures::{join::join, select::select};
@@ -214,7 +214,7 @@ async fn main(_spawner: Spawner) {
 // One-slot channel to pass EntryFn from core1
 static BINARY_CH: Channel<
     CriticalSectionRawMutex,
-    (EntryFn, Bump, userlib_sys::memory::Region),
+    (EntryFn, ProgramImage, userlib_sys::memory::Region),
     1,
 > = Channel::new();
 
@@ -223,7 +223,7 @@ static BINARY_CH: Channel<
 async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
-        let (entry, bump, image) = recv.receive().await;
+        let (entry, owned_image, image) = recv.receive().await;
 
         // disable kernel ui
         {
@@ -257,7 +257,7 @@ async fn userland_task() {
                 let _ = framebuffer.clear(Rgb565::BLACK);
             }
             SELECTIONS.lock().await.set_changed(true);
-            drop(bump);
+            drop(owned_image);
             MTP_RESUME.signal(());
             set_ui_enabled(true).await;
             while KEY_CACHE.try_receive().is_ok() {}
