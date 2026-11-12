@@ -32,4 +32,38 @@ just userapps
 # copy the build applications from target/thumbv8m.main-none-eabihf/release-binary/application to the sdcard and rename them to app.bin
 
 # has builds for the official rp2350 board and the pimoroni2w board
-just kernel-release rp235x # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged
+just kernel-release rp235xa # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged
+```
+
+## Quick Commands
+
+Run from this worktree's root. Kernel release commands build and deploy:
+
+```bash
+just kernel-release rp235xa          # official board, stable default
+just kernel-release rp235xa 300      # official board, 300 MHz
+just kernel-release pimoroni2w       # Pimoroni board, stable default
+just kernel-release pimoroni2w 300   # Pimoroni board, 300 MHz
+just kernel-release pimoroni2w stable # explicitly return to stable
+
+just userapp gboy                    # build Game Boy app
+just copy-userapp gboy               # copy existing build to mounted PICOCALC
+just userapps                       # build all user apps
+just copy-userapps                   # build/copy all, then unmount/power off PICOCALC
+
+just kernel-dev rp235xa              # debug probe: development build, FPS + logs
+just kernel-release-probe rp235xa    # debug probe: release build + FPS
+```
+
+The copy commands expect the card mounted at `/run/media/$(whoami)/PICOCALC`.
+The probe commands require a connected debug probe.
+
+### CPU Clock
+
+`kernel-release` defaults to the board's normal clock configuration.
+Both modes build and deploy. Unsupported clock values fail before building.
+The `300` option enables Cargo feature `overclock-300`; the existing `overclock`
+feature remains an alias. Stable mode does not enable either feature.
+
+300 MHz is an overclock, not a stability guarantee. If the device becomes
+unstable, rebuild and deploy with `stable`.

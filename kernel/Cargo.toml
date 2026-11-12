@@ -20,7 +20,8 @@ pimoroni2w = ["rp235xa", "psram"]
 rp235xa = ["embassy-rp/rp235xa"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 psram = ["dep:embedded-alloc"]
-overclock = []
+overclock = ["overclock-300"]
+overclock-300 = []
 fps = []
 defmt = [
   "dep:defmt",

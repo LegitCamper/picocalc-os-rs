@@ -4,8 +4,17 @@ kernel-dev board:
     cargo run --bin kernel --features {{board}}  --features fps --features defmt
 kernel-release-probe board:
     cargo run --bin kernel --profile release --features {{board}} --features fps
-kernel-release board:
-    cargo build --bin kernel --release --no-default-features --features {{board}}
+[positional-arguments]
+kernel-release board clock='stable':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    features="$1"
+    case "$2" in
+        stable) ;;
+        300) features+=",overclock-300" ;;
+        *) printf 'Unsupported clock: %s (expected stable or 300)\n' "$2" >&2; exit 2 ;;
+    esac
+    cargo build --bin kernel --release --no-default-features --features "$features"
     elf2uf2-rs -d target/{{target}}/release/kernel
 
 binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
