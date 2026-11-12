@@ -7,11 +7,14 @@
 pub mod codec;
 
 use codec::*;
+use core::fmt::Write;
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
+use embassy_time::{Duration, with_timeout};
 use embassy_usb::Builder;
-use embassy_usb::driver::{Driver, EndpointError, EndpointIn, EndpointOut};
+use embassy_usb::driver::{Driver, Endpoint, EndpointError, EndpointIn, EndpointOut};
+use embassy_usb::types::StringIndex;
 use heapless::String;
 
 use crate::storage::SDCARD;
@@ -44,31 +47,38 @@ type Name = String<MAX_NAME>;
 /// A pending `SendObjectInfo` -> `SendObject` pair.
 struct Pending {
     name: Name,
-    is_dir: bool,
+    size: u32,
 }
 
 /// USB MTP responder over a pair of bulk endpoints.
 pub struct MtpClass<'d, D: Driver<'d>> {
     bulk_out: D::EndpointOut,
     bulk_in: D::EndpointIn,
+    _interrupt_in: D::EndpointIn,
     session_open: bool,
     pending: Option<Pending>,
     buf: [u8; BUF],
 }
 
 impl<'d, D: Driver<'d>> MtpClass<'d, D> {
-    pub fn new(builder: &mut Builder<'d, D>) -> Self {
+    pub fn new(builder: &mut Builder<'d, D>, interface_name: StringIndex) -> Self {
         let mut function = builder.function(CLASS_IMAGE, SUBCLASS_STILL_IMAGE, PROTOCOL_PTP);
         let mut interface = function.interface();
-        let mut alt =
-            interface.alt_setting(CLASS_IMAGE, SUBCLASS_STILL_IMAGE, PROTOCOL_PTP, None);
+        let mut alt = interface.alt_setting(
+            CLASS_IMAGE,
+            SUBCLASS_STILL_IMAGE,
+            PROTOCOL_PTP,
+            Some(interface_name),
+        );
 
         let bulk_out = alt.endpoint_bulk_out(None, PACKET_SIZE);
         let bulk_in = alt.endpoint_bulk_in(None, PACKET_SIZE);
+        let interrupt_in = alt.endpoint_interrupt_in(None, 28, 10);
 
         Self {
             bulk_out,
             bulk_in,
+            _interrupt_in: interrupt_in,
             session_open: false,
             pending: None,
             buf: [0; BUF],
@@ -88,7 +98,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             // The host's view of the filesystem is stale after an app runs, so
             // drop the session and make it re-enumerate objects.
             self.session_open = false;
-            self.pending = None;
+            let _ = self.discard_pending().await;
 
             MTP_RESUME.reset();
             MTP_RESUME.wait().await;
@@ -97,21 +107,27 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
 
     /// Read one command container and answer it.
     async fn step(&mut self) {
-        let mut cmd = [0u8; HDR + 4 * 5];
+        self.bulk_out.wait_enabled().await;
+        let mut cmd = [0u8; PACKET_SIZE as usize];
         let Ok(n) = self.bulk_out.read(&mut cmd).await else {
             return;
         };
         let Some(hdr) = Header::parse(&cmd[..n]) else {
             return;
         };
-        if hdr.kind != CT_COMMAND {
+        if hdr.kind != CT_COMMAND || hdr.len as usize != n || n > HDR + 4 * 5 || (n - HDR) % 4 != 0
+        {
             return;
         }
 
         let p = params(&cmd[HDR..n]);
         let code = match self.dispatch(hdr, p).await {
             Ok(code) => code,
-            Err(code) => code,
+            Err(code) => {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("MTP operation failed");
+                code
+            }
         };
         let _ = self.respond(hdr.tid, code).await;
     }
@@ -121,7 +137,10 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     async fn dispatch(&mut self, hdr: Header, p: [u32; 5]) -> Result<u16, u16> {
         // Only session-less operations may run before OpenSession.
         if !self.session_open
-            && !matches!(hdr.code, OP_GET_DEVICE_INFO | OP_OPEN_SESSION | OP_CLOSE_SESSION)
+            && !matches!(
+                hdr.code,
+                OP_GET_DEVICE_INFO | OP_OPEN_SESSION | OP_CLOSE_SESSION
+            )
         {
             return Err(RC_SESSION_NOT_OPEN);
         }
@@ -140,10 +159,15 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             }
             OP_CLOSE_SESSION => {
                 self.session_open = false;
-                self.pending = None;
+                self.discard_pending().await?;
                 Ok(RC_OK)
             }
-            OP_GET_STORAGE_IDS => self.send_dataset(hdr.tid, |c| c.array_u32([STORAGE_ID].into_iter())).await,
+            OP_GET_STORAGE_IDS => {
+                self.send_dataset(hdr.tid, OP_GET_STORAGE_IDS, |c| {
+                    c.array_u32([STORAGE_ID].into_iter())
+                })
+                .await
+            }
             OP_GET_STORAGE_INFO => {
                 if p[0] != STORAGE_ID {
                     return Err(RC_INVALID_STORAGE_ID);
@@ -155,8 +179,8 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             OP_GET_OBJECT_INFO => self.send_object_info(hdr.tid, p[0]).await,
             OP_GET_OBJECT => self.send_object(hdr.tid, p[0]).await,
             OP_DELETE_OBJECT => self.delete_object(p[0]).await,
-            OP_SEND_OBJECT_INFO => self.recv_object_info(p[0]).await,
-            OP_SEND_OBJECT => self.recv_object().await,
+            OP_SEND_OBJECT_INFO => self.recv_object_info(hdr.tid, p[0], p[1]).await,
+            OP_SEND_OBJECT => self.recv_object(hdr.tid).await,
             _ => Err(RC_OPERATION_NOT_SUPPORTED),
         }
     }
@@ -165,6 +189,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     async fn send_dataset(
         &mut self,
         tid: u32,
+        operation: u16,
         fill: impl FnOnce(&mut Cursor<'_>) -> Option<()>,
     ) -> Result<u16, u16> {
         let len = {
@@ -177,14 +202,12 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
         Header {
             len: total as u32,
             kind: CT_DATA,
-            code: 0,
+            code: operation,
             tid,
         }
         .write(&mut self.buf)
         .ok_or(RC_GENERAL_ERROR)?;
 
-        // `code` in a data container echoes the operation; hosts ignore it, but
-        // keep it zero-free by reusing the response slot below instead.
         self.write_all(total).await.map_err(|_| RC_GENERAL_ERROR)?;
         Ok(RC_OK)
     }
@@ -205,7 +228,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             OP_SEND_OBJECT,
         ];
 
-        self.send_dataset(tid, |c| {
+        self.send_dataset(tid, OP_GET_DEVICE_INFO, |c| {
             c.u16(100)?; // standard version 1.00
             c.u32(0x0000_0006)?; // Microsoft MTP vendor extension
             c.u16(100)?; // MTP version 1.00
@@ -234,7 +257,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             return Err(RC_STORE_NOT_AVAILABLE);
         }
 
-        self.send_dataset(tid, |c| {
+        self.send_dataset(tid, OP_GET_STORAGE_INFO, |c| {
             c.u16(0x0004)?; // removable RAM
             c.u16(0x0002)?; // generic hierarchical filesystem
             c.u16(0x0000)?; // read-write
@@ -252,7 +275,9 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     /// Index-to-name mapping for the root directory. Handles are positional,
     /// so a listing must happen before any handle is used.
     async fn name_of(&self, handle: u32) -> Result<(Name, u32, bool), u16> {
-        let index = handle.checked_sub(FIRST_HANDLE).ok_or(RC_INVALID_OBJECT_HANDLE)?;
+        let index = handle
+            .checked_sub(FIRST_HANDLE)
+            .ok_or(RC_INVALID_OBJECT_HANDLE)?;
         let mut found = None;
         let mut seen = 0u32;
 
@@ -280,7 +305,9 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             sd.list_root(|_, _, _| count += 1)
                 .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
         }
-        self.respond_with(tid, RC_OK, &[count]).await.map_err(|_| RC_GENERAL_ERROR)?;
+        self.respond_with(tid, RC_OK, &[count])
+            .await
+            .map_err(|_| RC_GENERAL_ERROR)?;
         // Already answered with parameters; suppress the plain response.
         Err(RC_OK_ALREADY_SENT)
     }
@@ -295,7 +322,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
         }
         let count = count.min(MAX_OBJECTS);
 
-        self.send_dataset(tid, |c| {
+        self.send_dataset(tid, OP_GET_OBJECT_HANDLES, |c| {
             c.array_u32(FIRST_HANDLE..FIRST_HANDLE + count)
         })
         .await
@@ -304,9 +331,13 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     async fn send_object_info(&mut self, tid: u32, handle: u32) -> Result<u16, u16> {
         let (name, size, is_dir) = self.name_of(handle).await?;
 
-        self.send_dataset(tid, |c| {
+        self.send_dataset(tid, OP_GET_OBJECT_INFO, |c| {
             c.u32(STORAGE_ID)?;
-            c.u16(if is_dir { FMT_ASSOCIATION } else { FMT_UNDEFINED })?;
+            c.u16(if is_dir {
+                FMT_ASSOCIATION
+            } else {
+                FMT_UNDEFINED
+            })?;
             c.u16(0)?; // no protection
             c.u32(size)?;
             c.u16(0)?; // thumb format
@@ -335,40 +366,51 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             return Err(RC_INVALID_OBJECT_HANDLE);
         }
 
-        let total = HDR as u32 + size;
-        let mut head = [0u8; HDR];
+        let total = size.checked_add(HDR as u32).ok_or(RC_GENERAL_ERROR)?;
         Header {
             len: total,
             kind: CT_DATA,
             code: OP_GET_OBJECT,
             tid,
         }
-        .write(&mut head)
+        .write(&mut self.buf)
         .ok_or(RC_GENERAL_ERROR)?;
-        self.bulk_in.write(&head).await.map_err(|_| RC_GENERAL_ERROR)?;
 
         let mut sent = 0u32;
-        while sent < size {
-            let want = (size - sent).min(BUF as u32) as usize;
-            let read = {
+        let mut prefix = HDR;
+        loop {
+            let want = (size - sent).min((BUF - prefix) as u32) as usize;
+            let read = if want == 0 {
+                0
+            } else {
                 let mut guard = SDCARD.get().lock().await;
                 let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
-                sd.read_root_file(&name, sent, &mut self.buf[..want])
+                sd.read_root_file(&name, sent, &mut self.buf[prefix..prefix + want])
                     .map_err(|_| RC_GENERAL_ERROR)?
             };
-            if read == 0 {
+            if read != want {
                 return Err(RC_GENERAL_ERROR);
             }
-            for chunk in self.buf[..read].chunks(PACKET_SIZE as usize) {
-                self.bulk_in.write(chunk).await.map_err(|_| RC_GENERAL_ERROR)?;
+            for chunk in self.buf[..prefix + read].chunks(PACKET_SIZE as usize) {
+                self.bulk_in
+                    .write(chunk)
+                    .await
+                    .map_err(|_| RC_GENERAL_ERROR)?;
             }
             sent += read as u32;
+            prefix = 0;
+            if sent == size {
+                break;
+            }
         }
 
         // A transfer that is a whole multiple of the packet size needs a ZLP so
         // the host knows it ended.
         if total % PACKET_SIZE as u32 == 0 {
-            self.bulk_in.write(&[]).await.map_err(|_| RC_GENERAL_ERROR)?;
+            self.bulk_in
+                .write(&[])
+                .await
+                .map_err(|_| RC_GENERAL_ERROR)?;
         }
         Ok(RC_OK)
     }
@@ -387,89 +429,154 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     }
 
     /// Accept the ObjectInfo dataset that precedes `SendObject`.
-    async fn recv_object_info(&mut self, storage: u32) -> Result<u16, u16> {
+    async fn recv_object_info(&mut self, tid: u32, storage: u32, parent: u32) -> Result<u16, u16> {
+        let len = self.read_data_container(OP_SEND_OBJECT_INFO, tid).await?;
+        self.discard_pending().await?;
         if storage != 0 && storage != STORAGE_ID {
             return Err(RC_INVALID_STORAGE_ID);
         }
-
-        let len = self.read_data_container().await.map_err(|_| RC_GENERAL_ERROR)?;
-        let mut raw = [0u8; MAX_NAME];
-        let info = parse_object_info(&self.buf[HDR..len], &mut raw).ok_or(RC_NO_VALID_OBJECT_INFO)?;
-        let name = core::str::from_utf8(&raw[..info.name_len]).map_err(|_| RC_NO_VALID_OBJECT_INFO)?;
-        let mut stored = Name::new();
-        stored.push_str(name).map_err(|_| RC_NO_VALID_OBJECT_INFO)?;
-
-        if info.is_dir {
-            let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
-            sd.make_root_dir(&stored).map_err(|_| RC_STORE_FULL)?;
+        if parent != 0 && parent != u32::MAX {
+            return Err(RC_INVALID_PARENT_OBJECT);
         }
 
-        self.pending = Some(Pending {
-            name: stored,
-            is_dir: info.is_dir,
-        });
-        Ok(RC_OK)
+        let mut raw = [0u8; MAX_NAME];
+        let info =
+            parse_object_info(&self.buf[HDR..len], &mut raw).ok_or(RC_NO_VALID_OBJECT_INFO)?;
+        let name =
+            core::str::from_utf8(&raw[..info.name_len]).map_err(|_| RC_NO_VALID_OBJECT_INFO)?;
+        let short = embedded_sdmmc::ShortFileName::create_from_str(name)
+            .map_err(|_| RC_NO_VALID_OBJECT_INFO)?;
+        info.size
+            .checked_add(HDR as u32)
+            .ok_or(RC_NO_VALID_OBJECT_INFO)?;
+        let mut stored = Name::new();
+        write!(&mut stored, "{short}").map_err(|_| RC_NO_VALID_OBJECT_INFO)?;
+        if !stored.eq_ignore_ascii_case(name) {
+            return Err(RC_NO_VALID_OBJECT_INFO);
+        }
+
+        let handle = {
+            let mut guard = SDCARD.get().lock().await;
+            let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
+            let mut exists = false;
+            sd.list_root(|name, _, _| exists |= name.eq_ignore_ascii_case(&stored))
+                .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
+            if exists {
+                return Err(RC_INVALID_PARAMETER);
+            }
+            if info.is_dir {
+                sd.make_root_dir(&stored).map_err(|_| RC_GENERAL_ERROR)?;
+            } else {
+                sd.create_root_file(&stored).map_err(|_| RC_GENERAL_ERROR)?;
+                self.pending = Some(Pending {
+                    name: stored.clone(),
+                    size: info.size,
+                });
+            }
+            let mut handle = None;
+            let mut index = FIRST_HANDLE;
+            sd.list_root(|name, _, _| {
+                if name.eq_ignore_ascii_case(&stored) {
+                    handle = Some(index);
+                }
+                index += 1;
+            })
+            .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
+            handle.ok_or(RC_GENERAL_ERROR)?
+        };
+
+        self.respond_with(tid, RC_OK, &[STORAGE_ID, 0, handle])
+            .await
+            .map_err(|_| RC_GENERAL_ERROR)?;
+        Ok(RC_OK_ALREADY_SENT)
     }
 
     /// Receive file data and append it to the pending object.
-    async fn recv_object(&mut self) -> Result<u16, u16> {
-        let pending = self.pending.take().ok_or(RC_NO_VALID_OBJECT_INFO)?;
-        if pending.is_dir {
-            return Ok(RC_OK);
+    async fn recv_object(&mut self, tid: u32) -> Result<u16, u16> {
+        let pending = self.pending.as_ref().ok_or(RC_NO_VALID_OBJECT_INFO)?;
+        let name = pending.name.clone();
+        let size = pending.size;
+        let result = self.recv_file_data(tid, &name, size).await;
+        if result.is_ok() {
+            self.pending = None;
+        } else {
+            self.discard_pending().await?;
         }
+        result
+    }
 
-        let mut head = [0u8; HDR];
-        let n = self.bulk_out.read(&mut head).await.map_err(|_| RC_GENERAL_ERROR)?;
-        let hdr = Header::parse(&head[..n]).ok_or(RC_GENERAL_ERROR)?;
-        let mut left = (hdr.len as usize).saturating_sub(HDR);
-        let mut first = true;
+    async fn recv_file_data(&mut self, tid: u32, name: &str, size: u32) -> Result<u16, u16> {
+        let mut packet = [0u8; PACKET_SIZE as usize];
+        let received = self.read_packet(&mut packet).await?;
+        let (mut phase, header) = DataPhase::start(&packet[..received], OP_SEND_OBJECT, tid)
+            .ok_or(RC_INCOMPLETE_TRANSFER)?;
+        let mut failure = (header.len - HDR as u32 != size).then_some(RC_INCOMPLETE_TRANSFER);
+        let mut filled = received - HDR;
+        self.buf[..filled].copy_from_slice(&packet[HDR..received]);
 
-        while left > 0 {
-            let mut filled = 0;
-            while filled < BUF && left > 0 {
-                let take = (BUF - filled).min(PACKET_SIZE as usize);
-                let got = self
-                    .bulk_out
-                    .read(&mut self.buf[filled..filled + take])
-                    .await
-                    .map_err(|_| RC_GENERAL_ERROR)?;
-                if got == 0 {
-                    break;
+        loop {
+            if filled > BUF - PACKET_SIZE as usize || phase.remaining == 0 {
+                if failure.is_none() && filled != 0 {
+                    let mut guard = SDCARD.get().lock().await;
+                    let written = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE).and_then(|sd| {
+                        sd.append_root_file(name, &self.buf[..filled])
+                            .map_err(|_| RC_GENERAL_ERROR)
+                    });
+                    failure = written.err();
                 }
-                filled += got;
-                left = left.saturating_sub(got);
+                filled = 0;
             }
-
-            let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
-            sd.write_root_file(&pending.name, first, &self.buf[..filled])
-                .map_err(|_| RC_STORE_FULL)?;
-            first = false;
+            if phase.remaining == 0 {
+                break;
+            }
+            let received = self.read_packet(&mut packet).await?;
+            phase.accept(received).ok_or(RC_INCOMPLETE_TRANSFER)?;
+            self.buf[filled..filled + received].copy_from_slice(&packet[..received]);
+            filled += received;
         }
 
-        Ok(RC_OK)
+        failure.map_or(Ok(RC_OK), Err)
     }
 
     /// Read a whole data container into `self.buf`, returning its used length.
-    async fn read_data_container(&mut self) -> Result<usize, EndpointError> {
-        let mut filled = 0;
-        loop {
-            let take = (BUF - filled).min(PACKET_SIZE as usize);
-            if take == 0 {
-                return Ok(filled);
-            }
-            let got = self.bulk_out.read(&mut self.buf[filled..filled + take]).await?;
-            filled += got;
-
-            if let Some(hdr) = Header::parse(&self.buf[..filled]) {
-                if filled >= hdr.len as usize || got < PACKET_SIZE as usize {
-                    return Ok(filled.min(hdr.len as usize));
-                }
-            } else if got < PACKET_SIZE as usize {
-                return Ok(filled);
+    async fn read_data_container(&mut self, operation: u16, tid: u32) -> Result<usize, u16> {
+        let mut packet = [0u8; PACKET_SIZE as usize];
+        let mut filled = self.read_packet(&mut packet).await?;
+        let (mut phase, header) =
+            DataPhase::start(&packet[..filled], operation, tid).ok_or(RC_INCOMPLETE_TRANSFER)?;
+        let fits = header.len as usize <= BUF;
+        self.buf[..filled].copy_from_slice(&packet[..filled]);
+        while phase.remaining > 0 {
+            let received = self.read_packet(&mut packet).await?;
+            phase.accept(received).ok_or(RC_INCOMPLETE_TRANSFER)?;
+            if fits {
+                self.buf[filled..filled + received].copy_from_slice(&packet[..received]);
+                filled += received;
             }
         }
+        if fits {
+            Ok(filled)
+        } else {
+            Err(RC_NO_VALID_OBJECT_INFO)
+        }
+    }
+
+    async fn read_packet(&mut self, packet: &mut [u8; PACKET_SIZE as usize]) -> Result<usize, u16> {
+        with_timeout(Duration::from_secs(5), self.bulk_out.read(packet))
+            .await
+            .map_err(|_| RC_INCOMPLETE_TRANSFER)?
+            .map_err(|_| RC_INCOMPLETE_TRANSFER)
+    }
+
+    async fn discard_pending(&mut self) -> Result<(), u16> {
+        if let Some(pending) = self.pending.as_ref() {
+            let mut guard = SDCARD.get().lock().await;
+            let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
+            sd.delete_root_file(&pending.name)
+                .map_err(|_| RC_GENERAL_ERROR)?;
+            self.pending = None;
+        }
+        Ok(())
     }
 
     async fn respond(&mut self, tid: u32, code: u16) -> Result<(), EndpointError> {

@@ -33,3 +33,25 @@ just userapps
 
 # has builds for the official rp2350 board and the pimoroni2w board
 just kernel-release rp235xa # keep in mind that https://github.com/StripedMonkey/elf2uf2-rs version is required until https://github.com/JoNil/elf2uf2-rs/pull/41 is merged
+```
+
+## USB File Transfer
+
+USB exposes an MTP device named **PicoCalc**, with storage named **SD Card**.
+Uploads currently target the SD Card root and require ASCII 8.3 filenames
+(up to eight characters plus a three-character extension, such as `snake.bin`).
+Subdirectory uploads and long filenames are rejected, not silently renamed.
+New uploads cannot truncate existing files. Use a new name to preserve an older copy.
+
+Connect a data cable to the Pico board's native USB port; the debug probe alone
+does not provide MTP. Leave the device at its launcher (MTP pauses while an app
+runs). In an MTP-capable file manager, open **PicoCalc > SD Card** and copy files
+into that root folder. This is file transfer, not a USB disk or drive letter.
+
+Unmount MTP before running the hardware checks (Python 3 and libusb required):
+
+```bash
+python3 tools/mtp-smoke.py               # read-only discovery and listing
+python3 tools/mtp-smoke.py --write-check # creates/removes unique test files
+rustc --test --edition 2024 kernel/src/mtp/codec.rs -o /tmp/mtp_codec && /tmp/mtp_codec
+```

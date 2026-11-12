@@ -1,6 +1,5 @@
 use alloc::{string::String, vec::Vec};
 use core::fmt::Write as _;
-use core::str::FromStr;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI0;
 use embassy_rp::spi::{Blocking, Spi};
@@ -99,7 +98,11 @@ impl SdCard {
         let volume0 = self
             .volume_mgr
             .open_volume(VolumeIdx(0))
-            .map_err(|_| SdCardError::Volume0Missing)?;
+            .map_err(|_error| {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("SD volume open failed: {:?}", defmt::Debug2Format(&_error));
+                SdCardError::Volume0Missing
+            })?;
         let root_dir = volume0
             .open_root_dir()
             .map_err(|_| SdCardError::RootDirMissing)?;
@@ -123,15 +126,12 @@ impl SdCard {
 
     /// Visit every entry in the root directory, passing long name, size and
     /// whether the entry is a directory.
-    pub fn list_root(
-        &mut self,
-        mut visit: impl FnMut(&str, u32, bool),
-    ) -> Result<(), SdCardError> {
+    pub fn list_root(&mut self, mut visit: impl FnMut(&str, u32, bool)) -> Result<(), SdCardError> {
         let mut lfn_storage = [0; 256];
         let mut lfn_buffer = LfnBuffer::new(&mut lfn_storage);
 
         self.access_root_dir(|dir| {
-            let _ = dir.iterate_dir_lfn(&mut lfn_buffer, |entry, long| {
+            dir.iterate_dir_lfn(&mut lfn_buffer, |entry, long| {
                 if entry.attributes.is_volume() || matches!(entry.name.base_name(), b"." | b"..") {
                     return;
                 }
@@ -144,8 +144,9 @@ impl SdCard {
                         visit(&buf, entry.size, is_dir);
                     }
                 }
-            });
-        })
+            })
+            .map_err(|_| SdCardError::FileOpenFailed)
+        })?
     }
 
     /// Read at most `buf.len()` bytes of a root-directory file, starting at `offset`.
@@ -165,24 +166,23 @@ impl SdCard {
         })?
     }
 
-    /// Append `data` to a root-directory file, truncating it first when `truncate` is set.
-    pub fn write_root_file(
-        &mut self,
-        name: &str,
-        truncate: bool,
-        data: &[u8],
-    ) -> Result<(), SdCardError> {
-        let mode = if truncate {
-            Mode::ReadWriteCreateOrTruncate
-        } else {
-            Mode::ReadWriteAppend
-        };
-
+    pub fn create_root_file(&mut self, name: &str) -> Result<(), SdCardError> {
         self.access_root_dir(|dir| {
             let file = dir
-                .open_file_in_dir(name, mode)
+                .open_file_in_dir(name, Mode::ReadWriteCreate)
                 .map_err(|_| SdCardError::FileOpenFailed)?;
-            file.write(data).map_err(|_| SdCardError::WriteFailed)
+            file.close().map_err(|_| SdCardError::WriteFailed)
+        })?
+    }
+
+    pub fn append_root_file(&mut self, name: &str, data: &[u8]) -> Result<(), SdCardError> {
+        self.access_root_dir(|dir| {
+            let file = dir
+                .open_file_in_dir(name, Mode::ReadWriteAppend)
+                .map_err(|_| SdCardError::FileOpenFailed)?;
+            let result = file.write(data).map_err(|_| SdCardError::WriteFailed);
+            let closed = file.close().map_err(|_| SdCardError::WriteFailed);
+            result.and(closed)
         })?
     }
 
@@ -216,18 +216,25 @@ impl SdCard {
 
         self.access_root_dir(|dir| {
             dir.iterate_dir_lfn(&mut lfn_buffer, |entry, name| {
-                if let Some(name) = name {
-                    let name = String::from_str(name).unwrap();
-                    if name.contains(ext) {
-                        result.push(FileName {
-                            long_name: name,
-                            short_name: entry.name.clone(),
-                        });
-                    }
+                if entry.attributes.is_directory() || entry.attributes.is_volume() {
+                    return;
+                }
+                let name = match name {
+                    Some(name) => String::from(name),
+                    None => alloc::format!("{}", entry.name),
+                };
+                if name
+                    .get(name.len().saturating_sub(ext.len())..)
+                    .is_some_and(|suffix| suffix.eq_ignore_ascii_case(ext))
+                {
+                    result.push(FileName {
+                        long_name: name,
+                        short_name: entry.name.clone(),
+                    });
                 }
             })
-            .unwrap()
-        })?;
+            .map_err(|_| SdCardError::FileOpenFailed)
+        })??;
 
         Ok(result)
     }

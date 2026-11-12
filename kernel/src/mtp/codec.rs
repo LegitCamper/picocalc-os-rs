@@ -25,14 +25,15 @@ pub const OP_SEND_OBJECT: u16 = 0x100D;
 
 pub const RC_OK: u16 = 0x2001;
 pub const RC_GENERAL_ERROR: u16 = 0x2002;
+pub const RC_INCOMPLETE_TRANSFER: u16 = 0x2007;
 pub const RC_SESSION_NOT_OPEN: u16 = 0x2003;
 pub const RC_OPERATION_NOT_SUPPORTED: u16 = 0x2005;
 pub const RC_INVALID_STORAGE_ID: u16 = 0x2008;
 pub const RC_INVALID_OBJECT_HANDLE: u16 = 0x2009;
-pub const RC_STORE_FULL: u16 = 0x200C;
 pub const RC_STORE_NOT_AVAILABLE: u16 = 0x2013;
 pub const RC_NO_VALID_OBJECT_INFO: u16 = 0x2015;
 pub const RC_INVALID_PARAMETER: u16 = 0x201D;
+pub const RC_INVALID_PARENT_OBJECT: u16 = 0x201A;
 pub const RC_SESSION_ALREADY_OPEN: u16 = 0x201E;
 
 pub const FMT_UNDEFINED: u16 = 0x3000;
@@ -81,6 +82,30 @@ impl Header {
     }
 }
 
+pub struct DataPhase {
+    pub remaining: u32,
+}
+
+impl DataPhase {
+    pub fn start(packet: &[u8], operation: u16, tid: u32) -> Option<(Self, Header)> {
+        let header = Header::parse(packet)?;
+        if header.kind != CT_DATA || header.code != operation || header.tid != tid {
+            return None;
+        }
+        let received = u32::try_from(packet.len()).ok()?;
+        let remaining = header.len.checked_sub(received)?;
+        Some((Self { remaining }, header))
+    }
+
+    pub fn accept(&mut self, length: usize) -> Option<()> {
+        if length == 0 {
+            return None;
+        }
+        self.remaining = self.remaining.checked_sub(u32::try_from(length).ok()?)?;
+        Some(())
+    }
+}
+
 /// Up to five command parameters, missing ones read as 0.
 pub fn params(payload: &[u8]) -> [u32; 5] {
     let mut out = [0u32; 5];
@@ -110,7 +135,9 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn bytes(&mut self, src: &[u8]) -> Option<()> {
-        self.buf.get_mut(self.pos..self.pos + src.len())?.copy_from_slice(src);
+        self.buf
+            .get_mut(self.pos..self.pos + src.len())?
+            .copy_from_slice(src);
         self.pos += src.len();
         Some(())
     }
@@ -188,14 +215,27 @@ pub fn parse_object_info(data: &[u8], name_out: &mut [u8]) -> Option<NewObject> 
     ]);
 
     let units = *data.get(OBJECT_INFO_NAME_OFFSET)? as usize;
-    let chars = units.saturating_sub(1); // drop the NUL terminator
+    if units < 2 {
+        return None;
+    }
+    let encoded = data.get(OBJECT_INFO_NAME_OFFSET + 1..OBJECT_INFO_NAME_OFFSET + 1 + units * 2)?;
+    if encoded[encoded.len() - 2..] != [0, 0] {
+        return None;
+    }
+    let chars = units - 1;
     let mut name_len = 0;
     for i in 0..chars {
         let at = OBJECT_INFO_NAME_OFFSET + 1 + i * 2;
         let unit = u16::from_le_bytes([*data.get(at)?, *data.get(at + 1)?]);
-        let byte = if unit != 0 && unit < 0x80 { unit as u8 } else { b'?' };
-        *name_out.get_mut(name_len)? = byte;
+        if !(0x20..0x7f).contains(&unit) || matches!(unit as u8, b'/' | b'\\') {
+            return None;
+        }
+        *name_out.get_mut(name_len)? = unit as u8;
         name_len += 1;
+    }
+
+    if matches!(&name_out[..name_len], b"." | b"..") {
+        return None;
     }
 
     Some(NewObject {
@@ -277,7 +317,91 @@ mod tests {
     fn object_info_detects_directory() {
         let mut buf = [0u8; 64];
         buf[4..6].copy_from_slice(&FMT_ASSOCIATION.to_le_bytes());
+        buf[OBJECT_INFO_NAME_OFFSET] = 2;
+        buf[OBJECT_INFO_NAME_OFFSET + 1] = b'A';
         let mut name = [0u8; 4];
         assert!(parse_object_info(&buf, &mut name).unwrap().is_dir);
+    }
+
+    #[test]
+    fn data_phase_accepts_combined_and_split_headers() {
+        for size in [0, 1, 51, 52, 53, 64, 500, 512, 1024] {
+            for split in [false, true] {
+                let mut packet = [0u8; 64];
+                Header {
+                    len: HDR as u32 + size,
+                    kind: CT_DATA,
+                    code: OP_SEND_OBJECT,
+                    tid: 7,
+                }
+                .write(&mut packet)
+                .unwrap();
+                let first = if split {
+                    HDR
+                } else {
+                    (HDR + size as usize).min(64)
+                };
+                let (mut phase, _) = DataPhase::start(&packet[..first], OP_SEND_OBJECT, 7).unwrap();
+                let mut received = first - HDR;
+                while phase.remaining > 0 {
+                    let length = phase.remaining.min(64) as usize;
+                    phase.accept(length).unwrap();
+                    received += length;
+                }
+                assert_eq!(received, size as usize);
+            }
+        }
+    }
+
+    #[test]
+    fn data_phase_rejects_wrong_headers_and_lengths() {
+        let header = Header {
+            len: 64,
+            kind: CT_DATA,
+            code: OP_SEND_OBJECT,
+            tid: 7,
+        };
+        let mut packet = [0u8; 65];
+        header.write(&mut packet).unwrap();
+        assert!(DataPhase::start(&packet, OP_SEND_OBJECT, 7).is_none());
+        assert!(DataPhase::start(&packet[..12], OP_SEND_OBJECT_INFO, 7).is_none());
+        assert!(DataPhase::start(&packet[..12], OP_SEND_OBJECT, 8).is_none());
+        assert!(DataPhase::start(&packet[..11], OP_SEND_OBJECT, 7).is_none());
+        let (mut phase, _) = DataPhase::start(&packet[..12], OP_SEND_OBJECT, 7).unwrap();
+        assert!(phase.accept(0).is_none());
+        assert!(phase.accept(53).is_none());
+        assert_eq!(phase.remaining, 52);
+        Header {
+            kind: CT_COMMAND,
+            ..header
+        }
+        .write(&mut packet)
+        .unwrap();
+        assert!(DataPhase::start(&packet[..12], OP_SEND_OBJECT, 7).is_none());
+    }
+
+    #[test]
+    fn object_info_rejects_unsafe_or_lossy_names() {
+        for name in ["", ".", "..", "a/b", "a\\b", "\0", "\u{e9}"] {
+            let mut buf = [0u8; 100];
+            Cursor::new(&mut buf[OBJECT_INFO_NAME_OFFSET..])
+                .string(name)
+                .unwrap();
+            if name == "\u{e9}" {
+                buf[OBJECT_INFO_NAME_OFFSET + 1] = 0xe9;
+            }
+            assert!(parse_object_info(&buf, &mut [0; 64]).is_none(), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn object_info_requires_complete_terminated_name() {
+        let mut buf = [0u8; 64];
+        Cursor::new(&mut buf[OBJECT_INFO_NAME_OFFSET..])
+            .string("AB")
+            .unwrap();
+        assert!(parse_object_info(&buf[..58], &mut [0; 64]).is_none());
+        buf[57] = 1;
+        assert!(parse_object_info(&buf, &mut [0; 64]).is_none());
     }
 }

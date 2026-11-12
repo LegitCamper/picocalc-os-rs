@@ -16,9 +16,9 @@ mod display;
 mod elf;
 mod framebuffer;
 // TODO: NEED TO UPDATE MCU TO TEST BATTERY READS
+mod mtp;
 #[allow(unused)]
 mod peripherals;
-mod mtp;
 mod storage;
 mod syscalls;
 mod ui;
@@ -38,8 +38,8 @@ use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 use crate::{
     audio::{AUDIO_BUFFER_WRITTEN, audio_handler, clear_audio_buffers},
     display::{FRAMEBUFFER, display_handler, init_display},
-    peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
     mtp::{MTP_RESUME, MTP_SHUTDOWN},
+    peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
     storage::{SDCARD, SdCard},
     syscalls::{KEY_CACHE, MS_SINCE_LAUNCH},
     ui::{SELECTIONS, clear_selection, ui_handler},
@@ -354,8 +354,22 @@ async fn setup_sd(sd: Sd) {
     let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
     let sdcard = SdmmcSdCard::new(device, Delay);
 
-    config.frequency = 32_000_000;
-    sdcard.spi(|dev| dev.bus_mut().set_config(&config));
+    if det.is_low() {
+        match sdcard.num_bytes() {
+            Ok(_) => {
+                config.frequency = 32_000_000;
+                sdcard.spi(|dev| dev.bus_mut().set_config(&config));
+            }
+            Err(_error) => {
+                sdcard.mark_card_uninit();
+                #[cfg(feature = "defmt")]
+                defmt::warn!(
+                    "SD initialization failed: {:?}",
+                    defmt::Debug2Format(&_error)
+                );
+            }
+        }
+    }
     SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
 }
 
@@ -411,9 +425,15 @@ async fn prog_search_handler() {
     loop {
         {
             let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().unwrap();
-
-            let mut files = sd.list_files_by_extension(".bin").unwrap();
+            let mut files = match guard.as_mut().map(|sd| sd.list_files_by_extension(".bin")) {
+                Some(Ok(files)) => files,
+                Some(Err(_error)) => {
+                    #[cfg(feature = "defmt")]
+                    defmt::warn!("SD app scan failed: {:?}", defmt::Debug2Format(&_error));
+                    alloc::vec::Vec::new()
+                }
+                None => alloc::vec::Vec::new(),
+            };
             files.sort();
             let mut select = SELECTIONS.lock().await;
 

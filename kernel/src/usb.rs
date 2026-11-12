@@ -2,9 +2,18 @@ use crate::mtp::MtpClass;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::select;
 use embassy_rp::{peripherals::USB, usb::Driver};
-use embassy_usb::{Builder, Config, UsbDevice};
+use embassy_usb::types::StringIndex;
+use embassy_usb::{Builder, Config, Handler, UsbDevice};
 
 pub static USB_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct MtpStrings(StringIndex);
+
+impl Handler for MtpStrings {
+    fn get_string(&mut self, index: StringIndex, _lang_id: u16) -> Option<&str> {
+        (index == self.0).then_some("MTP")
+    }
+}
 
 #[embassy_executor::task]
 pub async fn usb_handler(driver: Driver<'static, USB>) {
@@ -18,6 +27,7 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
     let mut config_descriptor = [0; 256];
     let mut bos_descriptor = [0; 64];
     let mut control_buf = [0; 64];
+    let mut strings;
 
     let mut builder = Builder::new(
         driver,
@@ -28,7 +38,10 @@ pub async fn usb_handler(driver: Driver<'static, USB>) {
         &mut control_buf,
     );
 
-    let mut mtp = MtpClass::new(&mut builder);
+    let interface_name = builder.string();
+    strings = MtpStrings(interface_name);
+    builder.handler(&mut strings);
+    let mut mtp = MtpClass::new(&mut builder, interface_name);
     let usb = builder.build();
 
     select(run(usb), mtp.run()).await;
