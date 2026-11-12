@@ -59,8 +59,8 @@ let sd = guard.as_mut().unwrap();
 `SDCARD` is `LazyLock<Mutex<CriticalSectionRawMutex, Option<SdCard>>>`
 (`kernel/src/storage.rs:27`). Core0 holds this same lock in
 `prog_search_handler` (`kernel/src/main.rs:411`, every 5 s), in the ELF loader
-(`kernel/src/elf.rs:35`) and in the USB mass-storage path
-(`kernel/src/scsi/mod.rs:61`, `:81`). A user app doing file I/O while core0
+(`kernel/src/elf.rs:35`) and in the USB MTP path
+(`kernel/src/mtp/mod.rs:252`, `:284`). A user app doing file I/O while core0
 polls the card panics the kernel. The `.as_mut().unwrap()` on the next line is
 a second panic if the card was never initialized.
 

@@ -139,7 +139,7 @@ Mapping to plans: 1 → 001. 2, 8 → 002. 3, 12, 14 → 003. 4, 9, 10, 11 → 0
 - `kernel/src/psram.rs`, `kernel/src/heap.rs` (the PSRAM allocator, only built
   with the `psram`/`pimoroni2w` features — note its own `FIXME` at
   `kernel/src/heap.rs:37-38` about CAS atomics in PSRAM).
-- `kernel/src/usb.rs` and `kernel/src/scsi/` (USB mass-storage), beyond
+- `kernel/src/usb.rs` and `kernel/src/mtp/` (USB MTP responder), beyond
   confirming they contend for the `SDCARD` mutex.
 - `kernel/src/audio.rs`'s PIO program and DMA paths, beyond the buffer
   handshake with `send_audio_buffer`.
