@@ -2,19 +2,19 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::{format, vec::Vec};
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
-    prelude::{Point, RgbColor},
+    prelude::{Dimensions, DrawTargetExt, Point, RgbColor},
     transform::Transform,
 };
 use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 use tinygif::Gif;
 use userlib::{
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    fs::{Entries, file_len, list_dir, read_file},
+    fs::{file_len, list_media, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
     println, sleep,
@@ -39,16 +39,14 @@ pub fn main() {
         return;
     };
 
-    let mut entries = Entries::new();
-    if let Err(error) = list_dir("/gifs", &mut entries) {
-        println!("Cannot list /gifs: {:?}", error);
-        return;
-    }
-
-    let mut files = entries.entries();
-    files.retain(|entry| entry.extension().unwrap_or("").eq_ignore_ascii_case("gif"));
-    let mut gifs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
-    gifs.sort();
+    let files = match list_media("/gifs", "gif") {
+        Ok(files) => files,
+        Err(error) => {
+            println!("Cannot list GIFs: {:?}", error);
+            return;
+        }
+    };
+    let gifs = files.iter().map(|path| path.as_str()).collect::<Vec<_>>();
 
     let mut selection_ui = SelectionUi::new(&gifs);
     let selection = match selection_ui.run_selection_ui(&mut display) {
@@ -57,7 +55,7 @@ pub fn main() {
             SelectionUiError::SelectionListEmpty => {
                 draw_text_center(
                     &mut display,
-                    "No Gifs were found in /gifs",
+                    "No GIFs in / or /gifs",
                     MonoTextStyle::new(&FONT_6X10, Rgb565::RED),
                 )
                 .ok();
@@ -71,13 +69,13 @@ pub fn main() {
         return;
     };
 
-    let file_name = format!("/gifs/{}", gifs[selection]);
-    let Ok(size) = file_len(&file_name) else {
+    let file_name = gifs[selection];
+    let Ok(size) = file_len(file_name) else {
         return;
     };
-    // ponytail: whole-file decoding is capped at 1 MiB; stream larger GIFs later.
-    if size == 0 || size > 1_048_576 {
-        println!("GIF is empty or exceeds 1 MiB");
+    // ponytail: whole-file decoding is capped at 2 MiB; stream larger GIFs later.
+    if size == 0 || size > 2_097_152 {
+        println!("GIF is empty or exceeds 2 MiB");
         return;
     }
     let mut buf = Vec::new();
@@ -88,7 +86,7 @@ pub fn main() {
     buf.resize(size, 0);
     let mut position = 0;
     while position < size {
-        match read_file(&file_name, position, &mut buf[position..]) {
+        match read_file(file_name, position, &mut buf[position..]) {
             Ok(0) | Err(_) => return,
             Ok(read) => position += read,
         }
@@ -98,8 +96,8 @@ pub fn main() {
         println!("Invalid GIF");
         return;
     };
-    if usize::from(gif.width()) > SCREEN_WIDTH || usize::from(gif.height()) > SCREEN_HEIGHT {
-        println!("GIF exceeds display dimensions");
+    if u32::from(gif.width()) * u32::from(gif.height()) > 1_048_576 {
+        println!("GIF exceeds decoded pixel limit");
         return;
     }
 
@@ -107,6 +105,8 @@ pub fn main() {
         (SCREEN_WIDTH as i32 - gif.width() as i32) / 2,
         (SCREEN_HEIGHT as i32 - gif.height() as i32) / 2,
     );
+    let bounds = display.bounding_box();
+    let mut display = display.clipped(&bounds);
 
     loop {
         let mut has_frames = false;

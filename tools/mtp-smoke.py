@@ -185,6 +185,47 @@ def main():
             after, _ = command(0x1007, 0x00010001, 0, 0xFFFFFFFF)
             assert after == handles, "Failed upload left an object behind"
             print("Upload rejection, rollback and collision checks: PASS")
+
+            first_name = "HA" + secrets.token_hex(3).upper() + ".TST"
+            second_name = "HB" + secrets.token_hex(3).upper() + ".TST"
+            assert first_name not in names and second_name not in names
+
+            def upload(test_name, data):
+                _, response = command(0x100C, 0x00010001, 0,
+                                      data=object_info(test_name, len(data)))
+                handle = struct.unpack("<III", response)[2]
+                command(0x100D, data=data)
+                return handle
+
+            try:
+                first = upload(first_name, b"first generation")
+                second = upload(second_name, b"neighbor must survive")
+                command(0x100B, first)
+                command(0x1008, first, expected=0x2009)
+                command(0x100B, first, expected=0x2009)
+                downloaded, _ = command(0x1009, second)
+                assert downloaded == b"neighbor must survive"
+                replacement = upload(first_name, b"replacement generation")
+                assert replacement not in (first, second), "Reused a cached handle"
+                command(0x1007, 0x00010001, 0, 0xFFFFFFFF)
+                downloaded, _ = command(0x1009, second)
+                assert downloaded == b"neighbor must survive"
+                downloaded, _ = command(0x1009, replacement)
+                assert downloaded == b"replacement generation"
+                command(0x1008, first, expected=0x2009)
+            finally:
+                for test_name in (first_name, second_name):
+                    current, _ = command(0x1007, 0x00010001, 0, 0xFFFFFFFF)
+                    for offset in range(4, len(current), 4):
+                        handle = struct.unpack_from("<I", current, offset)[0]
+                        info, _ = command(0x1008, handle)
+                        actual_name = info[53:53 + (info[52] - 1) * 2].decode("utf-16le")
+                        if actual_name == test_name:
+                            command(0x100B, handle)
+                            break
+            after, _ = command(0x1007, 0x00010001, 0, 0xFFFFFFFF)
+            assert after == handles, "Neighbor handles changed after replacement"
+            print("Cached handles, deletion and directory-slot reuse: PASS")
     finally:
         try:
             if opened:

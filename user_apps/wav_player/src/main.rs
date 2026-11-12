@@ -15,7 +15,7 @@ use userlib::{
     audio::{AUDIO_BUFFER_LEN, audio_buffer_ready, reconfigure_sample_rate, send_audio_buffer},
     display::Display,
     format,
-    fs::{Entries, file_len, list_dir, read_file},
+    fs::{file_len, list_media, read_file},
     get_key,
     keyboard::{KeyCode, KeyState},
     println,
@@ -41,16 +41,14 @@ pub fn main() {
     };
 
     loop {
-        let mut entries = Entries::new();
-        if let Err(error) = list_dir("/music", &mut entries) {
-            println!("Cannot list /music: {:?}", error);
-            return;
-        }
-
-        let mut files = entries.entries();
-        files.retain(|entry| entry.extension().unwrap_or("").eq_ignore_ascii_case("wav"));
-        let mut wavs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
-        wavs.sort();
+        let files = match list_media("/music", "wav") {
+            Ok(files) => files,
+            Err(error) => {
+                println!("Cannot list WAVs: {:?}", error);
+                return;
+            }
+        };
+        let wavs = files.iter().map(|path| path.as_str()).collect::<Vec<_>>();
 
         let mut selection_ui = SelectionUi::new(&wavs);
         let selection = match selection_ui.run_selection_ui(&mut display) {
@@ -59,7 +57,7 @@ pub fn main() {
                 SelectionUiError::SelectionListEmpty => {
                     draw_text_center(
                         &mut display,
-                        "No Wavs were found in /music",
+                        "No WAVs in / or /music",
                         MonoTextStyle::new(&FONT_6X10, Rgb565::RED),
                     )
                     .ok();
@@ -80,12 +78,12 @@ pub fn main() {
         )
         .ok();
 
-        let file_name = format!("/music/{}", wavs[selection]);
-        let Ok(length) = file_len(&file_name) else {
+        let file_name = wavs[selection];
+        let Ok(length) = file_len(file_name) else {
             continue;
         };
         let mut read =
-            |offset, buffer: &mut [u8]| read_file(&file_name, offset, buffer).map_err(|_| ());
+            |offset, buffer: &mut [u8]| read_file(file_name, offset, buffer).map_err(|_| ());
         let Ok(wav) = wav_format::parse(length, &mut read) else {
             println!("Invalid WAV; only 8-bit stereo PCM is supported");
             continue;

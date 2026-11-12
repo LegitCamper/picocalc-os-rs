@@ -50,6 +50,31 @@ Uploads currently target the SD Card root and require ASCII 8.3 filenames
 Subdirectory uploads and long filenames are rejected, not silently renamed.
 New uploads cannot truncate existing files. Use a new name to preserve an older copy.
 
+`just copy-userapps` rebuilds all five apps and replaces their root-directory
+copies over MTP using GIO/GVfs (the host's GIO when running in a toolbox).
+The copy step uses `CALC.BIN` for `calculator` and `WAVPLAY.BIN` for `wav_player`;
+other app names are uppercased. Build target names remain unchanged.
+Existing files are backed up locally before deletion, and uploads are downloaded
+and compared byte-for-byte. A failed transfer stops the recipe and retains the
+printed temporary directory for recovery; replacement is not atomic.
+Identical files are verified without deleting or rewriting them.
+
+`just copy-userapp <app>` also copies that app's bundled assets, with the same
+backup and readback checks. MTP remains root-only: gallery BMPs in
+`assets/gallery/` use `IMG0001.BMP` through `IMG0005.BMP`, and
+`assets/gif/bad_apple.gif` uses `BADAPPLE.GIF`. Additional GIFs and WAVs in
+`assets/gif/` and `assets/wav_player/` must already have valid 8.3 names.
+No WAV sample is bundled. Gallery, GIF, and WAV apps scan both the root and their
+existing `/images`, `/gifs`, and `/music` folders. The GIF player accepts files
+up to 2 MiB and one megapixel, centering and clipping larger-than-screen images.
+
+Snake advances every 125 ms (eight steps per second), independent of rendering
+speed. Input stays responsive during waits.
+
+MTP object handles remain stable when other root entries are deleted or created.
+Deleted handles are retired rather than reassigned to another file. After flashing
+a kernel with this fix, reconnect USB and remount MTP to discard old host metadata.
+
 Connect a data cable to the Pico board's native USB port; the debug probe alone
 does not provide MTP. Leave the device at its launcher (MTP pauses while an app
 runs). In an MTP-capable file manager, open **PicoCalc > SD Card** and copy files
@@ -62,6 +87,9 @@ python3 tools/mtp-smoke.py               # read-only discovery and listing
 python3 tools/mtp-smoke.py --write-check # creates/removes unique test files
 rustc --test --edition 2024 kernel/src/mtp/codec.rs -o /tmp/mtp_codec && /tmp/mtp_codec
 ```
+
+The write check includes cached-handle lookups across delete/recreate operations
+and checks that neighboring files keep their handles and contents.
 
 ## Validation and ABI compatibility
 

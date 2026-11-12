@@ -497,8 +497,14 @@ pub fn detect_psram_qmi(qmi: &embassy_rp::pac::qmi::Qmi) -> u32 {
             }
         }
 
+        // Direct mode must be fully idle before it is torn down; dropping `en`
+        // mid-transfer leaves QMI wedged and every XIP fetch bus-faults.
+        while qmi.direct_csr().read().busy() {}
         qmi.direct_csr().modify(|w| {
             w.set_assert_cs1n(false);
+        });
+        while qmi.direct_csr().read().busy() {}
+        qmi.direct_csr().modify(|w| {
             w.set_en(false);
         });
         let mut param_size: u32 = 0;
@@ -533,7 +539,10 @@ pub fn init_psram_qmi(
 
     let clock_hz = clk_peri_freq();
 
-    let mut divisor: u32 = (clock_hz + MAX_PSRAM_FREQ - 1) / MAX_PSRAM_FREQ;
+    // `.max(1)` keeps the divide below provably non-zero: without it the
+    // compiler emits a div-by-zero panic branch, which is a call into flash
+    // from a function that runs with XIP down.
+    let mut divisor: u32 = clock_hz.div_ceil(MAX_PSRAM_FREQ).max(1);
     if divisor == 1 && clock_hz > 100_000_000 {
         divisor = 2;
     }
@@ -544,10 +553,18 @@ pub fn init_psram_qmi(
 
     // - Max select must be <= 8us.  The value is given in multiples of 64 system clocks.
     // - Min deselect must be >= 18ns.  The value is given in system clock cycles - ceil(divisor / 2).
-    let clock_period_fs: u64 = 1_000_000_000_000_000_u64 / u64::from(clock_hz);
-    let max_select: u8 = ((125 * 1_000_000) / clock_period_fs) as u8;
-    let min_deselect: u32 = ((18 * 1_000_000 + (clock_period_fs - 1)) / clock_period_fs
-        - u64::from(divisor + 1) / 2) as u32;
+    //
+    // Derived in 32-bit arithmetic on purpose. This function runs from `.data`
+    // with XIP down, so a `u64` divide would emit an `__aeabi_uldivmod` call
+    // into flash and bus-fault on the instruction prefetch. Cortex-M33 has a
+    // hardware `udiv`, so 32-bit division is a plain instruction.
+    //
+    // With a clock period of 1e15/f femtoseconds:
+    //   max_select  = 125e6 / (1e15/f)            = f / 8e6
+    //   min_deselect = ceil(18e6 / (1e15/f)) - .. = ceil(18 * f/1e9) - (divisor+1)/2
+    let max_select: u8 = (clock_hz / 8_000_000) as u8;
+    let clock_mhz = clock_hz / 1_000_000;
+    let min_deselect: u32 = (18 * clock_mhz).div_ceil(1000) - (divisor + 1) / 2;
 
     // #[cfg(feature = "defmt")]
     // defmt::info!(

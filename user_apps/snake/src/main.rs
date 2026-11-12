@@ -2,13 +2,14 @@
 #![no_main]
 
 extern crate alloc;
+mod timing;
 use core::panic::PanicInfo;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
 use embedded_snake::{Direction, SnakeGame};
 use userlib::{
     Rng,
     display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
-    get_key,
+    get_key, get_ms,
     keyboard::{KeyCode, KeyState},
     println, sleep,
 };
@@ -46,24 +47,31 @@ pub fn main() {
         50,
     );
 
+    let mut last_step = get_ms();
     loop {
         let event = get_key();
-        if event.state != KeyState::Idle {
+        if event.state == KeyState::Pressed {
             let direction = match event.key {
-                KeyCode::Up => Direction::Up,
-                KeyCode::Down => Direction::Down,
-                KeyCode::Right => Direction::Right,
-                KeyCode::Left => Direction::Left,
+                KeyCode::Up => Some(Direction::Up),
+                KeyCode::Down => Some(Direction::Down),
+                KeyCode::Right => Some(Direction::Right),
+                KeyCode::Left => Some(Direction::Left),
                 KeyCode::Esc => return,
-                _ => Direction::None,
+                _ => None,
             };
-            game.set_direction(direction);
+            if let Some(direction) = direction {
+                game.set_direction(direction);
+            }
         };
 
-        // ensure all draws show up at once
+        let now = get_ms();
+        let remaining = timing::remaining_ms(now, last_step);
+        if remaining > 0 {
+            sleep(remaining.min(10));
+            continue;
+        }
+        last_step = now;
         game.pre_draw(&mut display);
         game.draw(&mut display);
-
-        sleep(15);
     }
 }
