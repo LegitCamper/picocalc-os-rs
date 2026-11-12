@@ -1,0 +1,280 @@
+diff --git a/userlib_sys/src/lib.rs b/userlib_sys/src/lib.rs
+--- a/userlib_sys/src/lib.rs
++++ b/userlib_sys/src/lib.rs
+@@ -14,6 +14,41 @@
+ use strum::{EnumCount, EnumIter};
+ 
+ pub type EntryFn = fn();
++
++#[repr(C)]
++pub struct AbiHeader {
++    pub magic: u32,
++    pub major: u16,
++    pub minor: u16,
++    pub entries: u16,
++    pub reserved: u16,
++}
++const _: () = assert!(size_of::<AbiHeader>() == 12);
++
++#[used]
++#[unsafe(no_mangle)]
++#[unsafe(link_section = ".syscall_abi")]
++pub static SYS_CALL_ABI: AbiHeader = AbiHeader {
++    magic: u32::from_le_bytes(*b"PCOS"),
++    major: 2,
++    minor: 0,
++    entries: SYS_CALL_TABLE_COUNT as u16,
++    reserved: 0,
++};
++
++pub type SysResult = i64;
++
++pub fn decode_result(value: SysResult) -> Result<usize, SysError> {
++    if value < 0 {
++        let code = value
++            .checked_neg()
++            .and_then(|value| i32::try_from(value).ok())
++            .ok_or(SysError::Io)?;
++        SysError::from_code(code)?;
++        return Err(SysError::Io);
++    }
++    usize::try_from(value).map_err(|_| SysError::Io)
++}
+ 
+ pub const SYS_CALL_TABLE_COUNT: usize = 18;
+ const _: () = assert!(SYS_CALL_TABLE_COUNT == SyscallTable::COUNT);
+@@ -670,7 +705,7 @@
+     read_from: usize,
+     buf: *mut u8,
+     buf_len: usize,
+-) -> usize;
++) -> SysResult;
+ 
+ /// # Safety
+ /// The loader must initialize the syscall table. Pointer arguments must reference
+@@ -682,7 +717,8 @@
+     read_from: usize,
+     buf: *mut u8,
+     buf_len: usize,
+-) -> usize {
++) -> SysResult {
++    core::hint::black_box(&SYS_CALL_ABI);
+     // SAFETY: the loader initializes this slot; caller supplies disjoint path and output.
+     unsafe {
+         let ptr = SYS_CALL_TABLE[SyscallTable::ReadFile as usize];
+@@ -780,6 +816,15 @@
+     use super::*;
+ 
+     #[test]
++    fn scalar_results_preserve_values_and_reject_unknown_errors() {
++        assert_eq!(decode_result(0), Ok(0));
++        assert_eq!(decode_result(u32::MAX as i64), Ok(u32::MAX as usize));
++        assert_eq!(decode_result(-2), Err(SysError::NotFound));
++        assert_eq!(decode_result(-123), Err(SysError::Io));
++        assert_eq!(decode_result(i64::MIN), Err(SysError::Io));
++    }
++
++    #[test]
+     fn keyboard_stub_supplies_explicit_initialized_output() {
+         unsafe extern "C" fn write_key(output: *mut keyboard::KeyEventC) {
+             // SAFETY: get_key passes its initialized local event for this synchronous call.
+diff --git a/userlib/src/lib.rs b/userlib/src/lib.rs
+--- a/userlib/src/lib.rs
++++ b/userlib/src/lib.rs
+@@ -267,8 +267,7 @@
+                 buf.len(),
+             )
+         };
+-        SysError::from_code(userlib_sys::get_last_error())?;
+-        Ok(read)
++        userlib_sys::decode_result(read)
+     }
+ 
+     pub fn write_file(file: &str, start_from: usize, buf: &[u8]) -> Result<(), SysError> {
+diff --git a/kernel/src/syscalls.rs b/kernel/src/syscalls.rs
+--- a/kernel/src/syscalls.rs
++++ b/kernel/src/syscalls.rs
+@@ -396,7 +396,7 @@
+     offset: usize,
+     buffer: *mut u8,
+     buffer_len: usize,
+-) -> usize {
++) -> userlib_sys::SysResult {
+     let result = (|| {
+         // SAFETY: forwarded readable path contract.
+         let file = unsafe { path(file, len)? };
+@@ -424,7 +424,10 @@
+             file.read(buffer).map_err(fs_error)
+         })
+     })();
+-    report(result, 0)
++    match result {
++        Ok(count) => count as i64,
++        Err(error) => -(error as i64),
++    }
+ }
+ const _: WriteFile = write_file;
+ pub unsafe extern "C" fn write_file(
+diff --git a/kernel/src/elf_format.rs b/kernel/src/elf_format.rs
+--- a/kernel/src/elf_format.rs
++++ b/kernel/src/elf_format.rs
+@@ -25,6 +25,7 @@
+ 
+ #[derive(Debug, PartialEq, Eq)]
+ pub enum LoadError {
++    AbiMismatch,
+     WrongMachine,
+     InvalidElf,
+     FailedToReadFile,
+@@ -34,6 +35,25 @@
+     SyscallTableSizeMismatch,
+     TooLarge,
+     OutOfMemory,
++}
++
++pub fn validate_abi(
++    bytes: &[u8; 12],
++    kernel_minor: u16,
++    available_entries: usize,
++) -> Result<usize, LoadError> {
++    let count = half(bytes, 8) as usize;
++    if bytes[..4] != *b"PCOS"
++        || half(bytes, 4) != 2
++        || half(bytes, 6) > kernel_minor
++        || half(bytes, 6) != 0
++        || count != 18
++        || count > available_entries
++        || half(bytes, 10) != 0
++    {
++        return Err(LoadError::AbiMismatch);
++    }
++    Ok(count)
+ }
+ 
+ pub struct Header {
+@@ -408,6 +428,19 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn abi_handshake_rejects_incompatible_headers() {
++        let header = [b'P', b'C', b'O', b'S', 2, 0, 0, 0, 18, 0, 0, 0];
++        assert_eq!(validate_abi(&header, 0, 18), Ok(18));
++        assert_eq!(validate_abi(&header, 1, 19), Ok(18));
++        assert_eq!(validate_abi(&header, 0, 17), Err(LoadError::AbiMismatch));
++        for (index, value) in [(0, 0), (4, 1), (6, 1), (8, 0), (8, 19), (10, 1)] {
++            let mut invalid = header;
++            invalid[index] = value;
++            assert_eq!(validate_abi(&invalid, 0, 18), Err(LoadError::AbiMismatch));
++        }
++    }
+ 
+     #[test]
+     #[ignore = "requires just userapps; run by just check after rebuilding"]
+diff --git a/kernel/src/elf.rs b/kernel/src/elf.rs
+--- a/kernel/src/elf.rs
++++ b/kernel/src/elf.rs
+@@ -73,7 +73,8 @@
+                 _ => {}
+             }
+         }
+-        patch_syscalls(&mut file, &header, &image, base)?;
++        let table_count = read_abi(&mut file, &header, &image, base)?;
++        patch_syscalls(&mut file, &header, &image, base, table_count)?;
+         let entry_offset = image.range(header.entry & !1, 2, format::PF_X)?.start;
+         let entry_address = (base.as_ptr() as usize + entry_offset) | 1;
+         // SAFETY: entry is a Thumb address in loaded executable bytes. Executing
+@@ -148,11 +149,74 @@
+     Ok(())
+ }
+ 
++fn read_abi(
++    file: &mut File,
++    header: &Header,
++    image: &Image<'_>,
++    base: &[u8],
++) -> Result<usize, LoadError> {
++    const NAME: &[u8] = b"SYS_CALL_ABI\0";
++    let mut found = None;
++    let mut count = 0;
++    for index in 1..header.section_count {
++        let symbols = read_section(file, header, index)?;
++        if !matches!(symbols.kind, format::SHT_SYMTAB | format::SHT_DYNSYM) {
++            continue;
++        }
++        count += symbols.size / format::SYMBOL_SIZE as u32;
++        if count > format::MAX_SYMBOLS {
++            return Err(LoadError::TooLarge);
++        }
++        let strings = read_section(file, header, symbols.link as u16)?;
++        if strings.kind != format::SHT_STRTAB {
++            return Err(LoadError::InvalidElf);
++        }
++        for index in 0..symbols.size / format::SYMBOL_SIZE as u32 {
++            let mut raw = [0; format::SYMBOL_SIZE];
++            read_at(
++                file,
++                symbols.offset + index * format::SYMBOL_SIZE as u32,
++                &mut raw,
++            )?;
++            let symbol = format::Symbol::parse(&raw);
++            if symbol.name >= strings.size {
++                return Err(LoadError::InvalidElf);
++            }
++            if strings.size - symbol.name < NAME.len() as u32 {
++                continue;
++            }
++            let mut name = [0; NAME.len()];
++            read_at(file, strings.offset + symbol.name, &mut name)?;
++            if name != NAME {
++                continue;
++            }
++            symbol.validate_section(header.section_count)?;
++            if symbol.size != 12
++                || symbol.kind != 1
++                || !symbol.address.is_multiple_of(4)
++                || found.is_some_and(|address| address != symbol.address)
++            {
++                return Err(LoadError::AbiMismatch);
++            }
++            let section = read_section(file, header, symbol.section)?;
++            if section.flags & format::SHF_ALLOC == 0 {
++                return Err(LoadError::AbiMismatch);
++            }
++            format::contained_range(symbol.address, 12, section.address, section.size)?;
++            found = Some(symbol.address);
++        }
++    }
++    let range = image.range(found.ok_or(LoadError::AbiMismatch)?, 12, 0)?;
++    let bytes = base[range].try_into().map_err(|_| LoadError::AbiMismatch)?;
++    format::validate_abi(bytes, 0, SYS_CALL_TABLE_COUNT)
++}
++
+ fn patch_syscalls(
+     file: &mut File,
+     header: &Header,
+     image: &Image<'_>,
+     base: &mut [u8],
++    table_count: usize,
+ ) -> Result<(), LoadError> {
+     const NAME: &[u8] = b"SYS_CALL_TABLE\0";
+     let mut table_address = None;
+@@ -191,7 +255,7 @@
+             }
+             symbol.validate_section(header.section_count)?;
+             let section = read_section(file, header, symbol.section)?;
+-            image.syscall_range(&symbol, &section, SYS_CALL_TABLE_COUNT)?;
++            image.syscall_range(&symbol, &section, table_count)?;
+             if table_address.is_some_and(|previous| previous != symbol.address) {
+                 return Err(LoadError::InvalidElf);
+             }
+@@ -199,7 +263,7 @@
+         }
+     }
+     let address = table_address.ok_or(LoadError::SyscallTableNotFound)?;
+-    let range = image.range(address, (SYS_CALL_TABLE_COUNT * 4) as u32, format::PF_W)?;
++    let range = image.range(address, (table_count * 4) as u32, format::PF_W)?;
+     for (slot, call) in base[range].chunks_exact_mut(4).zip(SyscallTable::iter()) {
+         let pointer = match call {
+             SyscallTable::Alloc => syscalls::alloc as usize,

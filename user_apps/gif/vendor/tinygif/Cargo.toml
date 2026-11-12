@@ -1,0 +1,12 @@
+[package]
+name = "tinygif"
+version = "0.0.4"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+embedded-graphics = "0.8.1"
+defmt = { version = "0.3.4", optional = true }
+
+[features]
+8k = []

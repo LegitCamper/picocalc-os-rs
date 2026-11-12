@@ -13,9 +13,10 @@ use embedded_sdmmc::{
 };
 use embedded_sdmmc::{File as SdFile, LfnBuffer, Mode, ShortFileName};
 
-pub const MAX_DIRS: usize = 4;
+pub const MAX_DIRS: usize = userlib_sys::MAX_PATH_COMPONENTS + 1;
 pub const MAX_FILES: usize = 5;
 pub const MAX_VOLUMES: usize = 1;
+const MAX_PROGRAMS: usize = 128;
 
 type Device = ExclusiveDevice<Spi<'static, SPI0, Blocking>, Output<'static>, embassy_time::Delay>;
 type SD = SdmmcSdCard<Device, Delay>;
@@ -57,6 +58,10 @@ pub enum SdCardError {
     RootDirMissing,
     FileOpenFailed,
     WriteFailed,
+    DirectoryReadFailed,
+    TooManyPrograms,
+    NoMemory,
+    InvalidFileName,
 }
 
 pub struct SdCard {
@@ -202,7 +207,7 @@ impl SdCard {
         })?
     }
 
-    /// Returns a Vec of file names (long format) that match the given extension (e.g., "BIN")
+    /// Lists regular files with the given case-insensitive suffix (e.g., ".bin").
     pub fn list_files_by_extension(&mut self, ext: &str) -> Result<Vec<FileName>, SdCardError> {
         let mut result = Vec::new();
 
@@ -211,31 +216,58 @@ impl SdCard {
             return Ok(result);
         }
 
-        let mut lfn_storage = [0; 50];
+        let mut lfn_storage = [0; 768];
         let mut lfn_buffer = LfnBuffer::new(&mut lfn_storage);
+        let mut failure = None;
 
         self.access_root_dir(|dir| {
             dir.iterate_dir_lfn(&mut lfn_buffer, |entry, name| {
-                if entry.attributes.is_directory() || entry.attributes.is_volume() {
+                if failure.is_some()
+                    || entry.attributes.is_directory()
+                    || entry.attributes.is_volume()
+                {
                     return;
                 }
+                let mut short_name = heapless::String::<24>::new();
                 let name = match name {
-                    Some(name) => String::from(name),
-                    None => alloc::format!("{}", entry.name),
+                    Some(name) => name,
+                    None => {
+                        if write!(&mut short_name, "{}", entry.name).is_err() {
+                            failure = Some(SdCardError::InvalidFileName);
+                            return;
+                        }
+                        short_name.as_str()
+                    }
                 };
-                if name
-                    .get(name.len().saturating_sub(ext.len())..)
-                    .is_some_and(|suffix| suffix.eq_ignore_ascii_case(ext))
+                if !ext.is_empty()
+                    && name.len() >= ext.len()
+                    && name.as_bytes()[name.len() - ext.len()..]
+                        .eq_ignore_ascii_case(ext.as_bytes())
                 {
+                    if result.len() == MAX_PROGRAMS {
+                        failure = Some(SdCardError::TooManyPrograms);
+                        return;
+                    }
+                    let mut long_name = String::new();
+                    if long_name.try_reserve_exact(name.len()).is_err()
+                        || result.try_reserve(1).is_err()
+                    {
+                        failure = Some(SdCardError::NoMemory);
+                        return;
+                    }
+                    long_name.push_str(name);
                     result.push(FileName {
-                        long_name: name,
+                        long_name,
                         short_name: entry.name.clone(),
                     });
                 }
             })
-            .map_err(|_| SdCardError::FileOpenFailed)
+            .map_err(|_| SdCardError::DirectoryReadFailed)
         })??;
 
+        if let Some(error) = failure {
+            return Err(error);
+        }
         Ok(result)
     }
 }

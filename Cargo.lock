@@ -878,14 +878,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-audio"
-version = "0.1.0"
-source = "git+https://github.com/LegitCamper/embedded-audio#087784644d810b94dd659a03dbed4795dfb0bd24"
-dependencies = [
- "heapless",
-]
-
-[[package]]
 name = "embedded-graphics"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2507,10 +2499,9 @@ dependencies = [
 [[package]]
 name = "tinygif"
 version = "0.0.4"
-source = "git+https://github.com/LegitCamper/tinygif#083c0efbdbeb21835de30425e234247340f6e370"
 dependencies = [
+ "defmt 0.3.100",
  "embedded-graphics",
- "heapless",
 ]
 
 [[package]]
@@ -2758,9 +2749,7 @@ dependencies = [
 name = "wav_player"
 version = "0.1.0"
 dependencies = [
- "embedded-audio",
  "embedded-graphics",
- "rand",
  "selection_ui",
  "userlib",
 ]

@@ -2,322 +2,228 @@ use crate::{
     storage::{File, SDCARD},
     syscalls,
 };
-use alloc::{vec, vec::Vec};
 use bumpalo::Bump;
-use core::ptr;
+use core::alloc::Layout;
 use embedded_sdmmc::ShortFileName;
-use goblin::{
-    elf::{
-        header::{EM_ARM, ET_DYN, EV_CURRENT, header32::Header},
-        program_header::program_header32::{PT_LOAD, ProgramHeader},
-        reloc::R_ARM_RELATIVE,
-        section_header::{SHT_REL, SHT_SYMTAB},
-    },
-    elf32::{reloc::Rel, section_header::SectionHeader, sym::Sym},
-};
 use strum::IntoEnumIterator;
 use userlib_sys::{EntryFn, SYS_CALL_TABLE_COUNT, SyscallTable};
 
-const ELF32_HDR_SIZE: usize = 52;
+#[path = "elf_format.rs"]
+mod format;
+pub use format::LoadError;
+use format::{Header, Image, ProgramHeader, SectionHeader};
 
-#[derive(Debug)]
-pub enum LoadError {
-    WrongMachine,
-    InvalidElf,
-    FailedToReadFile,
-    ElfIsNotPie,
-    UnknownRelocationType,
-    SyscallTableNotFound,
-    SyscallTableSizeMismatch,
-}
-
-pub async unsafe fn load_binary(name: &ShortFileName) -> Result<(EntryFn, Bump), LoadError> {
+/// # Safety
+/// The entry point contains untrusted native code, not an isolated process.
+/// Keep the returned arena alive until execution has finished.
+pub async unsafe fn load_binary(
+    name: &ShortFileName,
+) -> Result<(EntryFn, Bump, userlib_sys::memory::Region), LoadError> {
     let mut sd_lock = SDCARD.get().lock().await;
-    let sd = sd_lock.as_mut().expect("Sdcard locked");
-
-    let mut header_buf = [0; ELF32_HDR_SIZE];
-
+    let sd = sd_lock.as_mut().ok_or(LoadError::FailedToReadFile)?;
     sd.read_file(name, |mut file| {
-        file.read(&mut header_buf)
-            .map_err(|_| LoadError::FailedToReadFile)?;
-        let elf_header = Header::from_bytes(&header_buf);
-
-        validate_header(&elf_header)?;
-
-        let mut ph_buf = vec![0_u8; elf_header.e_phentsize as usize];
-
-        let (total_size, min_vaddr, _max_vaddr) =
-            total_loadable_size(&mut file, elf_header, &mut ph_buf)?;
-
-        let bump = Bump::with_capacity(total_size);
-        let base = bump.alloc_slice_fill_default::<u8>(total_size);
-
-        // load each segment into bump, relative to base_ptr
-        for i in 0..elf_header.e_phnum {
-            file.seek_from_start(elf_header.e_phoff + (elf_header.e_phentsize * i) as u32)
-                .map_err(|_| LoadError::FailedToReadFile)?;
-            file.read(&mut ph_buf)
-                .map_err(|_| LoadError::FailedToReadFile)?;
-            let ph = cast_phdr(&ph_buf);
-
-            let seg_offset = (ph.p_vaddr - min_vaddr) as usize;
-            let segment = &mut base[seg_offset..seg_offset + ph.p_memsz as usize];
-
-            if ph.p_type == PT_LOAD {
-                load_segment(&mut file, &ph, segment)?;
+        let mut bytes = [0; format::HEADER_SIZE];
+        read_at(&mut file, 0, &mut bytes)?;
+        let header = Header::parse(&bytes, file.length())?;
+        let mut segments = [ProgramHeader::EMPTY; format::MAX_PROGRAM_HEADERS];
+        let mut segment_count = 0;
+        for index in 0..header.program_count {
+            let mut bytes = [0; format::PROGRAM_HEADER_SIZE];
+            read_at(&mut file, header.program_offset(index)?, &mut bytes)?;
+            let segment = ProgramHeader::parse(&bytes, file.length())?;
+            if segment.kind == format::PT_LOAD && segment.memory_size != 0 {
+                segments[segment_count] = segment;
+                segment_count += 1;
             }
         }
-
-        for i in 0..elf_header.e_shnum {
-            let sh = read_section(&mut file, elf_header, i.into())?;
-
-            if sh.sh_type == SHT_REL {
-                apply_relocations(&sh, min_vaddr, base.as_mut_ptr(), &mut file)?;
-            }
-        }
-
-        patch_syscalls(elf_header, base.as_mut_ptr(), min_vaddr, &mut file)?;
-
-        // entry pointer is base_ptr + (entry - min_vaddr)
-        let entry_ptr: EntryFn = unsafe {
-            core::mem::transmute(base.as_ptr().add((elf_header.e_entry - min_vaddr) as usize))
+        let segments = &segments[..segment_count];
+        let image = Image::new(segments, header.entry)?;
+        let layout = Layout::from_size_align(image.size, image.alignment)
+            .map_err(|_| LoadError::InvalidElf)?;
+        let bump = Bump::try_with_capacity(0).map_err(|_| LoadError::OutOfMemory)?;
+        bump.set_allocation_limit(Some(format::MAX_ALLOCATION));
+        let allocation = bump
+            .try_alloc_layout(layout)
+            .map_err(|_| LoadError::OutOfMemory)?;
+        // SAFETY: allocation owns image.size bytes until bump is dropped. Initialize
+        // all bytes, including BSS and holes, before constructing the mutable slice.
+        let base = unsafe {
+            allocation.as_ptr().write_bytes(0, image.size);
+            core::slice::from_raw_parts_mut(allocation.as_ptr(), image.size)
         };
-
-        Ok((entry_ptr, bump))
+        for segment in segments {
+            let range = image.range(segment.address, segment.file_size, 0)?;
+            read_at(&mut file, segment.offset, &mut base[range])?;
+        }
+        let mut relocation_count = 0;
+        for index in 1..header.section_count {
+            let section = read_section(&mut file, &header, index)?;
+            if section.flags & format::SHF_ALLOC != 0 && section.size != 0 {
+                image.range(section.address, section.size, 0)?;
+            }
+            match section.kind {
+                format::SHT_REL => {
+                    relocation_count += section.size / format::REL_SIZE as u32;
+                    if relocation_count > format::MAX_RELOCATIONS {
+                        return Err(LoadError::TooLarge);
+                    }
+                    apply_relocations(&mut file, &header, &section, &image, base)?;
+                }
+                format::SHT_RELA => return Err(LoadError::UnknownRelocationType),
+                _ => {}
+            }
+        }
+        patch_syscalls(&mut file, &header, &image, base)?;
+        let entry_offset = image.range(header.entry & !1, 2, format::PF_X)?.start;
+        let entry_address = (base.as_ptr() as usize + entry_offset) | 1;
+        // SAFETY: entry is a Thumb address in loaded executable bytes. Executing
+        // untrusted machine code is part of load_binary's caller contract.
+        let entry = unsafe { core::mem::transmute::<usize, EntryFn>(entry_address) };
+        let region = userlib_sys::memory::Region {
+            start: base.as_ptr() as usize,
+            len: base.len(),
+        };
+        Ok((entry, bump, region))
     })
     .await
     .map_err(|_| LoadError::FailedToReadFile)?
 }
 
-fn validate_header(h: &Header) -> Result<(), LoadError> {
-    if h.e_type != ET_DYN {
-        return Err(LoadError::ElfIsNotPie);
-    }
-    if h.e_machine != EM_ARM {
-        return Err(LoadError::WrongMachine);
-    }
-    if h.e_version as u8 != EV_CURRENT {
-        return Err(LoadError::InvalidElf);
-    }
-    Ok(())
+fn read_at(file: &mut File, offset: u32, bytes: &mut [u8]) -> Result<(), LoadError> {
+    let size = u32::try_from(bytes.len()).map_err(|_| LoadError::TooLarge)?;
+    format::checked_range(offset, size, file.length())?;
+    file.seek_from_start(offset)
+        .map_err(|_| LoadError::FailedToReadFile)?;
+    format::read_exact_with(bytes, |remaining| {
+        file.read(remaining)
+            .map_err(|_| LoadError::FailedToReadFile)
+    })
 }
 
-fn load_segment(file: &mut File, ph: &ProgramHeader, segment: &mut [u8]) -> Result<(), LoadError> {
-    let filesz = ph.p_filesz as usize;
-    let memsz = ph.p_memsz as usize;
-
-    // read file contents
-    let mut remaining = filesz;
-    let mut dst_offset = 0;
-    let mut file_offset = ph.p_offset;
-    let mut buf = [0u8; 512];
-
-    while remaining > 0 {
-        let to_read = core::cmp::min(remaining, buf.len());
-        file.seek_from_start(file_offset)
-            .map_err(|_| LoadError::FailedToReadFile)?;
-        file.read(&mut buf[..to_read])
-            .map_err(|_| LoadError::FailedToReadFile)?;
-
-        segment[dst_offset..dst_offset + to_read].copy_from_slice(&buf[..to_read]);
-
-        remaining -= to_read;
-        dst_offset += to_read;
-        file_offset += to_read as u32;
-    }
-
-    // zero BSS if needed
-    if memsz > filesz {
-        segment[filesz..].fill(0);
-    }
-
-    Ok(())
+fn read_section(file: &mut File, header: &Header, index: u16) -> Result<SectionHeader, LoadError> {
+    let mut bytes = [0; format::SECTION_HEADER_SIZE];
+    read_at(file, header.section_offset(index)?, &mut bytes)?;
+    SectionHeader::parse(&bytes, file.length(), header.section_count)
 }
 
 fn apply_relocations(
-    sh: &SectionHeader,
-    min_vaddr: u32,
-    base: *mut u8,
     file: &mut File,
+    header: &Header,
+    section: &SectionHeader,
+    image: &Image<'_>,
+    base: &mut [u8],
 ) -> Result<(), LoadError> {
-    let mut reloc = [0_u8; 8];
-
-    let num_relocs = sh.sh_size as usize / sh.sh_entsize as usize;
-
-    for i in 0..num_relocs {
-        file.seek_from_start(sh.sh_offset + (i as u32 * 8))
-            .map_err(|_| LoadError::FailedToReadFile)?;
-        file.read(&mut reloc)
-            .map_err(|_| LoadError::FailedToReadFile)?;
-
-        let rel = cast_rel(&reloc);
-
-        let reloc_type = rel.r_info & 0xff;
-        let reloc_addr = unsafe { base.add((rel.r_offset - min_vaddr) as usize) as *mut u32 };
-
-        match reloc_type {
-            R_ARM_RELATIVE => {
-                // REL: add base to the word already stored there
-                unsafe {
-                    let val = ptr::read_unaligned(reloc_addr);
-                    ptr::write_unaligned(reloc_addr, val.wrapping_add(base as u32));
-                }
-            }
-            _ => {
-                return Err(LoadError::UnknownRelocationType);
-            }
+    let symbols = read_section(file, header, section.link as u16)?;
+    if !matches!(symbols.kind, format::SHT_SYMTAB | format::SHT_DYNSYM) {
+        return Err(LoadError::InvalidElf);
+    }
+    let target = if section.info != 0 {
+        let target = read_section(file, header, section.info as u16)?;
+        if target.flags & format::SHF_ALLOC == 0 {
+            return Err(LoadError::InvalidElf);
         }
+        Some(target)
+    } else {
+        None
+    };
+    for index in 0..section.size / format::REL_SIZE as u32 {
+        let mut bytes = [0; format::REL_SIZE];
+        read_at(
+            file,
+            section.offset + index * format::REL_SIZE as u32,
+            &mut bytes,
+        )?;
+        let Some(range) = image.relocation_range(&bytes, target.as_ref())? else {
+            continue;
+        };
+        let addend = u32::from_le_bytes([
+            base[range.start],
+            base[range.start + 1],
+            base[range.start + 2],
+            base[range.start + 3],
+        ]);
+        let value = format::relative_value(base.as_ptr() as u32, image.origin, addend);
+        base[range].copy_from_slice(&value.to_le_bytes());
     }
     Ok(())
 }
 
 fn patch_syscalls(
-    elf_header: &Header,
-    base: *mut u8,
-    min_vaddr: u32,
     file: &mut File,
+    header: &Header,
+    image: &Image<'_>,
+    base: &mut [u8],
 ) -> Result<(), LoadError> {
-    for i in 1..=elf_header.e_shnum {
-        let sh = read_section(file, elf_header, i.into())?;
-
-        // find the symbol table
-        if sh.sh_type == SHT_SYMTAB {
-            let mut symtab_buf = vec![0u8; sh.sh_size as usize];
-            file.seek_from_start(sh.sh_offset)
-                .map_err(|_| LoadError::FailedToReadFile)?;
-            file.read(&mut symtab_buf)
-                .map_err(|_| LoadError::FailedToReadFile)?;
-
-            // Cast buffer into symbols
-            let sym_count = sh.sh_size as usize / sh.sh_entsize as usize;
-            for i in 0..sym_count {
-                let sym_bytes =
-                    &symtab_buf[i * sh.sh_entsize as usize..(i + 1) * sh.sh_entsize as usize];
-                let sym = cast_sym(sym_bytes);
-
-                let str_sh = read_section(file, elf_header, sh.sh_link)?;
-
-                let mut name = Vec::new();
-                file.seek_from_start(str_sh.sh_offset + sym.st_name)
-                    .map_err(|_| LoadError::FailedToReadFile)?;
-
-                loop {
-                    let mut byte = [0u8; 1];
-                    file.read(&mut byte)
-                        .map_err(|_| LoadError::FailedToReadFile)?;
-                    if byte[0] == 0 {
-                        break;
-                    }
-                    name.push(byte[0]);
-                }
-
-                let symbol_name = core::str::from_utf8(&name).expect("symbol was not utf8");
-                if symbol_name == stringify!(SYS_CALL_TABLE) {
-                    // The binary was linked against a different SyscallTable
-                    // than this kernel (e.g. built before a syscall was
-                    // added) -- writing the full table would overrun its
-                    // `.syscall_table` array and corrupt whatever follows it.
-                    let expected_size = SYS_CALL_TABLE_COUNT * size_of::<usize>();
-                    if sym.st_size as usize != expected_size {
-                        return Err(LoadError::SyscallTableSizeMismatch);
-                    }
-
-                    let table_base =
-                        unsafe { base.add((sym.st_value as usize) - min_vaddr as usize) }
-                            as *mut usize;
-
-                    for (idx, call) in SyscallTable::iter().enumerate() {
-                        let ptr = match call {
-                            SyscallTable::Alloc => syscalls::alloc as usize,
-                            SyscallTable::Dealloc => syscalls::dealloc as usize,
-                            SyscallTable::PrintString => syscalls::print as usize,
-                            SyscallTable::SleepMs => syscalls::sleep as usize,
-                            SyscallTable::GetMs => syscalls::get_ms as usize,
-                            SyscallTable::DrawIter => syscalls::draw_iter as usize,
-                            SyscallTable::GetKey => syscalls::get_key as usize,
-                            SyscallTable::GenRand => syscalls::gen_rand as usize,
-                            SyscallTable::ListDir => syscalls::list_dir as usize,
-                            SyscallTable::ReadFile => syscalls::read_file as usize,
-                            SyscallTable::WriteFile => syscalls::write_file as usize,
-                            SyscallTable::FileLen => syscalls::file_len as usize,
-                            SyscallTable::ReconfigureAudioSampleRate => {
-                                syscalls::reconfigure_audio_sample_rate as usize
-                            }
-                            SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
-                            SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
-                            SyscallTable::FillRect => syscalls::fill_rect as usize,
-                            SyscallTable::Blit => syscalls::blit as usize,
-                        };
-                        unsafe {
-                            table_base.add(idx).write(ptr);
-                        }
-                    }
-                    return Ok(());
-                }
+    const NAME: &[u8] = b"SYS_CALL_TABLE\0";
+    let mut table_address = None;
+    let mut symbol_count = 0;
+    for section_index in 1..header.section_count {
+        let symbols = read_section(file, header, section_index)?;
+        if !matches!(symbols.kind, format::SHT_SYMTAB | format::SHT_DYNSYM) {
+            continue;
+        }
+        let strings = read_section(file, header, symbols.link as u16)?;
+        if strings.kind != format::SHT_STRTAB {
+            return Err(LoadError::InvalidElf);
+        }
+        symbol_count += symbols.size / format::SYMBOL_SIZE as u32;
+        if symbol_count > format::MAX_SYMBOLS {
+            return Err(LoadError::TooLarge);
+        }
+        for index in 0..symbols.size / format::SYMBOL_SIZE as u32 {
+            let mut bytes = [0; format::SYMBOL_SIZE];
+            read_at(
+                file,
+                symbols.offset + index * format::SYMBOL_SIZE as u32,
+                &mut bytes,
+            )?;
+            let symbol = format::Symbol::parse(&bytes);
+            if symbol.name >= strings.size {
+                return Err(LoadError::InvalidElf);
             }
+            if strings.size - symbol.name < NAME.len() as u32 {
+                continue;
+            }
+            let mut name = [0; NAME.len()];
+            read_at(file, strings.offset + symbol.name, &mut name)?;
+            if name != NAME {
+                continue;
+            }
+            symbol.validate_section(header.section_count)?;
+            let section = read_section(file, header, symbol.section)?;
+            image.syscall_range(&symbol, &section, SYS_CALL_TABLE_COUNT)?;
+            if table_address.is_some_and(|previous| previous != symbol.address) {
+                return Err(LoadError::InvalidElf);
+            }
+            table_address = Some(symbol.address);
         }
     }
-    Err(LoadError::SyscallTableNotFound)
-}
-
-fn total_loadable_size(
-    file: &mut File,
-    elf_header: &Header,
-    ph_buf: &mut [u8],
-) -> Result<(usize, u32, u32), LoadError> {
-    let mut min_vaddr = u32::MAX;
-    let mut max_vaddr = 0u32;
-    for i in 0..elf_header.e_phnum {
-        file.seek_from_start(elf_header.e_phoff + (elf_header.e_phentsize * i) as u32)
-            .map_err(|_| LoadError::FailedToReadFile)?;
-        file.read(ph_buf).map_err(|_| LoadError::FailedToReadFile)?;
-        let ph = cast_phdr(ph_buf);
-
-        if ph.p_type == PT_LOAD {
-            if ph.p_vaddr < min_vaddr {
-                min_vaddr = ph.p_vaddr;
+    let address = table_address.ok_or(LoadError::SyscallTableNotFound)?;
+    let range = image.range(address, (SYS_CALL_TABLE_COUNT * 4) as u32, format::PF_W)?;
+    for (slot, call) in base[range].chunks_exact_mut(4).zip(SyscallTable::iter()) {
+        let pointer = match call {
+            SyscallTable::Alloc => syscalls::alloc as usize,
+            SyscallTable::Dealloc => syscalls::dealloc as usize,
+            SyscallTable::PrintString => syscalls::print as usize,
+            SyscallTable::SleepMs => syscalls::sleep as usize,
+            SyscallTable::GetMs => syscalls::get_ms as usize,
+            SyscallTable::DrawIter => syscalls::draw_iter as usize,
+            SyscallTable::GetKey => syscalls::get_key as usize,
+            SyscallTable::GenRand => syscalls::gen_rand as usize,
+            SyscallTable::ListDir => syscalls::list_dir as usize,
+            SyscallTable::ReadFile => syscalls::read_file as usize,
+            SyscallTable::WriteFile => syscalls::write_file as usize,
+            SyscallTable::FileLen => syscalls::file_len as usize,
+            SyscallTable::ReconfigureAudioSampleRate => {
+                syscalls::reconfigure_audio_sample_rate as usize
             }
-            if ph.p_vaddr + ph.p_memsz > max_vaddr {
-                max_vaddr = ph.p_vaddr + ph.p_memsz;
-            }
-        }
+            SyscallTable::AudioBufferReady => syscalls::audio_buffer_ready as usize,
+            SyscallTable::SendAudioBuffer => syscalls::send_audio_buffer as usize,
+            SyscallTable::FillRect => syscalls::fill_rect as usize,
+            SyscallTable::Blit => syscalls::blit as usize,
+            SyscallTable::GetLastError => syscalls::get_last_error as usize,
+        };
+        slot.copy_from_slice(&(pointer as u32).to_le_bytes());
     }
-
-    let total_size = (max_vaddr - min_vaddr) as usize;
-    Ok((total_size, min_vaddr, max_vaddr))
-}
-
-fn read_section(
-    file: &mut File,
-    elf_header: &Header,
-    section: u32,
-) -> Result<SectionHeader, LoadError> {
-    let mut sh_buf = vec![0_u8; elf_header.e_shentsize as usize];
-
-    file.seek_from_start(elf_header.e_shoff + (elf_header.e_shentsize as u32 * section))
-        .map_err(|_| LoadError::FailedToReadFile)?;
-    file.read(&mut sh_buf)
-        .map_err(|_| LoadError::FailedToReadFile)?;
-
-    Ok(cast_shdr(&sh_buf))
-}
-
-fn cast_phdr(buf: &[u8]) -> ProgramHeader {
-    assert!(buf.len() >= core::mem::size_of::<ProgramHeader>());
-    unsafe { core::ptr::read(buf.as_ptr() as *const ProgramHeader) }
-}
-
-fn cast_shdr(buf: &[u8]) -> SectionHeader {
-    assert!(buf.len() >= core::mem::size_of::<SectionHeader>());
-    unsafe { core::ptr::read(buf.as_ptr() as *const SectionHeader) }
-}
-
-fn cast_sym(buf: &[u8]) -> Sym {
-    assert!(buf.len() >= core::mem::size_of::<Sym>());
-    unsafe { core::ptr::read(buf.as_ptr() as *const Sym) }
-}
-
-fn cast_rel(buf: &[u8]) -> Rel {
-    assert!(buf.len() >= core::mem::size_of::<Rel>());
-    unsafe { core::ptr::read(buf.as_ptr() as *const Rel) }
+    Ok(())
 }

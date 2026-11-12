@@ -2,9 +2,9 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
-use embedded_audio::{AudioFile, PlatformFile, PlatformFileError, wav::Wav};
+mod wav_format;
 use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
@@ -12,7 +12,7 @@ use embedded_graphics::{
 };
 use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 use userlib::{
-    audio::{AUDIO_BUFFER_LEN, audio_buffer_ready, send_audio_buffer},
+    audio::{AUDIO_BUFFER_LEN, audio_buffer_ready, reconfigure_sample_rate, send_audio_buffer},
     display::Display,
     format,
     fs::{Entries, file_len, list_dir, read_file},
@@ -24,7 +24,9 @@ use userlib::{
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
+    loop {
+        userlib::sleep(1000);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -34,14 +36,19 @@ pub extern "Rust" fn _start() {
 
 pub fn main() {
     println!("Starting Wav player app");
-    let mut display = Display::take().unwrap();
+    let Some(mut display) = Display::take() else {
+        return;
+    };
 
     loop {
         let mut entries = Entries::new();
-        list_dir("/music", &mut entries);
+        if let Err(error) = list_dir("/music", &mut entries) {
+            println!("Cannot list /music: {:?}", error);
+            return;
+        }
 
         let mut files = entries.entries();
-        files.retain(|e| e.extension().unwrap_or("") == "wav");
+        files.retain(|entry| entry.extension().unwrap_or("").eq_ignore_ascii_case("wav"));
         let mut wavs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
         wavs.sort();
 
@@ -55,38 +62,53 @@ pub fn main() {
                         "No Wavs were found in /music",
                         MonoTextStyle::new(&FONT_6X10, Rgb565::RED),
                     )
-                    .expect("Display Error");
+                    .ok();
                     None
                 }
-                SelectionUiError::DisplayError(_) => panic!("Display Error"),
+                SelectionUiError::DisplayError(_) => None,
             },
         };
 
-        assert!(selection.is_some());
+        let Some(selection) = selection else {
+            return;
+        };
 
         draw_text_center(
             &mut display,
-            &format!("Now playing {}", wavs[selection.unwrap()]),
+            &format!("Now playing {}", wavs[selection]),
             MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE),
         )
-        .expect("Display Error");
+        .ok();
 
-        let file_name = format!("/music/{}", wavs[selection.unwrap()]);
-        let file = File::new(file_name);
-        let mut wav = Wav::new(file).unwrap();
-        println!("sample rate: {}", wav.sample_rate());
-        println!("channels: {:?}", wav.channels() as u8);
+        let file_name = format!("/music/{}", wavs[selection]);
+        let Ok(length) = file_len(&file_name) else {
+            continue;
+        };
+        let mut read =
+            |offset, buffer: &mut [u8]| read_file(&file_name, offset, buffer).map_err(|_| ());
+        let Ok(wav) = wav_format::parse(length, &mut read) else {
+            println!("Invalid WAV; only 8-bit stereo PCM is supported");
+            continue;
+        };
+        if reconfigure_sample_rate(wav.sample_rate).is_err() {
+            continue;
+        }
 
-        let mut buf = [0_u8; AUDIO_BUFFER_LEN];
+        let mut buf = [127_u8; AUDIO_BUFFER_LEN];
+        let mut position = wav.data_start;
+        let mut remaining = wav.data_len;
 
-        loop {
+        while remaining > 0 {
             if audio_buffer_ready() {
-                if wav.is_eof() {
+                buf.fill(127);
+                let count = remaining.min(buf.len());
+                if wav_format::read_exact_at(&mut read, position, &mut buf[..count]).is_err()
+                    || send_audio_buffer(&buf).is_err()
+                {
                     break;
                 }
-
-                let _read = wav.read(&mut buf).unwrap();
-                send_audio_buffer(&buf);
+                position += count;
+                remaining -= count;
             }
 
             let event = get_key();
@@ -94,50 +116,5 @@ pub fn main() {
                 return;
             }
         }
-    }
-}
-
-struct File {
-    current_pos: usize,
-    file: String,
-}
-
-impl File {
-    fn new(file: String) -> Self {
-        Self {
-            current_pos: 0,
-            file,
-        }
-    }
-}
-
-impl PlatformFile for File {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, PlatformFileError> {
-        let read = read_file(&self.file, self.current_pos, buf);
-        self.current_pos += read;
-        Ok(read)
-    }
-
-    fn seek_from_current(&mut self, offset: i64) -> Result<(), PlatformFileError> {
-        if offset.is_positive() {
-            self.current_pos += offset as usize;
-        } else {
-            self.current_pos -= offset as usize;
-        }
-        Ok(())
-    }
-
-    fn seek_from_start(&mut self, offset: usize) -> Result<(), PlatformFileError> {
-        self.current_pos = offset;
-        Ok(())
-    }
-
-    fn seek_from_end(&mut self, offset: usize) -> Result<(), PlatformFileError> {
-        self.current_pos = self.length() - offset;
-        Ok(())
-    }
-
-    fn length(&mut self) -> usize {
-        file_len(&self.file)
     }
 }

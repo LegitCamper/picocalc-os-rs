@@ -2,34 +2,61 @@
 #![allow(static_mut_refs)]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub use alloc::format;
+#[cfg(target_os = "none")]
 use core::alloc::{GlobalAlloc, Layout};
 use rand_core::RngCore;
 use userlib_sys::{RngRequest, keyboard::KeyEvent};
-pub use userlib_sys::{keyboard, print};
+pub use userlib_sys::{SysError, keyboard};
 
+#[cfg(target_os = "none")]
 #[global_allocator]
 static ALLOC: Alloc = Alloc;
 
+#[cfg(target_os = "none")]
 struct Alloc;
 
+#[cfg(target_os = "none")]
+// SAFETY: allocation and deallocation preserve the layouts supplied by Rust.
 unsafe impl GlobalAlloc for Alloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        userlib_sys::alloc(layout.into())
+        // SAFETY: Layout is valid and the loader initialized the syscall table.
+        unsafe { userlib_sys::alloc(layout.into()) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        userlib_sys::dealloc(ptr, layout.into());
+        // SAFETY: GlobalAlloc callers supply this allocation's original layout.
+        unsafe { userlib_sys::dealloc(ptr, layout.into()) };
     }
 }
 
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {{
-        let s = $crate::format!($($arg)*);
-        $crate::print(s.as_ptr(), s.len());
+        $crate::_print(core::format_args!($($arg)*));
     }};
+}
+
+pub fn print(text: &str) {
+    // SAFETY: text remains a valid immutable UTF-8 slice for this synchronous call.
+    unsafe { userlib_sys::print(text.as_ptr(), text.len()) };
+}
+
+#[doc(hidden)]
+pub fn _print(args: core::fmt::Arguments<'_>) {
+    use core::fmt::Write;
+
+    struct Writer;
+    impl Write for Writer {
+        fn write_str(&mut self, text: &str) -> core::fmt::Result {
+            print(text);
+            Ok(())
+        }
+    }
+    let _ = Writer.write_fmt(args);
 }
 
 pub fn sleep(ms: u64) {
@@ -87,6 +114,12 @@ pub mod display {
         }
     }
 
+    impl Drop for Display {
+        fn drop(&mut self) {
+            DISPLAY_TAKEN.store(false, Ordering::Release);
+        }
+    }
+
     impl Dimensions for Display {
         fn bounding_box(&self) -> Rectangle {
             Rectangle {
@@ -109,17 +142,20 @@ pub mod display {
         {
             let mut count = 0;
             for p in pixels {
+                // SAFETY: the unique Display owns BUF and count stays below BUF_SIZE.
                 unsafe { BUF[count] = p.into() };
                 count += 1;
 
-                if count == BUF_SIZE - 1 {
-                    userlib_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
+                if count == BUF_SIZE {
+                    // SAFETY: BUF contains count initialized pixels until the call returns.
+                    unsafe { userlib_sys::draw_iter(BUF.as_ptr(), count) };
                     count = 0;
                 }
             }
 
             if count > 0 {
-                userlib_sys::draw_iter(unsafe { BUF.as_ptr() }, count);
+                // SAFETY: BUF contains count initialized pixels until the call returns.
+                unsafe { userlib_sys::draw_iter(BUF.as_ptr(), count) };
             }
 
             Ok(())
@@ -144,96 +180,46 @@ pub mod display {
 
             Ok(())
         }
+    }
 
-        // Batches contiguous rows into `blit` calls instead of decomposing
-        // the area into individual pixels through `draw_iter` (the default
-        // impl this overrides), e.g. for images and animation frames. Every
-        // row within the screen-clipped area shares the same horizontal
-        // clip, so runs of rows are batched into a single rectangular blit.
-        fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-        where
-            I: IntoIterator<Item = Self::Color>,
-        {
-            let drawable = area.intersection(&self.bounding_box());
-            if drawable.size.width == 0 || drawable.size.height == 0 {
-                return Ok(());
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use embedded_graphics::prelude::RgbColor;
+        use std::sync::Mutex;
+
+        static PIXELS: Mutex<alloc::vec::Vec<CPixel>> = Mutex::new(alloc::vec::Vec::new());
+
+        unsafe extern "C" fn capture_pixels(ptr: *const CPixel, length: usize) {
+            // SAFETY: Display passes its initialized, exclusively owned pixel buffer.
+            let pixels = unsafe { core::slice::from_raw_parts(ptr, length) };
+            PIXELS.lock().unwrap().extend_from_slice(pixels);
+        }
+
+        #[test]
+        fn short_contiguous_rows_are_drawn_and_display_can_be_retaken() {
+            // SAFETY: this is the only test invoking draw syscalls in this test process.
+            unsafe {
+                userlib_sys::SYS_CALL_TABLE[userlib_sys::SyscallTable::DrawIter as usize] =
+                    capture_pixels as *const () as usize;
             }
-
-            let area_width = area.size.width;
-            let area_height = area.size.height;
-            let clip_w = drawable.size.width as usize;
-            let clip_x0 = drawable.top_left.x;
-            let clip_y0 = drawable.top_left.y;
-            let clip_y1 = clip_y0 + drawable.size.height as i32;
-
-            const CHUNK_LEN: usize = 4096;
-            static mut CHUNK: [u16; CHUNK_LEN] = [0; CHUNK_LEN];
-            let rows_per_chunk = (CHUNK_LEN / clip_w).max(1);
-
-            let mut colors = colors.into_iter();
-            let mut chunk_count = 0usize;
-            let mut chunk_row0 = clip_y0;
-
-            for y in 0..area_height {
-                let py = area.top_left.y + y as i32;
-                let row_in_bounds = py >= clip_y0 && py < clip_y1;
-
-                for x in 0..area_width {
-                    let px = area.top_left.x + x as i32;
-                    let in_bounds = row_in_bounds && px >= clip_x0 && px < clip_x0 + clip_w as i32;
-
-                    let Some(color) = colors.next() else {
-                        break;
-                    };
-
-                    if in_bounds {
-                        if chunk_count == 0 {
-                            chunk_row0 = py;
-                        }
-                        unsafe { CHUNK[chunk_count] = RawU16::from(color).into_inner() };
-                        chunk_count += 1;
-                    }
-                }
-
-                if row_in_bounds {
-                    let rows_buffered = chunk_count / clip_w;
-                    if rows_buffered >= rows_per_chunk {
-                        unsafe {
-                            userlib_sys::blit(
-                                clip_x0 as u16,
-                                chunk_row0 as u16,
-                                clip_w as u16,
-                                rows_buffered as u16,
-                                CHUNK.as_ptr(),
-                                chunk_count,
-                            );
-                        }
-                        chunk_count = 0;
-                    }
-                }
-            }
-
-            if chunk_count > 0 {
-                let rows_buffered = chunk_count / clip_w;
-                unsafe {
-                    userlib_sys::blit(
-                        clip_x0 as u16,
-                        chunk_row0 as u16,
-                        clip_w as u16,
-                        rows_buffered as u16,
-                        CHUNK.as_ptr(),
-                        chunk_count,
-                    );
-                }
-            }
-
-            Ok(())
+            let mut display = Display::take().unwrap();
+            assert!(Display::take().is_none());
+            let area = Rectangle::new(Point::new(0, 0), Size::new(3, 2));
+            display.fill_contiguous(&area, [Rgb565::RED; 4]).unwrap();
+            let pixels = PIXELS.lock().unwrap();
+            assert_eq!(pixels.len(), 4);
+            assert_eq!((pixels[3].x, pixels[3].y), (0, 1));
+            drop(pixels);
+            drop(display);
+            assert!(Display::take().is_some());
         }
     }
 }
 
 fn gen_rand(req: &mut RngRequest) {
-    userlib_sys::gen_rand(req);
+    // SAFETY: req and any byte slice in it remain exclusively borrowed during the call.
+    unsafe { userlib_sys::gen_rand(req) };
 }
 
 pub struct Rng;
@@ -266,27 +252,37 @@ impl RngCore for Rng {
 }
 
 pub mod fs {
+    use crate::SysError;
     use alloc::vec::Vec;
     use core::fmt::Display;
 
-    pub fn read_file(file: &str, start_from: usize, buf: &mut [u8]) -> usize {
-        userlib_sys::read_file(
-            file.as_ptr(),
-            file.len(),
-            start_from,
-            buf.as_mut_ptr(),
-            buf.len(),
-        )
+    pub fn read_file(file: &str, start_from: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        // SAFETY: the path and exclusively borrowed output live through this call.
+        let read = unsafe {
+            userlib_sys::read_file(
+                file.as_ptr(),
+                file.len(),
+                start_from,
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        SysError::from_code(userlib_sys::get_last_error())?;
+        Ok(read)
     }
 
-    pub fn write_file(file: &str, start_from: usize, buf: &[u8]) {
-        userlib_sys::write_file(
-            file.as_ptr(),
-            file.len(),
-            start_from,
-            buf.as_ptr(),
-            buf.len(),
-        )
+    pub fn write_file(file: &str, start_from: usize, buf: &[u8]) -> Result<(), SysError> {
+        // SAFETY: both immutable input slices live through this synchronous call.
+        unsafe {
+            userlib_sys::write_file(
+                file.as_ptr(),
+                file.len(),
+                start_from,
+                buf.as_ptr(),
+                buf.len(),
+            )
+        };
+        SysError::from_code(userlib_sys::get_last_error())
     }
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -334,7 +330,10 @@ pub mod fs {
     const MAX_ENTRIES: usize = 25;
 
     #[derive(Clone, Copy, Debug)]
-    pub struct Entries([[u8; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES]);
+    pub struct Entries {
+        names: [[u8; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES],
+        count: usize,
+    }
 
     impl Default for Entries {
         fn default() -> Self {
@@ -344,48 +343,94 @@ pub mod fs {
 
     impl Entries {
         pub fn new() -> Self {
-            Self([[0; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES])
+            Self {
+                names: [[0; MAX_ENTRY_NAME_LEN]; MAX_ENTRIES],
+                count: 0,
+            }
         }
 
         /// Get list of file names after listing
         pub fn entries<'a>(&'a self) -> Vec<FileName<'a>> {
-            self.0
+            self.names[..self.count]
                 .iter()
                 .filter_map(|buf| {
                     let nul_pos = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                    if nul_pos == 0 {
+                        return None;
+                    }
                     Some(core::str::from_utf8(&buf[..nul_pos]).ok()?.into())
                 })
                 .collect()
         }
 
-        fn as_ptrs(&mut self) -> [*mut u8; MAX_ENTRIES] {
-            let mut ptrs: [*mut u8; MAX_ENTRIES] = [core::ptr::null_mut(); MAX_ENTRIES];
-            for (i, buf) in self.0.iter_mut().enumerate() {
-                ptrs[i] = buf.as_mut_ptr();
+        fn as_ptrs(&mut self) -> [*mut core::ffi::c_char; MAX_ENTRIES] {
+            let mut ptrs = [core::ptr::null_mut(); MAX_ENTRIES];
+            for (i, buf) in self.names.iter_mut().enumerate() {
+                ptrs[i] = buf.as_mut_ptr().cast();
             }
             ptrs
         }
     }
 
-    pub fn list_dir(path: &str, entries: &mut Entries) -> usize {
-        userlib_sys::list_dir(
-            path.as_ptr(),
-            path.len(),
-            entries.as_ptrs().as_mut_ptr(),
-            MAX_ENTRIES,
-            MAX_ENTRY_NAME_LEN,
-        )
+    pub fn list_dir(path: &str, entries: &mut Entries) -> Result<usize, SysError> {
+        *entries = Entries::new();
+        let mut pointers = entries.as_ptrs();
+        // SAFETY: every pointer names a distinct writable fixed-capacity name buffer.
+        let count = unsafe {
+            userlib_sys::list_dir(
+                path.as_ptr(),
+                path.len(),
+                pointers.as_mut_ptr(),
+                MAX_ENTRIES,
+                MAX_ENTRY_NAME_LEN,
+            )
+        };
+        SysError::from_code(userlib_sys::get_last_error())?;
+        if count > MAX_ENTRIES {
+            return Err(SysError::Io);
+        }
+        entries.count = count;
+        Ok(count)
     }
 
-    pub fn file_len(str: &str) -> usize {
-        userlib_sys::file_len(str.as_ptr(), str.len())
+    pub fn file_len(path: &str) -> Result<usize, SysError> {
+        // SAFETY: path remains a valid immutable UTF-8 slice through this call.
+        let length = unsafe { userlib_sys::file_len(path.as_ptr(), path.len()) };
+        SysError::from_code(userlib_sys::get_last_error())?;
+        Ok(length)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn entries_only_return_current_nonempty_valid_names() {
+            let mut entries = Entries::new();
+            assert!(entries.entries().is_empty());
+            entries.names[0][..7].copy_from_slice(b"one.wav");
+            entries.names[1][0] = 0xff;
+            entries.names[3][..7].copy_from_slice(b"old.wav");
+            entries.count = 3;
+            assert_eq!(entries.entries(), alloc::vec![FileName::from("one.wav")]);
+            entries = Entries::new();
+            assert!(entries.entries().is_empty());
+        }
     }
 }
 
 pub mod audio {
+    use crate::SysError;
     pub use userlib_sys::{AUDIO_BUFFER_LEN, AUDIO_BUFFER_SAMPLES, audio_buffer_ready};
 
-    pub fn send_audio_buffer(buf: &[u8]) {
-        userlib_sys::send_audio_buffer(buf.as_ptr(), buf.len())
+    pub fn send_audio_buffer(buf: &[u8]) -> Result<(), SysError> {
+        // SAFETY: buf remains a valid immutable slice until the kernel copies it.
+        unsafe { userlib_sys::send_audio_buffer(buf.as_ptr(), buf.len()) };
+        SysError::from_code(userlib_sys::get_last_error())
+    }
+
+    pub fn reconfigure_sample_rate(sample_rate: u32) -> Result<(), SysError> {
+        userlib_sys::reconfigure_audio_sample_rate(sample_rate);
+        SysError::from_code(userlib_sys::get_last_error())
     }
 }
