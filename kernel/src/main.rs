@@ -16,15 +16,14 @@ mod display;
 mod elf;
 mod framebuffer;
 // TODO: NEED TO UPDATE MCU TO TEST BATTERY READS
+mod mtp;
 #[allow(unused)]
 mod peripherals;
-#[allow(unused)]
-mod scsi;
 mod storage;
 mod syscalls;
 mod ui;
-#[allow(unused)]
 mod usb;
+mod user_memory;
 mod utils;
 
 #[cfg(feature = "psram")]
@@ -38,13 +37,14 @@ mod psram;
 use crate::{heap::init_qmi_psram_heap, psram::init_psram_qmi};
 
 use crate::{
-    audio::{AUDIO_BUFFER_WRITTEN, audio_handler, clear_audio_buffers},
+    audio::audio_handler,
     display::{FRAMEBUFFER, display_handler, init_display},
+    mtp::{MTP_RESUME, MTP_SHUTDOWN},
     peripherals::{conf_peripherals, keyboard::read_keyboard_fifo},
-    scsi::MSC_SHUTDOWN,
     storage::{SDCARD, SdCard},
     syscalls::{KEY_CACHE, MS_SINCE_LAUNCH},
     ui::{SELECTIONS, clear_selection, ui_handler},
+    usb::usb_handler,
 };
 use bumpalo::Bump;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +98,7 @@ static mut ARENA: [u8; 250 * 1024] = [0; 250 * 1024];
 static mut ARENA: [u8; 400 * 1024] = [0; 400 * 1024];
 
 #[global_allocator]
+// SAFETY: the static arena lives forever and Talck serializes allocator access.
 static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
     Talc::new(unsafe { ClaimOnOom::new(Span::from_array(core::ptr::addr_of!(ARENA).cast_mut())) })
         .lock();
@@ -124,6 +125,13 @@ async fn watchdog_task(mut watchdog: Watchdog) {
 
 static ENABLE_UI: AtomicBool = AtomicBool::new(true);
 static UI_CHANGE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static UI_READY: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+
+async fn set_ui_enabled(enabled: bool) {
+    ENABLE_UI.store(enabled, Ordering::Release);
+    UI_CHANGE.signal(());
+    while UI_READY.wait().await != enabled {}
+}
 
 const OVERCLOCK: u32 = 300_000_000;
 
@@ -139,6 +147,7 @@ async fn main(_spawner: Spawner) {
 
     spawn_core1(
         p.CORE1,
+        // SAFETY: core1 is started once; no other code borrows its stack storage.
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
@@ -203,41 +212,55 @@ async fn main(_spawner: Spawner) {
 }
 
 // One-slot channel to pass EntryFn from core1
-static BINARY_CH: Channel<CriticalSectionRawMutex, (EntryFn, Bump), 1> = Channel::new();
+static BINARY_CH: Channel<
+    CriticalSectionRawMutex,
+    (EntryFn, Bump, userlib_sys::memory::Region),
+    1,
+> = Channel::new();
 
 // runs dynamically loaded elf files
 #[embassy_executor::task]
 async fn userland_task() {
     let recv = BINARY_CH.receiver();
     loop {
-        let (entry, _bump) = recv.receive().await;
+        let (entry, bump, image) = recv.receive().await;
 
         // disable kernel ui
         {
-            ENABLE_UI.store(false, Ordering::Release);
-            UI_CHANGE.signal(());
+            set_ui_enabled(false).await;
+            while KEY_CACHE.try_receive().is_ok() {}
 
             clear_selection().await;
 
-            MSC_SHUTDOWN.signal(());
+            MTP_SHUTDOWN.signal(());
         }
 
+        // SAFETY: only core1 accesses the launch timestamp.
         unsafe { MS_SINCE_LAUNCH = Some(Instant::now()) };
+        let stack_start = core::ptr::addr_of!(CORE1_STACK) as usize + 256;
+        user_memory::begin(
+            image,
+            userlib_sys::memory::Region {
+                start: stack_start,
+                len: (cortex_m::register::msp::read() as usize).saturating_sub(stack_start),
+            },
+        );
         #[cfg(feature = "defmt")]
         defmt::info!("Executing Binary");
         entry();
+        user_memory::finish();
 
         // enable kernel ui
         {
-            AUDIO_BUFFER_WRITTEN.store(false, Ordering::Release);
-            clear_audio_buffers();
-
-            ENABLE_UI.store(true, Ordering::Release);
-            UI_CHANGE.signal(());
-            unsafe { FRAMEBUFFER.as_mut().unwrap().clear(Rgb565::BLACK).unwrap() };
-
-            let mut selections = SELECTIONS.lock().await;
-            selections.set_changed(true);
+            audio::reset().await;
+            if let Some(framebuffer) = FRAMEBUFFER.lock().await.as_mut() {
+                let _ = framebuffer.clear(Rgb565::BLACK);
+            }
+            SELECTIONS.lock().await.set_changed(true);
+            drop(bump);
+            MTP_RESUME.signal(());
+            set_ui_enabled(true).await;
+            while KEY_CACHE.try_receive().is_ok() {}
         }
     }
 }
@@ -353,8 +376,22 @@ async fn setup_sd(sd: Sd) {
     let device = ExclusiveDevice::new(spi, cs, Delay).unwrap();
     let sdcard = SdmmcSdCard::new(device, Delay);
 
-    config.frequency = 32_000_000;
-    sdcard.spi(|dev| dev.bus_mut().set_config(&config));
+    if det.is_low() {
+        match sdcard.num_bytes() {
+            Ok(_) => {
+                config.frequency = 32_000_000;
+                sdcard.spi(|dev| dev.bus_mut().set_config(&config));
+            }
+            Err(_error) => {
+                sdcard.mark_card_uninit();
+                #[cfg(feature = "defmt")]
+                defmt::warn!(
+                    "SD initialization failed: {:?}",
+                    defmt::Debug2Format(&_error)
+                );
+            }
+        }
+    }
     SDCARD.get().lock().await.replace(SdCard::new(sdcard, det));
 }
 
@@ -392,11 +429,13 @@ async fn kernel_task(
 
     spawner.spawn(audio_handler(audio)).unwrap();
 
-    let _usb = embassy_rp_usb::Driver::new(usb, Irqs);
-    // spawner.spawn(usb_handler(usb)).unwrap();
+    spawner
+        .spawn(usb_handler(embassy_rp_usb::Driver::new(usb, Irqs)))
+        .unwrap();
 
     loop {
-        let ui_enabled = ENABLE_UI.load(Ordering::Relaxed);
+        let ui_enabled = ENABLE_UI.load(Ordering::Acquire);
+        UI_READY.signal(ui_enabled);
         if ui_enabled {
             select(join(ui_handler(), prog_search_handler()), UI_CHANGE.wait()).await;
         } else {
@@ -407,18 +446,25 @@ async fn kernel_task(
 
 async fn prog_search_handler() {
     loop {
-        {
+        let result = {
             let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().unwrap();
-
-            let mut files = sd.list_files_by_extension(".bin").unwrap();
+            guard.as_mut().map(|sd| sd.list_files_by_extension(".bin"))
+        };
+        if let Some(Ok(mut files)) = result {
             files.sort();
             let mut select = SELECTIONS.lock().await;
+            select.set_storage_available(true);
 
             if *select.selections() != files {
                 select.update_selections(files);
                 select.reset();
             }
+        } else {
+            if let Some(Err(_error)) = result {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("SD app scan failed: {:?}", defmt::Debug2Format(&_error));
+            }
+            SELECTIONS.lock().await.set_storage_available(false);
         }
         Timer::after_secs(5).await;
     }
@@ -427,10 +473,8 @@ async fn prog_search_handler() {
 async fn key_handler() {
     loop {
         if let Some(event) = read_keyboard_fifo().await {
-            unsafe {
-                let _ = KEY_CACHE.enqueue(event);
-            }
+            let _ = KEY_CACHE.try_send(event);
         }
-        Timer::after_millis(50).await;
+        Timer::after_millis(10).await;
     }
 }

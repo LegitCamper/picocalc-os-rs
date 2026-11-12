@@ -7,4 +7,4 @@ edition = "2024"
 userlib = { path = "../../userlib" }
 selection_ui = { path = "../../selection_ui" }
 embedded-graphics = "0.8.1"
-tinygif = { git = "https://github.com/LegitCamper/tinygif" }
+tinygif = { path = "vendor/tinygif" }

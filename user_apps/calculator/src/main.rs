@@ -29,7 +29,9 @@ use userlib::{
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
+    loop {
+        userlib::sleep(1000);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -39,7 +41,9 @@ pub extern "Rust" fn _start() {
 
 pub fn main() {
     println!("Starting Calculator app");
-    let mut display = Display::take().unwrap();
+    let Some(mut display) = Display::take() else {
+        return;
+    };
 
     let mut input = vec!['e', 'x', 'p', 'r', ':', ' '];
     let input_min = input.len();
@@ -107,7 +111,9 @@ pub fn main() {
         if event.state == KeyState::Released {
             match event.key {
                 KeyCode::Char(ch) => {
-                    input.push(ch);
+                    if input.len() < input_min + 128 {
+                        input.push(ch);
+                    }
                 }
                 KeyCode::Del => {
                     input.truncate(input_min);

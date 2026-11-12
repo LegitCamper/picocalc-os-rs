@@ -24,10 +24,10 @@ mod peanut;
 use peanut::gb_run_frame;
 
 use crate::peanut::{
-    ROM, JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
-    JOYPAD_UP, gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_get_rom_name, gb_get_save_size,
-    gb_init, gb_init_lcd, gb_reset, gb_rom_read, gb_s, gb_set_frame_skip, gb_set_joypad,
-    lcd_draw_line,
+    JOYPAD_A, JOYPAD_B, JOYPAD_DOWN, JOYPAD_LEFT, JOYPAD_RIGHT, JOYPAD_SELECT, JOYPAD_START,
+    JOYPAD_UP, ROM, gb_cart_ram_read, gb_cart_ram_write, gb_error, gb_get_rom_name,
+    gb_get_save_size, gb_init, gb_init_lcd, gb_reset, gb_rom_read, gb_s, gb_set_frame_skip,
+    gb_set_joypad, lcd_draw_line,
 };
 
 static mut DISPLAY: LazyCell<Display> = LazyCell::new(|| Display::take().unwrap());
@@ -56,7 +56,10 @@ pub fn main() {
     println!("Starting Gameboy app");
 
     let mut entries = Entries::new();
-    list_dir(GAME_PATH, &mut entries);
+    if let Err(error) = list_dir(GAME_PATH, &mut entries) {
+        println!("Unable to list {}: {:?}", GAME_PATH, error);
+        return;
+    }
 
     let mut files = entries.entries();
     files.retain(|e| {
@@ -86,14 +89,26 @@ pub fn main() {
         }
     };
 
-    assert!(selection.is_some());
+    let Some(selection) = selection else {
+        return;
+    };
 
-    let file_name = format!("{}/{}", GAME_PATH, roms[selection.unwrap()]);
-    let size = file_len(&file_name);
+    let file_name = format!("{}/{}", GAME_PATH, roms[selection]);
+    let size = match file_len(&file_name) {
+        Ok(size) if size != 0 => size,
+        other => {
+            println!("Unable to size {}: {:?}", file_name, other);
+            return;
+        }
+    };
     unsafe { GAME_ROM = Some(vec![0_u8; size]) };
+    // SAFETY: GAME_ROM was just assigned and this app is single-threaded.
     let read = read_file(&file_name, 0, unsafe { GAME_ROM.as_mut().unwrap() });
-    assert!(size == read);
-    println!("Rom size: {}", read);
+    if read != Ok(size) {
+        println!("Short read of {}: {:?} of {}", file_name, read, size);
+        return;
+    }
+    println!("Rom size: {}", size);
 
     // hand the rom to the hot read callback as a plain slice
     unsafe { ROM = GAME_ROM.as_ref().unwrap().as_slice() };

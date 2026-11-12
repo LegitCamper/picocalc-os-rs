@@ -16,7 +16,9 @@ use userlib::{
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
+    loop {
+        userlib::sleep(1000);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -28,7 +30,9 @@ const CELL_SIZE: usize = 8;
 
 pub fn main() {
     println!("Starting Snake app");
-    let mut display = Display::take().unwrap();
+    let Some(mut display) = Display::take() else {
+        return;
+    };
 
     let mut game = SnakeGame::<100, Rgb565, Rng>::new(
         SCREEN_WIDTH as u16,

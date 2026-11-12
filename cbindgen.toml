@@ -1,4 +1,6 @@
 language = "C"
+include_guard = "PICOCALC_USERLIB_SYS_H"
+cpp_compat = true
 
 [macro_expansion]
 bitflags = true

@@ -2,10 +2,9 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::{format, vec, vec::Vec};
+use alloc::{format, vec::Vec};
 use core::panic::PanicInfo;
 use embedded_graphics::{
-    image::ImageDrawable,
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
     prelude::{Point, RgbColor},
@@ -24,7 +23,9 @@ use userlib::{
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("user panic: {} @ {:?}", info.message(), info.location(),);
-    loop {}
+    loop {
+        userlib::sleep(1000);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -34,13 +35,18 @@ pub extern "Rust" fn _start() {
 
 pub fn main() {
     println!("Starting Gif app");
-    let mut display = Display::take().unwrap();
+    let Some(mut display) = Display::take() else {
+        return;
+    };
 
     let mut entries = Entries::new();
-    list_dir("/gifs", &mut entries);
+    if let Err(error) = list_dir("/gifs", &mut entries) {
+        println!("Cannot list /gifs: {:?}", error);
+        return;
+    }
 
     let mut files = entries.entries();
-    files.retain(|e| e.extension().unwrap_or("") == "gif");
+    files.retain(|entry| entry.extension().unwrap_or("").eq_ignore_ascii_case("gif"));
     let mut gifs = files.iter().map(|e| e.full_name()).collect::<Vec<&str>>();
     gifs.sort();
 
@@ -54,45 +60,83 @@ pub fn main() {
                     "No Gifs were found in /gifs",
                     MonoTextStyle::new(&FONT_6X10, Rgb565::RED),
                 )
-                .expect("Display Error");
+                .ok();
                 None
             }
-            SelectionUiError::DisplayError(_) => panic!("Display Error"),
+            SelectionUiError::DisplayError(_) => None,
         },
     };
 
-    assert!(selection.is_some());
+    let Some(selection) = selection else {
+        return;
+    };
 
-    let file_name = format!("/gifs/{}", gifs[selection.unwrap()]);
-    let size = file_len(&file_name);
-    let mut buf = vec![0_u8; size];
-    let read = read_file(&file_name, 0, &mut buf);
-    println!("read: {}, file size: {}", read, size);
-    assert!(read == size);
+    let file_name = format!("/gifs/{}", gifs[selection]);
+    let Ok(size) = file_len(&file_name) else {
+        return;
+    };
+    // ponytail: whole-file decoding is capped at 1 MiB; stream larger GIFs later.
+    if size == 0 || size > 1_048_576 {
+        println!("GIF is empty or exceeds 1 MiB");
+        return;
+    }
+    let mut buf = Vec::new();
+    if buf.try_reserve_exact(size).is_err() {
+        println!("Not enough memory for GIF");
+        return;
+    }
+    buf.resize(size, 0);
+    let mut position = 0;
+    while position < size {
+        match read_file(&file_name, position, &mut buf[position..]) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => position += read,
+        }
+    }
 
-    let gif = Gif::<Rgb565>::from_slice(&buf).expect("Failed to parse gif");
+    let Ok(gif) = Gif::<Rgb565>::from_slice(&buf) else {
+        println!("Invalid GIF");
+        return;
+    };
+    if usize::from(gif.width()) > SCREEN_WIDTH || usize::from(gif.height()) > SCREEN_HEIGHT {
+        println!("GIF exceeds display dimensions");
+        return;
+    }
 
     let translation = Point::new(
         (SCREEN_WIDTH as i32 - gif.width() as i32) / 2,
         (SCREEN_HEIGHT as i32 - gif.height() as i32) / 2,
     );
 
-    let mut frame_num = 0;
     loop {
+        let mut has_frames = false;
         for mut frame in gif.frames() {
+            has_frames = true;
             let start = get_ms();
 
-            frame.translate_mut(translation).draw(&mut display).unwrap();
-            frame_num += 1;
+            if frame
+                .translate_mut(translation)
+                .draw_checked(&mut display)
+                .is_err()
+            {
+                return;
+            }
 
-            if frame_num % 5 == 0 {
+            loop {
                 let event = get_key();
                 if event.state != KeyState::Idle && event.key == KeyCode::Esc {
-                    drop(buf);
                     return;
-                };
+                }
+                let elapsed = get_ms().saturating_sub(start);
+                let remaining = (u64::from(frame.delay_centis) * 10).saturating_sub(elapsed);
+                if remaining == 0 {
+                    break;
+                }
+                sleep(remaining.min(10));
             }
-            sleep(((frame.delay_centis as u64) * 10).saturating_sub(start));
+        }
+        if !has_frames {
+            return;
         }
     }
 }

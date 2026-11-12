@@ -20,7 +20,11 @@ kernel-release board clock='stable':
 binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
 
 cbindgen:
-    cbindgen userlib_sys --output userlib_sys.h -q
+    cbindgen userlib_sys --config cbindgen.toml --output userlib_sys.h -q
+
+check-header: cbindgen
+    printf '#include "userlib_sys.h"\n' | cc -std=c11 -x c -I. -fsyntax-only -
+    printf '#include "userlib_sys.h"\n' | c++ -std=c++17 -x c++ -I. -fsyntax-only -
 
 newlib:
     #!/bin/bash
@@ -69,3 +73,20 @@ copy-userapps:
     DEV=$(lsblk -o LABEL,NAME -nr | awk -v L="PICOCALC" '$1==L {print "/dev/" $2}')
     udisksctl unmount -b "$DEV"
     udisksctl power-off -b "$DEV"    
+
+# Host-only logic; no probe or SD card needed.
+test:
+    cargo test -p userlib_sys -p userlib -p selection_ui -p tinygif --target x86_64-unknown-linux-gnu
+    rustc --edition 2024 --test kernel/src/elf_format.rs -o target/elf-format-tests
+    target/elf-format-tests
+    rustc --edition 2024 --test user_apps/wav_player/src/wav_format.rs -o target/wav-format-tests
+    target/wav-format-tests
+    rustc --edition 2024 --test kernel/src/mtp/codec.rs -o target/mtp-codec-tests
+    target/mtp-codec-tests
+
+# everything a change must pass before review
+check: test check-header
+    cargo fmt --check
+    cargo build --bin kernel --release --no-default-features --features rp235xa
+    just userapps
+    target/elf-format-tests --ignored rebuilt_apps_match_loader_contract

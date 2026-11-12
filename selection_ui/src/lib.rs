@@ -2,19 +2,13 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
-    pixelcolor::Rgb565,
-    prelude::{Dimensions, DrawTarget, Point, Primitive, RgbColor},
-    primitives::{PrimitiveStyle, Rectangle},
-    text::{renderer::TextRenderer, Alignment, Text},
     Drawable,
-};
-use embedded_layout::{
-    align::{horizontal, vertical},
-    layout::linear::{FixedMargin, LinearLayout},
-    prelude::*,
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
+    pixelcolor::Rgb565,
+    prelude::{Dimensions, DrawTarget, Point, Primitive, RgbColor, Size},
+    primitives::{PrimitiveStyle, Rectangle},
+    text::{Alignment, Text, renderer::TextRenderer},
 };
 use userlib::{
     display::Display,
@@ -31,7 +25,6 @@ pub enum SelectionUiError<DisplayError> {
 pub struct SelectionUi<'a> {
     selection: usize,
     items: &'a [&'a str],
-    last_bounds: Option<Rectangle>,
 }
 
 impl<'a> SelectionUi<'a> {
@@ -39,7 +32,6 @@ impl<'a> SelectionUi<'a> {
         Self {
             selection: 0,
             items,
-            last_bounds: None,
         }
     }
 
@@ -48,19 +40,24 @@ impl<'a> SelectionUi<'a> {
         display: &mut Display,
     ) -> Result<Option<usize>, SelectionUiError<<Display as DrawTarget>::Error>> {
         self.draw(display)?;
-        let selection;
         loop {
             let key = get_key();
-            if key.state == KeyState::Pressed
-                && let Some(s) = self.update(display, key.key)? {
-                    selection = Some(s);
-                    display
-                        .clear(Rgb565::BLACK)
-                        .map_err(SelectionUiError::DisplayError)?;
-                    break;
-                }
+            if key.state != KeyState::Pressed {
+                userlib::sleep(10);
+                continue;
+            }
+            let selection = if key.key == KeyCode::Esc {
+                None
+            } else if let Some(selection) = self.update(display, key.key)? {
+                Some(selection)
+            } else {
+                continue;
+            };
+            display
+                .clear(Rgb565::BLACK)
+                .map_err(SelectionUiError::DisplayError)?;
+            return Ok(selection);
         }
-        Ok(selection)
     }
 
     /// updates the display with a new keypress.
@@ -70,6 +67,9 @@ impl<'a> SelectionUi<'a> {
         display: &mut Display,
         key: KeyCode,
     ) -> Result<Option<usize>, SelectionUiError<<Display as DrawTarget>::Error>> {
+        if self.items.is_empty() {
+            return Err(SelectionUiError::SelectionListEmpty);
+        }
         match key {
             KeyCode::Down => {
                 self.selection = (self.selection + 1).min(self.items.len() - 1);
@@ -95,43 +95,64 @@ impl<'a> SelectionUi<'a> {
             return Err(SelectionUiError::SelectionListEmpty);
         }
 
-        if let Some(bounds) = self.last_bounds {
-            Rectangle::new(bounds.top_left, bounds.size)
-                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                .draw(display)
-                .map_err(SelectionUiError::DisplayError)?;
-        }
-
-        let mut views: Vec<Text<MonoTextStyle<Rgb565>>> = Vec::new();
-
-        for i in self.items {
-            views.push(Text::new(i, Point::zero(), text_style));
-        }
-
-        let views_group = Views::new(views.as_mut_slice());
-
-        let layout = LinearLayout::vertical(views_group)
-            .with_alignment(horizontal::Center)
-            .with_spacing(FixedMargin(5))
-            .arrange()
-            .align_to(&display_area, horizontal::Center, vertical::Center);
-
-        layout
-            .draw(display)
+        display
+            .clear(Rgb565::BLACK)
             .map_err(SelectionUiError::DisplayError)?;
 
-        // draw selected box
-        if let Some(selected_bounds) = layout.inner().get(self.selection) {
-            let selected_bounds = selected_bounds.bounding_box();
-            Rectangle::new(selected_bounds.top_left, selected_bounds.size)
-                .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
-                .draw(display)
-                .map_err(SelectionUiError::DisplayError)?;
-
-            self.last_bounds = Some(selected_bounds);
+        let rows = (display_area.size.height / 25).max(1) as usize;
+        let visible = visible_range(self.items.len(), self.selection, rows);
+        for (row, index) in visible.enumerate() {
+            let top = row as i32 * 25;
+            Text::with_alignment(
+                self.items[index],
+                Point::new(display_area.center().x, top + 20),
+                text_style,
+                Alignment::Center,
+            )
+            .draw(display)
+            .map_err(SelectionUiError::DisplayError)?;
+            if index == self.selection {
+                Rectangle::new(Point::new(0, top), Size::new(display_area.size.width, 25))
+                    .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
+                    .draw(display)
+                    .map_err(SelectionUiError::DisplayError)?;
+            }
         }
 
         Ok(())
+    }
+}
+
+fn visible_range(count: usize, selection: usize, rows: usize) -> core::ops::Range<usize> {
+    let start = selection.saturating_sub(rows.saturating_sub(1));
+    start..count.min(start.saturating_add(rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible_range;
+
+    #[test]
+    fn selection_stays_inside_bounded_visible_rows() {
+        assert_eq!(visible_range(0, 0, 12), 0..0);
+        assert_eq!(visible_range(1, 0, 12), 0..1);
+        assert_eq!(visible_range(25, 0, 12), 0..12);
+        assert_eq!(visible_range(25, 12, 12), 1..13);
+        assert_eq!(visible_range(25, 24, 12), 13..25);
+    }
+
+    #[test]
+    fn empty_selection_rejects_input_before_drawing() {
+        let mut selection = super::SelectionUi::new(&[]);
+        let mut display = super::Display::take().unwrap();
+        assert!(matches!(
+            selection.update(&mut display, super::KeyCode::Down),
+            Err(super::SelectionUiError::SelectionListEmpty)
+        ));
+        assert!(matches!(
+            selection.update(&mut display, super::KeyCode::Enter),
+            Err(super::SelectionUiError::SelectionListEmpty)
+        ));
     }
 }
 
