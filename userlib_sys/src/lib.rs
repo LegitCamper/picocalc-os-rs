@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod framebuffer;
 pub mod memory;
+pub mod read_cache;
 #[cfg(feature = "alloc")]
 use core::alloc::Layout;
 

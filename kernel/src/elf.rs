@@ -1,17 +1,29 @@
 use crate::{
-    storage::{File, SDCARD},
+    storage::{File as SdFile, SDCARD},
     syscalls,
 };
 use bumpalo::Bump;
 use core::alloc::Layout;
 use embedded_sdmmc::ShortFileName;
 use strum::IntoEnumIterator;
+use userlib_sys::read_cache::{ReadCache, ReadError};
 use userlib_sys::{EntryFn, SYS_CALL_TABLE_COUNT, SyscallTable};
 
 #[path = "elf_format.rs"]
 mod format;
 pub use format::LoadError;
 use format::{Header, Image, ProgramHeader, SectionHeader};
+
+struct File<'a> {
+    inner: SdFile<'a>,
+    cache: ReadCache,
+}
+
+impl File<'_> {
+    fn length(&self) -> u32 {
+        self.inner.length()
+    }
+}
 
 /// # Safety
 /// The entry point contains untrusted native code, not an isolated process.
@@ -21,7 +33,13 @@ pub async unsafe fn load_binary(
 ) -> Result<(EntryFn, Bump, userlib_sys::memory::Region), LoadError> {
     let mut sd_lock = SDCARD.get().lock().await;
     let sd = sd_lock.as_mut().ok_or(LoadError::FailedToReadFile)?;
-    sd.read_file(name, |mut file| {
+    sd.read_file(name, |file| {
+        #[cfg(feature = "defmt")]
+        let _started = embassy_time::Instant::now();
+        let mut file = File {
+            cache: ReadCache::new(file.length()),
+            inner: file,
+        };
         let mut bytes = [0; format::HEADER_SIZE];
         read_at(&mut file, 0, &mut bytes)?;
         let header = Header::parse(&bytes, file.length())?;
@@ -55,6 +73,8 @@ pub async unsafe fn load_binary(
             let range = image.range(segment.address, segment.file_size, 0)?;
             read_at(&mut file, segment.offset, &mut base[range])?;
         }
+        #[cfg(feature = "defmt")]
+        let _image_done = embassy_time::Instant::now();
         let mut relocation_count = 0;
         for index in 1..header.section_count {
             let section = read_section(&mut file, &header, index)?;
@@ -73,7 +93,20 @@ pub async unsafe fn load_binary(
                 _ => {}
             }
         }
+        #[cfg(feature = "defmt")]
+        let _relocations_done = embassy_time::Instant::now();
         patch_syscalls(&mut file, &header, &image, base)?;
+        #[cfg(feature = "defmt")]
+        {
+            let _done = embassy_time::Instant::now();
+            defmt::info!(
+                "ELF load ms: image={} relocations={} symbols={} total={}",
+                (_image_done - _started).as_millis(),
+                (_relocations_done - _image_done).as_millis(),
+                (_done - _relocations_done).as_millis(),
+                (_done - _started).as_millis(),
+            );
+        }
         let entry_offset = image.range(header.entry & !1, 2, format::PF_X)?.start;
         let entry_address = (base.as_ptr() as usize + entry_offset) | 1;
         // SAFETY: entry is a Thumb address in loaded executable bytes. Executing
@@ -92,12 +125,21 @@ pub async unsafe fn load_binary(
 fn read_at(file: &mut File, offset: u32, bytes: &mut [u8]) -> Result<(), LoadError> {
     let size = u32::try_from(bytes.len()).map_err(|_| LoadError::TooLarge)?;
     format::checked_range(offset, size, file.length())?;
-    file.seek_from_start(offset)
-        .map_err(|_| LoadError::FailedToReadFile)?;
-    format::read_exact_with(bytes, |remaining| {
-        file.read(remaining)
-            .map_err(|_| LoadError::FailedToReadFile)
-    })
+    file.cache
+        .read_at(offset, bytes, |offset, bytes| {
+            file.inner
+                .seek_from_start(offset)
+                .map_err(|_| LoadError::FailedToReadFile)?;
+            format::read_exact_with(bytes, |remaining| {
+                file.inner
+                    .read(remaining)
+                    .map_err(|_| LoadError::FailedToReadFile)
+            })
+        })
+        .map_err(|error| match error {
+            ReadError::OutOfBounds => LoadError::InvalidElf,
+            ReadError::Source(error) => error,
+        })
 }
 
 fn read_section(file: &mut File, header: &Header, index: u16) -> Result<SectionHeader, LoadError> {
