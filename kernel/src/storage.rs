@@ -118,15 +118,19 @@ impl SdCard {
     pub async fn read_file<R>(
         &mut self,
         name: &ShortFileName,
-        mut access: impl FnMut(File) -> R,
+        mut access: impl AsyncFnMut(File<'_>) -> R,
     ) -> Result<R, SdCardError> {
-        self.access_root_dir(|root_dir| {
-            let file = root_dir
-                .open_file_in_dir(name, Mode::ReadOnly)
-                .map_err(|_| SdCardError::FileOpenFailed)?;
-
-            Ok(access(file))
-        })?
+        let volume = self
+            .volume_mgr
+            .open_volume(VolumeIdx(0))
+            .map_err(|_| SdCardError::Volume0Missing)?;
+        let root_dir = volume
+            .open_root_dir()
+            .map_err(|_| SdCardError::RootDirMissing)?;
+        let file = root_dir
+            .open_file_in_dir(name, Mode::ReadOnly)
+            .map_err(|_| SdCardError::FileOpenFailed)?;
+        Ok(access(file).await)
     }
 
     /// Visit every entry in the root directory, passing long name, size and

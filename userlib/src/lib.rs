@@ -120,6 +120,31 @@ pub mod display {
         }
     }
 
+    impl Display {
+        /// Writes `width` x `height` row-major RGB565 pixels in one syscall.
+        ///
+        /// Cheaper than the `DrawTarget` path, which spends a syscall per
+        /// `BUF_SIZE` pixels and ships coordinates for every pixel. Returns
+        /// the number of pixels written, or `None` when `pixels` is shorter
+        /// than `width * height`.
+        pub fn blit(
+            &mut self,
+            x: u16,
+            y: u16,
+            width: u16,
+            height: u16,
+            pixels: &[u16],
+        ) -> Option<usize> {
+            let required = usize::from(width).checked_mul(usize::from(height))?;
+            if required == 0 || pixels.len() < required {
+                return None;
+            }
+            // SAFETY: pixels stays live and holds `required` colors for this call.
+            unsafe { userlib_sys::blit(x, y, width, height, pixels.as_ptr(), required) };
+            Some(required)
+        }
+    }
+
     impl Dimensions for Display {
         fn bounding_box(&self) -> Rectangle {
             Rectangle {
@@ -253,7 +278,7 @@ impl RngCore for Rng {
 
 pub mod fs {
     use crate::SysError;
-    use alloc::vec::Vec;
+    use alloc::{string::String, vec::Vec};
     use core::fmt::Display;
 
     pub fn read_file(file: &str, start_from: usize, buf: &mut [u8]) -> Result<usize, SysError> {
@@ -393,6 +418,40 @@ pub mod fs {
         Ok(count)
     }
 
+    /// Lists matching media in the SD root and its optional legacy media folder.
+    pub fn list_media(directory: &str, extension: &str) -> Result<Vec<String>, SysError> {
+        let mut paths = Vec::new();
+        let mut entries = Entries::new();
+        for parent in ["/", directory] {
+            match list_dir(parent, &mut entries) {
+                Ok(_) => (),
+                Err(SysError::NotFound) if parent != "/" => continue,
+                Err(error) => return Err(error),
+            }
+            for entry in entries.entries() {
+                if !entry
+                    .extension()
+                    .unwrap_or("")
+                    .eq_ignore_ascii_case(extension)
+                {
+                    continue;
+                }
+                let prefix = parent.trim_end_matches('/');
+                let mut path = String::new();
+                path.try_reserve_exact(prefix.len() + 1 + entry.full_name().len())
+                    .map_err(|_| SysError::NoMemory)?;
+                path.push_str(prefix);
+                path.push('/');
+                path.push_str(entry.full_name());
+                paths.try_reserve(1).map_err(|_| SysError::NoMemory)?;
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
     pub fn file_len(path: &str) -> Result<usize, SysError> {
         // SAFETY: path remains a valid immutable UTF-8 slice through this call.
         let length = unsafe { userlib_sys::file_len(path.as_ptr(), path.len()) };
@@ -403,6 +462,66 @@ pub mod fs {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use core::sync::atomic::{AtomicI32, Ordering};
+
+        static LIST_ERROR: AtomicI32 = AtomicI32::new(0);
+
+        unsafe extern "C" fn list_fixture(
+            directory: *const u8,
+            length: usize,
+            entries: *mut *mut core::ffi::c_char,
+            count: usize,
+            capacity: usize,
+        ) -> usize {
+            // SAFETY: list_dir passes a live path slice for this synchronous call.
+            let directory = unsafe { core::slice::from_raw_parts(directory, length) };
+            let names: &[&[u8]] = match directory {
+                b"/" => &[b"ROOT.BMP", b"APP.BIN", b"song.WaV"],
+                b"/images" => &[b"long image.bmp", b"skip.gif"],
+                b"/missing" => {
+                    LIST_ERROR.store(SysError::NotFound as i32, Ordering::Relaxed);
+                    return 0;
+                }
+                _ => {
+                    LIST_ERROR.store(SysError::Io as i32, Ordering::Relaxed);
+                    return 0;
+                }
+            };
+            LIST_ERROR.store(0, Ordering::Relaxed);
+            assert!(names.len() <= count);
+            for (index, name) in names.iter().enumerate() {
+                assert!(name.len() < capacity);
+                // SAFETY: list_dir supplies count separate buffers of capacity bytes.
+                unsafe {
+                    let output = *entries.add(index);
+                    core::ptr::copy_nonoverlapping(name.as_ptr(), output.cast(), name.len());
+                    *output.add(name.len()) = 0;
+                }
+            }
+            names.len()
+        }
+
+        extern "C" fn fixture_error() -> i32 {
+            LIST_ERROR.load(Ordering::Relaxed)
+        }
+
+        #[test]
+        fn media_scan_combines_root_and_legacy_folder_and_preserves_errors() {
+            // SAFETY: no other test uses the filesystem syscall slots.
+            unsafe {
+                userlib_sys::SYS_CALL_TABLE[userlib_sys::SyscallTable::ListDir as usize] =
+                    list_fixture as *const () as usize;
+                userlib_sys::SYS_CALL_TABLE[userlib_sys::SyscallTable::GetLastError as usize] =
+                    fixture_error as *const () as usize;
+            }
+            assert_eq!(
+                list_media("/images", "bmp").unwrap(),
+                ["/ROOT.BMP", "/images/long image.bmp"]
+            );
+            assert_eq!(list_media("/missing", "WAV").unwrap(), ["/song.WaV"]);
+            assert_eq!(list_media("/", "bmp").unwrap(), ["/ROOT.BMP"]);
+            assert_eq!(list_media("/broken", "bmp"), Err(SysError::Io));
+        }
 
         #[test]
         fn entries_only_return_current_nonempty_valid_names() {

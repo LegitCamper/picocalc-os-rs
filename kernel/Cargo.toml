@@ -2,6 +2,7 @@
 name = "kernel"
 version = "0.0.1"
 edition = "2024"
+build = "../user_apps/build.rs"
 
 [[bin]]
 name = "kernel"
@@ -20,7 +21,8 @@ pimoroni2w = ["rp235xa", "psram"]
 rp235xa = ["embassy-rp/rp235xa"]
 trouble = ["dep:bt-hci", "dep:cyw43", "dep:cyw43-pio", "dep:trouble-host"]
 psram = ["dep:embedded-alloc"]
-overclock = []
+overclock = ["overclock-300"]
+overclock-300 = []
 fps = []
 defmt = [
   "dep:defmt",
@@ -101,6 +103,5 @@ talc = "4.4.3"
 embedded-alloc = { version = "0.6.0", features = [
   "allocator_api",
 ], optional = true }
-bumpalo = "3.19.0"
 
 userlib_sys = { path = "../userlib_sys" }

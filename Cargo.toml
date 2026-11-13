@@ -10,6 +10,7 @@ members = [
   "user_apps/gallery",
   "user_apps/gif",
   "user_apps/wav_player",
+  "user_apps/gboy",
 ]
 
 [profile.release]
@@ -25,6 +26,10 @@ lto = true
 debug = false
 opt-level = "z"
 panic = "unwind"
+
+# Emulators are cycle-bound, not flash-bound: size-opt costs ~2x here.
+[profile.release-binary.package.gboy]
+opt-level = 3
 
 [profile.dev]
 lto = true

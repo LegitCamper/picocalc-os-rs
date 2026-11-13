@@ -2,5 +2,5 @@
 *.uf2
 userlib_sys.h
 assets/gif/bad_apple.gif
-picolibc
+/user_apps/picolibc
 user-apps/gboy/Peanut-GB

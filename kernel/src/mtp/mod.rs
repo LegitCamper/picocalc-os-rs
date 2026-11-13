@@ -5,6 +5,7 @@
 //! has to be ejected to be usable locally again.
 
 pub mod codec;
+mod handles;
 
 use codec::*;
 use core::fmt::Write;
@@ -15,6 +16,7 @@ use embassy_time::{Duration, with_timeout};
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver, Endpoint, EndpointError, EndpointIn, EndpointOut};
 use embassy_usb::types::StringIndex;
+use handles::{MAX_NAME, ObjectHandles};
 use heapless::String;
 
 use crate::storage::SDCARD;
@@ -32,20 +34,14 @@ const PROTOCOL_PTP: u8 = 0x01;
 
 /// The single storage exposed to the host.
 const STORAGE_ID: u32 = 0x0001_0001;
-/// Object handles are `FIRST_HANDLE + index of the entry in the root dir`.
-const FIRST_HANDLE: u32 = 1;
-/// Longest filename accepted or reported.
-const MAX_NAME: usize = 64;
 /// Scratch buffer for one dataset or one file chunk.
 const BUF: usize = 512;
-/// Upper bound on root entries addressable as objects.
-/// ponytail: root-only, flat listing; add a handle table when subdirs are needed.
-const MAX_OBJECTS: u32 = 512;
 
 type Name = String<MAX_NAME>;
 
 /// A pending `SendObjectInfo` -> `SendObject` pair.
 struct Pending {
+    handle: u32,
     name: Name,
     size: u32,
 }
@@ -56,6 +52,7 @@ pub struct MtpClass<'d, D: Driver<'d>> {
     bulk_in: D::EndpointIn,
     _interrupt_in: D::EndpointIn,
     session_open: bool,
+    objects: ObjectHandles,
     pending: Option<Pending>,
     buf: [u8; BUF],
 }
@@ -80,6 +77,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             bulk_in,
             _interrupt_in: interrupt_in,
             session_open: false,
+            objects: ObjectHandles::new(),
             pending: None,
             buf: [0; BUF],
         }
@@ -99,6 +97,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             // drop the session and make it re-enumerate objects.
             self.session_open = false;
             let _ = self.discard_pending().await;
+            self.objects.clear();
 
             MTP_RESUME.reset();
             MTP_RESUME.wait().await;
@@ -110,6 +109,9 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
         self.bulk_out.wait_enabled().await;
         let mut cmd = [0u8; PACKET_SIZE as usize];
         let Ok(n) = self.bulk_out.read(&mut cmd).await else {
+            self.session_open = false;
+            let _ = self.discard_pending().await;
+            self.objects.clear();
             return;
         };
         let Some(hdr) = Header::parse(&cmd[..n]) else {
@@ -154,12 +156,15 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
                 if self.session_open {
                     return Err(RC_SESSION_ALREADY_OPEN);
                 }
+                self.discard_pending().await?;
+                self.objects.clear();
                 self.session_open = true;
                 Ok(RC_OK)
             }
             OP_CLOSE_SESSION => {
                 self.session_open = false;
                 self.discard_pending().await?;
+                self.objects.clear();
                 Ok(RC_OK)
             }
             OP_GET_STORAGE_IDS => {
@@ -272,25 +277,40 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
         .await
     }
 
-    /// Index-to-name mapping for the root directory. Handles are positional,
-    /// so a listing must happen before any handle is used.
-    async fn name_of(&self, handle: u32) -> Result<(Name, u32, bool), u16> {
-        let index = handle
-            .checked_sub(FIRST_HANDLE)
-            .ok_or(RC_INVALID_OBJECT_HANDLE)?;
+    async fn refresh_handles(&mut self) -> Result<(), u16> {
+        let mut guard = SDCARD.get().lock().await;
+        let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
+        self.objects.begin_scan();
+        let mut result = Ok(());
+        sd.list_root(|name, _, _| {
+            if result.is_ok() {
+                result = self
+                    .objects
+                    .observe(name)
+                    .map(|_| ())
+                    .map_err(|_| RC_GENERAL_ERROR);
+            }
+        })
+        .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
+        result?;
+        self.objects.finish_scan();
+        Ok(())
+    }
+
+    async fn name_of(&mut self, handle: u32) -> Result<(Name, u32, bool), u16> {
+        self.refresh_handles().await?;
+        let expected = self.objects.name(handle).ok_or(RC_INVALID_OBJECT_HANDLE)?;
         let mut found = None;
-        let mut seen = 0u32;
 
         let mut guard = SDCARD.get().lock().await;
         let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
         sd.list_root(|name, size, is_dir| {
-            if seen == index {
+            if name.eq_ignore_ascii_case(expected) {
                 let mut out = Name::new();
                 if out.push_str(name).is_ok() {
                     found = Some((out, size, is_dir));
                 }
             }
-            seen += 1;
         })
         .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
 
@@ -298,13 +318,8 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     }
 
     async fn send_num_objects(&mut self, tid: u32) -> Result<u16, u16> {
-        let mut count = 0u32;
-        {
-            let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
-            sd.list_root(|_, _, _| count += 1)
-                .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
-        }
+        self.refresh_handles().await?;
+        let count = self.objects.iter().len() as u32;
         self.respond_with(tid, RC_OK, &[count])
             .await
             .map_err(|_| RC_GENERAL_ERROR)?;
@@ -313,19 +328,35 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
     }
 
     async fn send_object_handles(&mut self, tid: u32) -> Result<u16, u16> {
-        let mut count = 0u32;
-        {
-            let mut guard = SDCARD.get().lock().await;
-            let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
-            sd.list_root(|_, _, _| count += 1)
-                .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
+        self.refresh_handles().await?;
+        let count = self.objects.iter().len() as u32;
+        let mut packet = [0u8; PACKET_SIZE as usize];
+        Header {
+            len: HDR as u32 + 4 + count * 4,
+            kind: CT_DATA,
+            code: OP_GET_OBJECT_HANDLES,
+            tid,
         }
-        let count = count.min(MAX_OBJECTS);
-
-        self.send_dataset(tid, OP_GET_OBJECT_HANDLES, |c| {
-            c.array_u32(FIRST_HANDLE..FIRST_HANDLE + count)
-        })
-        .await
+        .write(&mut packet)
+        .ok_or(RC_GENERAL_ERROR)?;
+        packet[HDR..HDR + 4].copy_from_slice(&count.to_le_bytes());
+        let mut filled = HDR + 4;
+        for handle in self.objects.iter() {
+            packet[filled..filled + 4].copy_from_slice(&handle.to_le_bytes());
+            filled += 4;
+            if filled == packet.len() {
+                self.bulk_in
+                    .write(&packet)
+                    .await
+                    .map_err(|_| RC_GENERAL_ERROR)?;
+                filled = 0;
+            }
+        }
+        self.bulk_in
+            .write(&packet[..filled])
+            .await
+            .map_err(|_| RC_GENERAL_ERROR)?;
+        Ok(RC_OK)
     }
 
     async fn send_object_info(&mut self, tid: u32, handle: u32) -> Result<u16, u16> {
@@ -425,6 +456,14 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
         let mut guard = SDCARD.get().lock().await;
         let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
         sd.delete_root_file(&name).map_err(|_| RC_GENERAL_ERROR)?;
+        self.objects.remove(handle);
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.handle == handle)
+        {
+            self.pending = None;
+        }
         Ok(RC_OK)
     }
 
@@ -455,6 +494,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             return Err(RC_NO_VALID_OBJECT_INFO);
         }
 
+        self.refresh_handles().await?;
         let handle = {
             let mut guard = SDCARD.get().lock().await;
             let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
@@ -464,25 +504,27 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             if exists {
                 return Err(RC_INVALID_PARAMETER);
             }
-            if info.is_dir {
-                sd.make_root_dir(&stored).map_err(|_| RC_GENERAL_ERROR)?;
+            let handle = self
+                .objects
+                .observe(&stored)
+                .map_err(|_| RC_GENERAL_ERROR)?;
+            let created = if info.is_dir {
+                sd.make_root_dir(&stored)
             } else {
-                sd.create_root_file(&stored).map_err(|_| RC_GENERAL_ERROR)?;
+                sd.create_root_file(&stored)
+            };
+            if created.is_err() {
+                self.objects.remove(handle);
+                return Err(RC_GENERAL_ERROR);
+            }
+            if !info.is_dir {
                 self.pending = Some(Pending {
+                    handle,
                     name: stored.clone(),
                     size: info.size,
                 });
             }
-            let mut handle = None;
-            let mut index = FIRST_HANDLE;
-            sd.list_root(|name, _, _| {
-                if name.eq_ignore_ascii_case(&stored) {
-                    handle = Some(index);
-                }
-                index += 1;
-            })
-            .map_err(|_| RC_STORE_NOT_AVAILABLE)?;
-            handle.ok_or(RC_GENERAL_ERROR)?
+            handle
         };
 
         self.respond_with(tid, RC_OK, &[STORAGE_ID, 0, handle])
@@ -574,6 +616,7 @@ impl<'d, D: Driver<'d>> MtpClass<'d, D> {
             let sd = guard.as_mut().ok_or(RC_STORE_NOT_AVAILABLE)?;
             sd.delete_root_file(&pending.name)
                 .map_err(|_| RC_GENERAL_ERROR)?;
+            self.objects.remove(pending.handle);
             self.pending = None;
         }
         Ok(())

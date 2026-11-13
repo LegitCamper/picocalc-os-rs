@@ -26,11 +26,11 @@ impl ReadCache {
     }
 
     /// `read_exact_at` must fill its entire buffer or return an error.
-    pub fn read_at<Error>(
+    pub async fn read_at<Error>(
         &mut self,
         mut offset: u32,
         mut bytes: &mut [u8],
-        mut read_exact_at: impl FnMut(u32, &mut [u8]) -> Result<(), Error>,
+        mut read_exact_at: impl AsyncFnMut(u32, &mut [u8]) -> Result<(), Error>,
     ) -> Result<(), ReadError<Error>> {
         let size = u32::try_from(bytes.len()).map_err(|_| ReadError::OutOfBounds)?;
         if offset
@@ -43,7 +43,9 @@ impl ReadCache {
             return Ok(());
         }
         if bytes.len() >= SECTOR_SIZE {
-            return read_exact_at(offset, bytes).map_err(ReadError::Source);
+            return read_exact_at(offset, bytes)
+                .await
+                .map_err(ReadError::Source);
         }
         while !bytes.is_empty() {
             let sector_offset = offset / SECTOR_SIZE as u32 * SECTOR_SIZE as u32;
@@ -58,6 +60,7 @@ impl ReadCache {
                     self.offsets[slot] = None;
                     let count = (self.file_size - sector_offset).min(SECTOR_SIZE as u32) as usize;
                     read_exact_at(sector_offset, &mut self.sectors[slot][..count])
+                        .await
                         .map_err(ReadError::Source)?;
                     self.offsets[slot] = Some(sector_offset);
                     slot
@@ -77,6 +80,98 @@ impl ReadCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+
+    impl ReadCache {
+        fn read_at_sync<Error>(
+            &mut self,
+            offset: u32,
+            bytes: &mut [u8],
+            mut read: impl FnMut(u32, &mut [u8]) -> Result<(), Error>,
+        ) -> Result<(), ReadError<Error>> {
+            let mut future =
+                pin!(self.read_at(offset, bytes, async |offset, bytes| read(offset, bytes)));
+            match future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+            {
+                Poll::Ready(result) => result,
+                Poll::Pending => panic!("synchronous source yielded"),
+            }
+        }
+    }
+
+    #[test]
+    fn cache_fill_can_yield_and_resume() {
+        let mut cache = ReadCache::new(512);
+        let mut byte = [0];
+        {
+            let mut future = pin!(cache.read_at(0, &mut byte, async |_, bytes| {
+                let mut yielded = false;
+                core::future::poll_fn(|context| {
+                    if core::mem::replace(&mut yielded, true) {
+                        Poll::Ready(())
+                    } else {
+                        context.waker().wake_by_ref();
+                        Poll::Pending
+                    }
+                })
+                .await;
+                bytes.fill(7);
+                Ok::<_, ()>(())
+            }));
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(future.as_mut().poll(&mut context).is_pending());
+            assert_eq!(future.as_mut().poll(&mut context), Poll::Ready(Ok(())));
+        }
+        assert_eq!(byte, [7]);
+        cache
+            .read_at_sync(0, &mut byte, |_, _| -> Result<(), ()> {
+                panic!("completed fill should be cached")
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn cancelled_fill_invalidates_previous_sector() {
+        let mut cache = ReadCache::new(1536);
+        for offset in [0, 512] {
+            cache
+                .read_at_sync(offset, &mut [0], |_, bytes| {
+                    bytes.fill(7);
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
+        }
+        let mut byte = [0];
+        {
+            let mut future = pin!(cache.read_at(1024, &mut byte, async |_, bytes| {
+                bytes[0] = 99;
+                core::future::pending::<()>().await;
+                Ok::<_, ()>(())
+            }));
+            assert!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+        }
+        let mut reads = 0;
+        cache
+            .read_at_sync(0, &mut byte, |_, bytes| {
+                reads += 1;
+                bytes.fill(7);
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert_eq!(reads, 1);
+        assert_eq!(byte, [7]);
+    }
 
     #[test]
     fn alternating_symbols_and_names_read_each_sector_once() {
@@ -92,7 +187,7 @@ mod tests {
             for (offset, length) in [(symbol * 16, 16), (8192 + symbol * 16, 14)] {
                 let mut bytes = [0; 16];
                 cache
-                    .read_at(offset, &mut bytes[..length], &mut read)
+                    .read_at_sync(offset, &mut bytes[..length], &mut read)
                     .unwrap();
                 assert_eq!(
                     &bytes[..length],
@@ -114,9 +209,9 @@ mod tests {
             Ok::<_, ()>(())
         };
         let mut bytes = [0; 14];
-        cache.read_at(505, &mut bytes, &mut read).unwrap();
+        cache.read_at_sync(505, &mut bytes, &mut read).unwrap();
         assert_eq!(bytes, source[505..]);
-        cache.read_at(505, &mut bytes, &mut read).unwrap();
+        cache.read_at_sync(505, &mut bytes, &mut read).unwrap();
         assert_eq!(reads, [(0, 512), (512, 7)]);
     }
 
@@ -126,7 +221,7 @@ mod tests {
         let mut reads = Vec::new();
         for offset in [0, 512, 0, 1024, 0, 512] {
             cache
-                .read_at(offset, &mut [0], |start, bytes| {
+                .read_at_sync(offset, &mut [0], |start, bytes| {
                     reads.push(start);
                     bytes.fill(0);
                     Ok::<_, ()>(())
@@ -145,11 +240,11 @@ mod tests {
             bytes.fill(7);
             Ok::<_, ()>(())
         };
-        cache.read_at(0, &mut [0], &mut read).unwrap();
+        cache.read_at_sync(0, &mut [0], &mut read).unwrap();
         let mut bytes = [0; 1024];
-        cache.read_at(513, &mut bytes, &mut read).unwrap();
+        cache.read_at_sync(513, &mut bytes, &mut read).unwrap();
         assert_eq!(bytes, [7; 1024]);
-        cache.read_at(0, &mut [0], &mut read).unwrap();
+        cache.read_at_sync(0, &mut [0], &mut read).unwrap();
         assert_eq!(reads, [(0, 512), (513, 1024)]);
     }
 
@@ -158,18 +253,18 @@ mod tests {
         let mut cache = ReadCache::new(u32::MAX);
         let mut read = |_, _: &mut [u8]| -> Result<(), ()> { panic!("unexpected read") };
         assert_eq!(
-            cache.read_at(u32::MAX, &mut [0], &mut read),
+            cache.read_at_sync(u32::MAX, &mut [0], &mut read),
             Err(ReadError::OutOfBounds)
         );
         assert_eq!(
-            cache.read_at(u32::MAX - 1, &mut [0; 2], &mut read),
+            cache.read_at_sync(u32::MAX - 1, &mut [0; 2], &mut read),
             Err(ReadError::OutOfBounds)
         );
-        cache.read_at(u32::MAX, &mut [], &mut read).unwrap();
+        cache.read_at_sync(u32::MAX, &mut [], &mut read).unwrap();
         let mut cache = ReadCache::new(0);
-        cache.read_at(0, &mut [], &mut read).unwrap();
+        cache.read_at_sync(0, &mut [], &mut read).unwrap();
         assert_eq!(
-            cache.read_at(1, &mut [], &mut read),
+            cache.read_at_sync(1, &mut [], &mut read),
             Err(ReadError::OutOfBounds)
         );
     }
@@ -179,14 +274,14 @@ mod tests {
         let mut cache = ReadCache::new(1536);
         for offset in [0, 512] {
             cache
-                .read_at(offset, &mut [0], |_, bytes| {
+                .read_at_sync(offset, &mut [0], |_, bytes| {
                     bytes.fill(7);
                     Ok::<_, ()>(())
                 })
                 .unwrap();
         }
         assert_eq!(
-            cache.read_at(1024, &mut [0], |_, bytes| {
+            cache.read_at_sync(1024, &mut [0], |_, bytes| {
                 bytes[0] = 99;
                 Err("read failed")
             }),
@@ -196,7 +291,7 @@ mod tests {
         for offset in [0, 1024] {
             let mut byte = [0];
             cache
-                .read_at(offset, &mut byte, |start, bytes| {
+                .read_at_sync(offset, &mut byte, |start, bytes| {
                     reads.push(start);
                     bytes.fill(7);
                     Ok::<_, ()>(())
@@ -206,7 +301,7 @@ mod tests {
         }
         assert_eq!(reads, [0, 1024]);
         assert_eq!(
-            cache.read_at(0, &mut [0; 512], |_, _| Err("bulk failed")),
+            cache.read_at_sync(0, &mut [0; 512], |_, _| Err("bulk failed")),
             Err(ReadError::Source("bulk failed"))
         );
     }

@@ -402,6 +402,13 @@ pub mod keyboard {
         pub mods: u8,
     }
 
+    const _: () = {
+        assert!(core::mem::size_of::<KeyEventC>() == 3);
+        assert!(core::mem::align_of::<KeyEventC>() == 1);
+        assert!(core::mem::offset_of!(KeyEventC, state) == 1);
+        assert!(core::mem::offset_of!(KeyEventC, mods) == 2);
+    };
+
     impl From<KeyEventC> for KeyEvent {
         fn from(val: KeyEventC) -> Self {
             KeyEvent {
@@ -431,7 +438,7 @@ pub mod keyboard {
 
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[repr(C)]
+    #[repr(u8)]
     pub enum KeyState {
         Idle = 0,
         Pressed = 1,

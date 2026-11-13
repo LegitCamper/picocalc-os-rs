@@ -1,7 +1,9 @@
 // This whole file was taken from:
 // https://github.com/wezterm/picocalc-wezterm/blob/main/src/heap.rs
 
+use core::alloc::{AllocError, Allocator};
 use core::alloc::{GlobalAlloc, Layout};
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use embedded_alloc::LlffHeap as Heap;
 
@@ -70,14 +72,8 @@ impl PsramHeap {
 
 unsafe impl GlobalAlloc for PsramHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe {
-            let ptr = self.heap.alloc(layout);
-            if !ptr.is_null() {
-                return ptr;
-            } else {
-                panic!("HEAP FULL");
-            }
-        }
+        // SAFETY: the caller supplies a valid nonzero allocation layout.
+        unsafe { self.heap.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -86,6 +82,26 @@ unsafe impl GlobalAlloc for PsramHeap {
             if self.region.contains(ptr_usize) {
                 self.heap.dealloc(ptr, layout);
             }
+        }
+    }
+}
+
+unsafe impl Allocator for PsramHeap {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let pointer = if layout.size() == 0 {
+            layout.align() as *mut u8
+        } else {
+            // SAFETY: layout is valid and nonzero; the heap synchronizes access.
+            unsafe { self.heap.alloc(layout) }
+        };
+        let pointer = NonNull::new(pointer).ok_or(AllocError)?;
+        Ok(NonNull::slice_from_raw_parts(pointer, layout.size()))
+    }
+
+    unsafe fn deallocate(&self, pointer: NonNull<u8>, layout: Layout) {
+        if layout.size() != 0 {
+            // SAFETY: the caller owns this allocation with the original layout.
+            unsafe { GlobalAlloc::dealloc(self, pointer.as_ptr(), layout) };
         }
     }
 }

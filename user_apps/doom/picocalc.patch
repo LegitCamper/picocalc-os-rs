@@ -1,0 +1,67 @@
+diff --git a/doomgeneric/i_system.c b/doomgeneric/i_system.c
+--- a/doomgeneric/i_system.c
++++ b/doomgeneric/i_system.c
+@@ -260,6 +260,8 @@ void I_Quit (void)
+ #if ORIGCODE
+     SDL_Quit();
+ 
+     exit(0);
++#elif defined(PICOCALC)
++    exit(0);
+ #endif
+ }
+diff --git a/doomgeneric/i_video.c b/doomgeneric/i_video.c
+--- a/doomgeneric/i_video.c
++++ b/doomgeneric/i_video.c
+@@ -321,5 +321,9 @@
+ void I_FinishUpdate (void)
+ {
++#ifdef PICOCALC
++    DG_ScreenBuffer = I_VideoBuffer;
++    DG_DrawFrame();
++#else
+     int y;
+     int x_offset, y_offset, x_offset_end;
+     unsigned char *line_in, *line_out;
+@@ -369,4 +373,5 @@
+ 	DG_DrawFrame();
++#endif
+ }
+ 
+ //
+diff --git a/doomgeneric/m_menu.c b/doomgeneric/m_menu.c
+--- a/doomgeneric/m_menu.c
++++ b/doomgeneric/m_menu.c
+@@ -650,5 +650,9 @@
+ void M_SaveGame (int choice)
+ {
++#ifdef PICOCALC
++    M_StartMessage("SAVING DISABLED: READ-ONLY PORT", NULL, false);
++    return;
++#endif
+     if (!usergame)
+     {
+ 	M_StartMessage(DEH_String(SAVEDEAD),NULL,false);
+diff --git a/doomgeneric/i_sound.c b/doomgeneric/i_sound.c
+--- a/doomgeneric/i_sound.c
++++ b/doomgeneric/i_sound.c
+@@ -78,6 +78,6 @@
+ {
+-    #ifdef FEATURE_SOUND
++    #if defined(FEATURE_SOUND) || defined(PICOCALC)
+     &DG_sound_module,
+     #endif
+     NULL,
+ };
+diff --git a/doomgeneric/i_sound.h b/doomgeneric/i_sound.h
+--- a/doomgeneric/i_sound.h
++++ b/doomgeneric/i_sound.h
+@@ -239,5 +239,7 @@
+ void I_InitTimidityConfig(void);
+-#ifdef FEATURE_SOUND
++#if defined(FEATURE_SOUND) || defined(PICOCALC)
+ extern sound_module_t DG_sound_module;
++#endif
++#ifdef FEATURE_SOUND
+ extern music_module_t DG_music_module;
+ #endif

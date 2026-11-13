@@ -8,9 +8,18 @@ pub const REL_SIZE: usize = 8;
 pub const MAX_PROGRAM_HEADERS: usize = 32;
 pub const MAX_RELOCATIONS: u32 = 8192;
 pub const MAX_SYMBOLS: u32 = 8192;
+pub const SRAM_IMAGE_SIZE: usize = 250 * 1024;
 // ponytail: match app linker RAM ceiling; larger apps need a larger linker region and budget.
-pub const MAX_IMAGE_SIZE: usize = 250 * 1024;
-pub const MAX_ALLOCATION: usize = MAX_IMAGE_SIZE + 64 * 1024;
+// PSRAM boards allow larger PSRAM-compatible images such as Doom in the XIP window.
+#[cfg(not(feature = "psram"))]
+pub const MAX_IMAGE_SIZE: usize = SRAM_IMAGE_SIZE;
+#[cfg(feature = "psram")]
+pub const MAX_IMAGE_SIZE: usize = 640 * 1024;
+
+#[cfg(any(feature = "psram", test))]
+pub const fn needs_psram(size: usize) -> bool {
+    size > SRAM_IMAGE_SIZE
+}
 pub const PT_LOAD: u32 = 1;
 pub const PF_X: u32 = 1;
 pub const PF_W: u32 = 2;
@@ -351,13 +360,14 @@ pub fn relative_value(base: u32, origin: u32, addend: u32) -> u32 {
     base.wrapping_sub(origin).wrapping_add(addend)
 }
 
-pub fn read_exact_with(
+pub async fn read_exact_with(
     mut bytes: &mut [u8],
-    mut read: impl FnMut(&mut [u8]) -> Result<usize, LoadError>,
+    mut read: impl AsyncFnMut(&mut [u8]) -> Result<usize, LoadError>,
 ) -> Result<(), LoadError> {
     while !bytes.is_empty() {
-        let count = read(bytes)?;
-        if count == 0 || count > bytes.len() {
+        let chunk_len = bytes.len().min(512);
+        let count = read(&mut bytes[..chunk_len]).await?;
+        if count == 0 || count > chunk_len {
             return Err(LoadError::FailedToReadFile);
         }
         bytes = &mut bytes[count..];
@@ -412,7 +422,14 @@ mod tests {
     #[test]
     #[ignore = "requires just userapps; run by just check after rebuilding"]
     fn rebuilt_apps_match_loader_contract() {
-        for app in ["calculator", "snake", "gallery", "gif", "wav_player"] {
+        for app in [
+            "calculator",
+            "snake",
+            "gallery",
+            "gif",
+            "wav_player",
+            "gboy",
+        ] {
             let bytes = std::fs::read(format!(
                 "target/thumbv8m.main-none-eabihf/release-binary/{app}"
             ))
@@ -613,29 +630,88 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_images_stay_in_sram_for_exclusive_atomics() {
+        assert!(!needs_psram(1));
+        assert!(!needs_psram(SRAM_IMAGE_SIZE));
+        assert!(needs_psram(SRAM_IMAGE_SIZE + 1));
+        assert!(needs_psram(520_176));
+    }
+
+    #[test]
     fn exact_reads_retry_partial_data_and_stop_on_eof_or_error() {
+        fn ready<Result>(future: impl core::future::Future<Output = Result>) -> Result {
+            let mut future = core::pin::pin!(future);
+            let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+            match future.as_mut().poll(&mut context) {
+                core::task::Poll::Ready(result) => result,
+                core::task::Poll::Pending => panic!("read unexpectedly yielded"),
+            }
+        }
+
         let mut bytes = [0; 4];
         let mut next = 0;
-        read_exact_with(&mut bytes, |remaining| {
+        ready(read_exact_with(&mut bytes, async |remaining| {
             next += 1;
             remaining[0] = next;
             Ok(1)
-        })
+        }))
         .unwrap();
         assert_eq!(bytes, [1, 2, 3, 4]);
         assert_eq!(
-            read_exact_with(&mut bytes, |_| Ok(0)),
+            ready(read_exact_with(&mut bytes, async |_| Ok(0))),
             Err(LoadError::FailedToReadFile)
         );
         assert_eq!(
-            read_exact_with(&mut bytes, |_| Ok(5)),
+            ready(read_exact_with(&mut bytes, async |_| Ok(5))),
             Err(LoadError::FailedToReadFile)
         );
         assert_eq!(
-            read_exact_with(&mut bytes, |_| Err(LoadError::FailedToReadFile)),
+            ready(read_exact_with(&mut bytes, async |_| {
+                Err(LoadError::FailedToReadFile)
+            })),
             Err(LoadError::FailedToReadFile)
         );
-        assert!(read_exact_with(&mut [], |_| panic!("empty read")).is_ok());
+        assert!(ready(read_exact_with(&mut [], async |_| panic!("empty read"))).is_ok());
+    }
+
+    #[test]
+    fn exact_reads_bound_io_and_yield_between_chunks() {
+        use core::{
+            cell::Cell,
+            future::{Future, poll_fn},
+            task::{Context, Poll, Waker},
+        };
+
+        let mut bytes = [0; 1025];
+        let reads = Cell::new(0);
+        let mut context = Context::from_waker(Waker::noop());
+        {
+            let future = read_exact_with(&mut bytes, async |chunk| {
+                let mut yielded = false;
+                poll_fn(|context| {
+                    if yielded {
+                        Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        context.waker().wake_by_ref();
+                        Poll::Pending
+                    }
+                })
+                .await;
+                assert!(chunk.len() <= 512);
+                reads.set(reads.get() + 1);
+                chunk.fill(0x5a);
+                Ok(chunk.len())
+            });
+            let mut future = core::pin::pin!(future);
+            for completed in 0..3 {
+                assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
+                assert_eq!(reads.get(), completed);
+            }
+            assert_eq!(future.as_mut().poll(&mut context), Poll::Ready(Ok(())));
+        }
+        assert_eq!(reads.get(), 3);
+        assert_eq!(bytes, [0x5a; 1025]);
     }
 
     #[test]

@@ -1,6 +1,9 @@
 [submodule "picolibc"]
-	path = picolibc
+	path = user_apps/picolibc
 	url = https://github.com/picolibc/picolibc
-[submodule "user-apps/gboy/Peanut-GB"]
-	path = user-apps/gboy/Peanut-GB
+[submodule "user_apps/gboy/Peanut-GB"]
+	path = user_apps/gboy/Peanut-GB
 	url = https://github.com/deltabeard/Peanut-GB
+[submodule "user_apps/doom/doomgeneric"]
+	path = user_apps/doom/doomgeneric
+	url = https://github.com/ozkl/doomgeneric

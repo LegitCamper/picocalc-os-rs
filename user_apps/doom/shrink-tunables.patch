@@ -1,0 +1,133 @@
+diff --git a/doomgeneric/i_system.c b/doomgeneric/i_system.c
+index 53ab2c9..17ff633 100644
+--- a/doomgeneric/i_system.c
++++ b/doomgeneric/i_system.c
+@@ -55,8 +55,12 @@
+ #include <CoreFoundation/CFUserNotification.h>
+ #endif
+ 
+-#define DEFAULT_RAM 6 /* MiB */
+-#define MIN_RAM     6  /* MiB */
++#ifndef DEFAULT_RAM
++#define DEFAULT_RAM 6
++#endif
++#ifndef MIN_RAM
++#define MIN_RAM 6
++#endif
+ 
+ 
+ typedef struct atexit_listentry_s atexit_listentry_t;
+diff --git a/doomgeneric/net_defs.h b/doomgeneric/net_defs.h
+index bedfb95..fcc9f5b 100644
+--- a/doomgeneric/net_defs.h
++++ b/doomgeneric/net_defs.h
+@@ -42,7 +42,9 @@
+ 
+ // Networking and tick handling related.
+ 
++#ifndef BACKUPTICS
+ #define BACKUPTICS 128
++#endif
+ 
+ typedef struct _net_module_s net_module_t;
+ typedef struct _net_packet_s net_packet_t;
+diff --git a/doomgeneric/r_defs.h b/doomgeneric/r_defs.h
+index a64ac84..ba43209 100644
+--- a/doomgeneric/r_defs.h
++++ b/doomgeneric/r_defs.h
+@@ -48,7 +48,9 @@
+ #define SIL_TOP			2
+ #define SIL_BOTH		3
+ 
+-#define MAXDRAWSEGS		256
++#ifndef MAXDRAWSEGS
++#define MAXDRAWSEGS 256
++#endif
+ 
+ 
+ 
+diff --git a/doomgeneric/r_draw.c b/doomgeneric/r_draw.c
+index 9271bcd..5740c73 100644
+--- a/doomgeneric/r_draw.c
++++ b/doomgeneric/r_draw.c
+@@ -38,8 +38,12 @@
+ 
+ 
+ // ?
+-#define MAXWIDTH			1120
+-#define MAXHEIGHT			832
++#ifndef MAXWIDTH
++#define MAXWIDTH 1120
++#endif
++#ifndef MAXHEIGHT
++#define MAXHEIGHT 832
++#endif
+ 
+ // status bar height at bottom of screen
+ #define SBARHEIGHT		32
+diff --git a/doomgeneric/r_main.c b/doomgeneric/r_main.c
+index 22278fe..b896a2e 100644
+--- a/doomgeneric/r_main.c
++++ b/doomgeneric/r_main.c
+@@ -90,7 +90,7 @@ angle_t			clipangle;
+ // maps the visible view angles to screen X coordinates,
+ // flattening the arc to a flat projection plane.
+ // There will be many angles mapped to the same X. 
+-int			viewangletox[FINEANGLES/2];
++short			viewangletox[FINEANGLES/2];
+ 
+ // The xtoviewangleangle[] table maps a screen pixel
+ // to the lowest viewangle that maps back to x ranges
+diff --git a/doomgeneric/r_plane.c b/doomgeneric/r_plane.c
+index ea1611c..1828bd5 100644
+--- a/doomgeneric/r_plane.c
++++ b/doomgeneric/r_plane.c
+@@ -42,14 +42,18 @@ planefunction_t		ceilingfunc;
+ //
+ 
+ // Here comes the obnoxious "visplane".
+-#define MAXVISPLANES	128
++#ifndef MAXVISPLANES
++#define MAXVISPLANES 128
++#endif
+ visplane_t		visplanes[MAXVISPLANES];
+ visplane_t*		lastvisplane;
+ visplane_t*		floorplane;
+ visplane_t*		ceilingplane;
+ 
+ // ?
+-#define MAXOPENINGS	SCREENWIDTH*64
++#ifndef MAXOPENINGS
++#define MAXOPENINGS SCREENWIDTH*64
++#endif
+ short			openings[MAXOPENINGS];
+ short*			lastopening;
+ 
+diff --git a/doomgeneric/r_state.h b/doomgeneric/r_state.h
+index 2a60e2f..09e40a7 100644
+--- a/doomgeneric/r_state.h
++++ b/doomgeneric/r_state.h
+@@ -105,7 +105,7 @@ extern player_t*	viewplayer;
+ // ?
+ extern angle_t		clipangle;
+ 
+-extern int		viewangletox[FINEANGLES/2];
++extern short		viewangletox[FINEANGLES/2];
+ extern angle_t		xtoviewangle[SCREENWIDTH+1];
+ //extern fixed_t		finetangent[FINEANGLES/2];
+ 
+diff --git a/doomgeneric/r_things.h b/doomgeneric/r_things.h
+index 256a5eb..0a04509 100644
+--- a/doomgeneric/r_things.h
++++ b/doomgeneric/r_things.h
+@@ -22,7 +22,9 @@
+ 
+ 
+ 
+-#define MAXVISSPRITES  	128
++#ifndef MAXVISSPRITES
++#define MAXVISSPRITES 128
++#endif
+ 
+ extern vissprite_t	vissprites[MAXVISSPRITES];
+ extern vissprite_t*	vissprite_p;
