@@ -25,6 +25,12 @@ Current focus is on exanding applications and porting software, finding bugs in 
 
 ## Getting Started
 
+Kernel builds currently use the companion driver checkout at
+`../ST7365P-lcd-rs/st7365`, with the `PixelStorage` framebuffer changes.
+Keep that checkout beside this repository until the driver changes are published
+and the dependency can be pinned to a Git revision again. PicoCalc borrows its
+pixel allocation from the kernel; the driver owns shared drawing and flushing.
+
 Launcher: Up/Down selects a program; Enter/Right launches it. Del prompts to
 permanently delete the selected `.bin` from the SD card; Enter confirms and Esc
 cancels. Failed deletions show an error and keep the program in the list.

@@ -1,4 +1,4 @@
-use crate::framebuffer::{self, AtomicFrameBuffer};
+use crate::framebuffer::{self, FrameBuffer};
 use embassy_futures::yield_now;
 use embassy_rp::{
     Peri,
@@ -31,7 +31,7 @@ type Display = ST7365P<
 pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
 
-pub static FRAMEBUFFER: Mutex<CriticalSectionRawMutex, Option<AtomicFrameBuffer<'static>>> =
+pub static FRAMEBUFFER: Mutex<CriticalSectionRawMutex, Option<FrameBuffer<'static>>> =
     Mutex::new(None);
 
 async fn init_fb() {
@@ -47,7 +47,7 @@ async fn init_fb() {
             }
             let buf = core::slice::from_raw_parts_mut(slab, framebuffer::SIZE);
 
-            let mut fb = AtomicFrameBuffer::new(buf);
+            let mut fb = FrameBuffer::with_storage(buf);
             fb.clear(Rgb565::BLACK).unwrap();
             *framebuffer = Some(fb);
         }
@@ -55,7 +55,7 @@ async fn init_fb() {
         #[cfg(not(feature = "psram"))]
         {
             static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
-            *framebuffer = Some(AtomicFrameBuffer::new(&mut BUF));
+            *framebuffer = Some(FrameBuffer::with_storage(&mut BUF[..]));
         }
     }
 }
@@ -108,11 +108,24 @@ pub async fn display_handler(mut display: Display) {
             }
         }
 
-        if let Some(framebuffer) = FRAMEBUFFER.lock().await.as_mut()
-            && framebuffer.partial_draw(&mut display).await.is_err()
-        {
-            #[cfg(feature = "defmt")]
-            defmt::warn!("Framebuffer transfer failed; retrying dirty tiles");
+        if let Some(framebuffer) = FRAMEBUFFER.lock().await.as_mut() {
+            #[cfg(feature = "fps")]
+            framebuffer::fps::draw_into(framebuffer);
+
+            if framebuffer
+                .partial_draw_batched(&mut display)
+                .await
+                .is_err()
+            {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("Framebuffer transfer failed; retrying dirty tiles");
+            } else {
+                #[cfg(feature = "fps")]
+                // SAFETY: only the core0 display task accesses FPS state.
+                unsafe {
+                    FPS_COUNTER.measure();
+                }
+            }
         }
 
         let elapsed = start.elapsed().as_millis();

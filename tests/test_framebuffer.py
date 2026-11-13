@@ -64,7 +64,7 @@ fn rgb565_reaches_spi_in_big_endian_order() {
     let bus = Bus { dc: dc.clone(), ram_write: false, bytes: bytes.clone() };
     let mut display = ST7365P::new(bus, dc, None::<Pin>, true, false, Delay);
     let mut pixels = vec![0; framebuffer::SIZE];
-    let mut framebuffer = framebuffer::AtomicFrameBuffer::new(&mut pixels);
+    let mut framebuffer = framebuffer::FrameBuffer::with_storage(&mut pixels[..]);
     framebuffer.clear(Rgb565::BLUE).unwrap();
     ready(framebuffer.draw(&mut display));
     assert_eq!(bytes.borrow().len(), framebuffer::SIZE * 2);
@@ -83,7 +83,7 @@ fn rgb565_reaches_spi_in_big_endian_order() {
                     Size::new(1, 1)), color).unwrap();
             },
         }
-        ready(framebuffer.partial_draw(&mut display));
+        ready(framebuffer.partial_draw_batched(&mut display));
         assert_eq!(bytes.borrow().len(), 16 * 16 * 2);
         assert_eq!(&bytes.borrow()[..8], &expected);
     }
@@ -99,6 +99,8 @@ def main():
     manifest += '[workspace]\n[features]\nfps = []\n[dependencies]\n'
     for name in ("embedded-graphics", "embedded-hal_2", "embedded-hal-async", "st7365p-lcd"):
         dependency = DEPENDENCIES[name]
+        if isinstance(dependency, dict) and "path" in dependency:
+            dependency = {**dependency, "path": str((ROOT / "kernel" / dependency["path"]).resolve())}
         value = json.dumps(dependency) if isinstance(dependency, str) else "{ " + ", ".join(
             f"{key} = {json.dumps(value)}" for key, value in dependency.items()
         ) + " }"
