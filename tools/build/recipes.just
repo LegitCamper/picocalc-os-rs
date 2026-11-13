@@ -4,8 +4,17 @@ kernel-dev board:
     cargo run --bin kernel --features {{board}}  --features fps --features defmt
 kernel-release-probe board:
     cargo run --bin kernel --profile release --features {{board}} --features fps
-kernel-release board:
-    cargo build --bin kernel --release --no-default-features --features {{board}}
+[positional-arguments]
+kernel-release board clock='stable':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    features="$1"
+    case "$2" in
+        stable) ;;
+        300) features+=",overclock-300" ;;
+        *) printf 'Unsupported clock: %s (expected stable or 300)\n' "$2" >&2; exit 2 ;;
+    esac
+    cargo build --bin kernel --release --no-default-features --features "$features"
     elf2uf2-rs -d target/{{target}}/release/kernel
 
 binary-args := "RUSTFLAGS=\"-C link-arg=-pie -C relocation-model=pic\""
@@ -51,6 +60,7 @@ userapps: cbindgen
     just userapp gallery
     just userapp gif
     just userapp wav_player
+    just userapp gboy
 
 # gvfs backends usually live on the host, not inside the toolbox, so fall back
 # to running gio there. MTP is spoken by the gvfs daemon, not by gio itself.
@@ -163,12 +173,13 @@ copy-userapps:
     #!/bin/bash
     set -euo pipefail
     just userapps
-    for app in calculator snake gallery gif wav_player; do
+    for app in calculator snake gallery gif wav_player gboy; do
         just copy-userapp "$app"
     done
 
 # Host-only logic; no probe or SD card needed.
 test:
+    bash tests/kernel-release.sh
     cargo test -p userlib_sys -p userlib -p selection_ui -p tinygif --target x86_64-unknown-linux-gnu
     python3 tests/test_framebuffer.py
     rustc --edition 2024 --test kernel/src/elf_format.rs -o target/elf-format-tests

@@ -422,7 +422,14 @@ mod tests {
     #[test]
     #[ignore = "requires just userapps; run by just check after rebuilding"]
     fn rebuilt_apps_match_loader_contract() {
-        for app in ["calculator", "snake", "gallery", "gif", "wav_player"] {
+        for app in [
+            "calculator",
+            "snake",
+            "gallery",
+            "gif",
+            "wav_player",
+            "gboy",
+        ] {
             let bytes = std::fs::read(format!(
                 "target/thumbv8m.main-none-eabihf/release-binary/{app}"
             ))

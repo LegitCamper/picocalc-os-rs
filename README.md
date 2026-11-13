@@ -74,7 +74,7 @@ Uploads currently target the SD Card root and require ASCII 8.3 filenames
 Subdirectory uploads and long filenames are rejected, not silently renamed.
 New uploads cannot truncate existing files. Use a new name to preserve an older copy.
 
-`just copy-userapps` rebuilds all five apps and replaces their root-directory
+`just copy-userapps` rebuilds all six apps and replaces their root-directory
 copies over MTP using GIO/GVfs (the host's GIO when running in a toolbox).
 The copy step uses `CALC.BIN` for `calculator` and `WAVPLAY.BIN` for `wav_player`;
 other app names are uppercased. Build target names remain unchanged.
@@ -103,3 +103,36 @@ Connect a data cable to the Pico board's native USB port; the debug probe alone
 does not provide MTP. Leave the device at its launcher (MTP pauses while an app
 runs). In an MTP-capable file manager, open **PicoCalc > SD Card** and copy files
 into that root folder. This is file transfer, not a USB disk or drive letter.
+
+## Quick Commands
+
+Run from this worktree's root. Kernel release commands build and deploy:
+
+```bash
+just kernel-release rp235xa          # official board, stable default
+just kernel-release rp235xa 300      # official board, 300 MHz
+just kernel-release pimoroni2w       # Pimoroni board, stable default
+just kernel-release pimoroni2w 300   # Pimoroni board, 300 MHz
+just kernel-release pimoroni2w stable # explicitly return to stable
+
+just userapp gboy                    # build Game Boy app
+just copy-userapp gboy               # copy existing build over USB MTP
+just userapps                       # build all user apps
+just copy-userapps                   # build/copy all over USB MTP
+
+just kernel-dev rp235xa              # debug probe: development build, FPS + logs
+just kernel-release-probe rp235xa    # debug probe: release build + FPS
+```
+
+The copy commands require the kernel's USB MTP connection and GIO/GVfs.
+The probe commands require a connected debug probe.
+
+### CPU Clock
+
+`kernel-release` defaults to the board's normal clock configuration.
+Both modes build and deploy. Unsupported clock values fail before building.
+The `300` option enables Cargo feature `overclock-300`; the existing `overclock`
+feature remains an alias. Stable mode does not enable either feature.
+
+300 MHz is an overclock, not a stability guarantee. If the device becomes
+unstable, rebuild and deploy with `stable`.

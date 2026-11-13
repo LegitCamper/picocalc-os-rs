@@ -120,6 +120,31 @@ pub mod display {
         }
     }
 
+    impl Display {
+        /// Writes `width` x `height` row-major RGB565 pixels in one syscall.
+        ///
+        /// Cheaper than the `DrawTarget` path, which spends a syscall per
+        /// `BUF_SIZE` pixels and ships coordinates for every pixel. Returns
+        /// the number of pixels written, or `None` when `pixels` is shorter
+        /// than `width * height`.
+        pub fn blit(
+            &mut self,
+            x: u16,
+            y: u16,
+            width: u16,
+            height: u16,
+            pixels: &[u16],
+        ) -> Option<usize> {
+            let required = usize::from(width).checked_mul(usize::from(height))?;
+            if required == 0 || pixels.len() < required {
+                return None;
+            }
+            // SAFETY: pixels stays live and holds `required` colors for this call.
+            unsafe { userlib_sys::blit(x, y, width, height, pixels.as_ptr(), required) };
+            Some(required)
+        }
+    }
+
     impl Dimensions for Display {
         fn bounding_box(&self) -> Rectangle {
             Rectangle {

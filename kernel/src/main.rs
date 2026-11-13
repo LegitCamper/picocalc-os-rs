@@ -137,7 +137,7 @@ const OVERCLOCK: u32 = 300_000_000;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let p = if cfg!(feature = "overclock") {
+    let p = if cfg!(feature = "overclock-300") {
         let clocks = ClockConfig::system_freq(OVERCLOCK).unwrap();
         let config = Config::new(clocks);
         embassy_rp::init(config)
