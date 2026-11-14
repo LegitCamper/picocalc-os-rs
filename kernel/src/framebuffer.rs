@@ -11,29 +11,6 @@ pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 pub type FrameBuffer<'a> =
     st7365p_lcd::FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, SIZE, &'a mut [u16]>;
 
-#[cfg(feature = "fps")]
-pub fn draw_fps_into_fb(framebuffer: &mut FrameBuffer<'_>) {
-    use embedded_graphics::{
-        draw_target::DrawTarget,
-        pixelcolor::{Rgb565, raw::RawU16},
-        prelude::{Point, Size},
-        primitives::Rectangle,
-    };
-    use fps::{FPS_CANVAS, FPS_CANVAS_HEIGHT, FPS_CANVAS_WIDTH, FPS_CANVAS_X, FPS_CANVAS_Y};
-
-    // SAFETY: only the core0 display task accesses FPS state.
-    let canvas = unsafe { &FPS_CANVAS.canvas };
-    let _ = framebuffer.fill_contiguous(
-        &Rectangle::new(
-            Point::new(FPS_CANVAS_X as i32, FPS_CANVAS_Y as i32),
-            Size::new(FPS_CANVAS_WIDTH as u32, FPS_CANVAS_HEIGHT as u32),
-        ),
-        canvas
-            .iter()
-            .map(|pixel| Rgb565::from(RawU16::new(pixel.swap_bytes()))),
-    );
-}
-
 /// Uploads full-width snapshot rows without borrowing the live framebuffer.
 #[cfg(feature = "psram")]
 pub async fn upload_rows<SPI, DC, RST, DELAY: DelayNs>(
@@ -58,11 +35,6 @@ where
             &pixels[rows.start * SCREEN_WIDTH..rows.end * SCREEN_WIDTH],
         )
         .await?;
-    #[cfg(feature = "fps")]
-    // SAFETY: only the core0 display task accesses FPS state.
-    unsafe {
-        crate::display::FPS_COUNTER.measure()
-    }
     Ok(())
 }
 
@@ -70,7 +42,6 @@ where
 pub mod fps {
     use crate::display::SCREEN_WIDTH;
     use core::fmt::Write;
-    use embassy_time::{Duration, Instant};
     use embedded_graphics::{
         Drawable, Pixel,
         draw_target::DrawTarget,
@@ -81,16 +52,10 @@ pub mod fps {
         text::{Alignment, Text},
     };
 
-    pub static mut FPS_COUNTER: FpsCounter = FpsCounter::new();
-    pub static mut FPS_CANVAS: FpsCanvas = FpsCanvas::new();
-
-    // "FPS: 120" = 8 len
-    const FPS_LEN: usize = 8;
-    pub const FPS_CANVAS_WIDTH: usize = (FONT_8X13.character_size.width + 4) as usize * FPS_LEN;
+    const FPS_LEN: usize = 14;
+    pub const FPS_CANVAS_WIDTH: usize = FONT_8X13.character_size.width as usize * FPS_LEN;
     pub const FPS_CANVAS_HEIGHT: usize = FONT_8X13.character_size.height as usize;
 
-    // puts canvas in the top right of the display
-    // top left point of canvas
     pub const FPS_CANVAS_X: usize = SCREEN_WIDTH - FPS_CANVAS_WIDTH;
     pub const FPS_CANVAS_Y: usize = 0;
 
@@ -99,27 +64,33 @@ pub mod fps {
     }
 
     impl FpsCanvas {
-        const fn new() -> Self {
-            Self {
+        pub fn new() -> Self {
+            let mut canvas = Self {
                 canvas: [0; FPS_CANVAS_HEIGHT * FPS_CANVAS_WIDTH],
+            };
+            canvas.draw_fps(0);
+            canvas
+        }
+
+        #[cfg(feature = "psram")]
+        pub fn composite(&self, pixels: &mut [u16], rows: core::ops::Range<usize>) {
+            for row in rows.start.max(FPS_CANVAS_Y)..rows.end.min(FPS_CANVAS_Y + FPS_CANVAS_HEIGHT)
+            {
+                let start = row * SCREEN_WIDTH + FPS_CANVAS_X;
+                let source = (row - FPS_CANVAS_Y) * FPS_CANVAS_WIDTH;
+                pixels[start..start + FPS_CANVAS_WIDTH]
+                    .copy_from_slice(&self.canvas[source..source + FPS_CANVAS_WIDTH]);
             }
         }
 
-        fn clear(&mut self) {
-            for p in &mut self.canvas {
-                *p = 0;
-            }
-        }
-
-        pub async fn draw_fps(&mut self) {
+        pub fn draw_fps(&mut self, tenths: u32) {
             let mut buf: heapless::String<FPS_LEN> = heapless::String::new();
-            // SAFETY: only the core0 display task accesses FPS state.
-            let fps = unsafe { FPS_COUNTER.smoothed };
-            let _ = write!(buf, "FPS: {}", fps as u8);
+            let tenths = tenths.min(9_999);
+            let _ = write!(buf, "LCD FPS: {}.{}", tenths / 10, tenths % 10);
 
-            self.clear();
+            self.canvas.fill(0);
             let text_style = MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE);
-            Text::with_alignment(
+            let _ = Text::with_alignment(
                 buf.as_str(),
                 Point::new(
                     FPS_CANVAS_WIDTH as i32 / 2,
@@ -128,8 +99,7 @@ pub mod fps {
                 text_style,
                 Alignment::Center,
             )
-            .draw(self)
-            .unwrap();
+            .draw(self);
         }
     }
 
@@ -151,8 +121,6 @@ pub mod fps {
                 }
 
                 let index = (point.y as usize) * FPS_CANVAS_WIDTH + point.x as usize;
-                // Pre-swapped to match the main framebuffer's storage, since
-                // this canvas is copied directly into it (see draw_fps_into_fb).
                 self.canvas[index] = color.into_storage().swap_bytes();
             }
             Ok(())
@@ -162,52 +130,6 @@ pub mod fps {
     impl OriginDimensions for FpsCanvas {
         fn size(&self) -> Size {
             Size::new(FPS_CANVAS_WIDTH as u32, FPS_CANVAS_HEIGHT as u32)
-        }
-    }
-
-    pub struct FpsCounter {
-        last_frame: Option<Instant>,
-        smoothed: f32,
-        last_draw: Option<Instant>,
-    }
-
-    impl FpsCounter {
-        pub const fn new() -> Self {
-            Self {
-                last_frame: None,
-                smoothed: 0.0,
-                last_draw: None,
-            }
-        }
-
-        // Is called once per frame or partial frame to update FPS
-        pub fn measure(&mut self) {
-            let now = Instant::now();
-
-            if let Some(last) = self.last_frame {
-                let dt_us = (now - last).as_micros() as f32;
-                if dt_us > 0.0 {
-                    let current = 1_000_000.0 / dt_us;
-                    self.smoothed = if self.smoothed == 0.0 {
-                        current
-                    } else {
-                        0.9 * self.smoothed + 0.1 * current
-                    };
-                }
-            }
-
-            self.last_frame = Some(now);
-        }
-
-        pub fn should_draw(&mut self) -> bool {
-            let now = Instant::now();
-            match self.last_draw {
-                Some(last) if now - last < Duration::from_millis(200) => false,
-                _ => {
-                    self.last_draw = Some(now);
-                    true
-                }
-            }
         }
     }
 }

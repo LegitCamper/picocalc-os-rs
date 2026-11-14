@@ -652,6 +652,8 @@ where
                         .or(self.global_color_table)
                         .ok_or(DrawError::Parse(ParseError::InvalidByte))?;
                     let transparent = self.is_transparent.then_some(self.transparent_color_index);
+                    let colors: [Option<C>; 256] =
+                        core::array::from_fn(|index| palette.get(index as u8).map(C::from));
                     let transform = self.transform.unwrap_or(Point::zero());
                     let left = i32::from(image.left)
                         .checked_add(transform.x)
@@ -665,34 +667,38 @@ where
                         .ok_or(DrawError::Parse(ParseError::InvalidImageDimensions))?;
                     let expected = u32::from(image.width) * u32::from(image.height);
                     let mut count = 0_u32;
+                    let mut column = 0_u16;
+                    let mut source_row = 0_u32;
+                    let mut row = 0_u32;
                     let raw = LenPrefixRawDataView::new(image.image_data);
                     let mut decoder = lzw::Decoder::new(raw, image.lzw_min_code_size)
                         .map_err(DrawError::Parse)?;
                     while let Some(decoded) = decoder.decode_next().map_err(DrawError::Parse)? {
                         if decoded.len() as u32 > expected - count
                             || decoded.iter().any(|&index| {
-                                transparent != Some(index) && palette.get(index).is_none()
+                                transparent != Some(index) && colors[index as usize].is_none()
                             })
                         {
                             return Err(DrawError::Parse(ParseError::InvalidByte));
                         }
                         target
-                            .draw_iter(decoded.iter().enumerate().filter_map(|(offset, &index)| {
-                                if transparent == Some(index) {
-                                    return None;
+                            .draw_iter(decoded.iter().filter_map(|&index| {
+                                let point = Point::new(left + i32::from(column), top + row as i32);
+                                column += 1;
+                                if column == image.width {
+                                    column = 0;
+                                    source_row += 1;
+                                    row = if image.is_interlaced {
+                                        interlaced_row(source_row, u32::from(image.height))
+                                    } else {
+                                        source_row
+                                    };
                                 }
-                                let position = count + offset as u32;
-                                let row = position / u32::from(image.width);
-                                let row = if image.is_interlaced {
-                                    interlaced_row(row, u32::from(image.height))
+                                if transparent == Some(index) {
+                                    None
                                 } else {
-                                    row
-                                };
-                                let point = Point::new(
-                                    left + (position % u32::from(image.width)) as i32,
-                                    top + row as i32,
-                                );
-                                palette.get(index).map(|color| Pixel(point, color.into()))
+                                    colors[index as usize].map(|color| Pixel(point, color))
+                                }
                             }))
                             .map_err(DrawError::Target)?;
                         count += decoded.len() as u32;
@@ -810,7 +816,7 @@ pub enum ParseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use embedded_graphics::{mock_display::MockDisplay, prelude::RgbColor};
+    use embedded_graphics::{mock_display::MockDisplay, pixelcolor::Rgb565, prelude::RgbColor};
 
     fn fixture() -> [u8; 43] {
         [
@@ -830,6 +836,66 @@ mod tests {
         assert_eq!(display.get_pixel(Point::zero()), Some(Rgb888::BLACK));
         assert_eq!(frame.delay_centis, 1);
         assert!(frame.is_self_contained());
+    }
+
+    #[test]
+    fn decoded_coordinates_cross_chunks_rows_and_transparent_pixels() {
+        for interlaced in [false, true] {
+            for transparent in [false, true] {
+                let mut bytes = fixture()[..38].to_vec();
+                bytes[6] = 3;
+                bytes[8] = 5;
+                bytes[22] = u8::from(transparent);
+                bytes[25] = 1;
+                bytes[32] = 3;
+                bytes[34] = 5;
+                bytes[36] = if interlaced { 0x40 } else { 0 };
+                let codes = (0..15).flat_map(|pixel| [4_u8, pixel % 2]).chain([5]);
+                let mut packed = alloc::vec::Vec::new();
+                let mut pending = 0_u16;
+                let mut bits = 0;
+                for code in codes {
+                    pending |= u16::from(code) << bits;
+                    bits += 3;
+                    if bits >= 8 {
+                        packed.push(pending as u8);
+                        pending >>= 8;
+                        bits -= 8;
+                    }
+                }
+                if bits != 0 {
+                    packed.push(pending as u8);
+                }
+                bytes.push(packed.len() as u8);
+                bytes.extend(packed);
+                bytes.extend([0, 0x3b]);
+                let gif = Gif::<Rgb565>::from_slice(&bytes).unwrap();
+                let mut frame = gif.frames().next().unwrap();
+                let mut display = MockDisplay::new();
+                frame
+                    .translate_mut(Point::new(1, 2))
+                    .draw_checked(&mut display)
+                    .unwrap();
+                for index in 0..15 {
+                    let row = if interlaced {
+                        [0, 4, 2, 1, 3][index / 3]
+                    } else {
+                        index / 3
+                    };
+                    let expected = if index % 2 == 0 {
+                        Some(Rgb565::BLACK)
+                    } else if transparent {
+                        None
+                    } else {
+                        Some(Rgb565::WHITE)
+                    };
+                    assert_eq!(
+                        display.get_pixel(Point::new((index % 3 + 1) as i32, (row + 2) as i32)),
+                        expected
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -1,5 +1,35 @@
 use core::ops::Range;
 
+/// Completed content snapshots per elapsed second, in tenths of a frame.
+pub struct FrameRate {
+    started_ms: u64,
+    completed: u32,
+}
+
+impl FrameRate {
+    pub fn new(now_ms: u64) -> Self {
+        Self {
+            started_ms: now_ms,
+            completed: 0,
+        }
+    }
+
+    pub fn completed(&mut self) {
+        self.completed = self.completed.saturating_add(1);
+    }
+
+    pub fn sample(&mut self, now_ms: u64) -> Option<u32> {
+        let elapsed = now_ms.saturating_sub(self.started_ms);
+        if elapsed < 1_000 {
+            return None;
+        }
+        let rate = u64::from(self.completed) * 10_000 / elapsed;
+        self.started_ms = now_ms;
+        self.completed = 0;
+        Some(rate.min(u64::from(u32::MAX)) as u32)
+    }
+}
+
 pub fn scan_band_delay_us(
     frame_us: u64,
     counter_period: u16,
@@ -35,7 +65,32 @@ pub fn take_dirty_run(tiles: &mut [bool], start: usize) -> Option<Range<usize>> 
 
 #[cfg(test)]
 mod tests {
-    use super::{scan_band_delay_us, take_dirty_run};
+    use super::{FrameRate, scan_band_delay_us, take_dirty_run};
+
+    #[test]
+    fn frame_rate_counts_completions_over_actual_elapsed_time() {
+        let mut rate = FrameRate::new(100);
+        for _ in 0..27 {
+            rate.completed();
+        }
+        assert_eq!(rate.sample(1_099), None);
+        assert_eq!(rate.sample(1_300), Some(225));
+        assert_eq!(rate.sample(2_300), Some(0));
+        rate.completed();
+        assert_eq!(rate.sample(4_300), Some(5));
+    }
+
+    #[test]
+    fn frame_rate_polling_and_overlay_refresh_do_not_count_as_frames() {
+        let mut rate = FrameRate::new(1_000);
+        assert_eq!(rate.sample(0), None);
+        for now in 1_000..2_000 {
+            assert_eq!(rate.sample(now), None);
+        }
+        assert_eq!(rate.sample(2_000), Some(0));
+        rate.completed();
+        assert_eq!(rate.sample(3_000), Some(10));
+    }
 
     #[test]
     fn scan_delay_never_waits_a_frame_or_rejects_late_updates() {

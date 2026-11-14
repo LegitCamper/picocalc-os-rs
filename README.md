@@ -25,11 +25,10 @@ Current focus is on exanding applications and porting software, finding bugs in 
 
 ## Getting Started
 
-Kernel builds currently use the companion driver checkout at
-`../ST7365P-lcd-rs/st7365`, with the `PixelStorage` framebuffer changes.
-Keep that checkout beside this repository until the driver changes are published
-and the dependency can be pinned to a Git revision again. PicoCalc borrows its
-pixel allocation from the kernel; the driver owns shared drawing and flushing.
+Kernel builds pin the ST7365P driver's `async` branch revision
+`2deb9e4508f9c51faf039de533d2de649caf527e` from Git. Local driver edits do not
+affect these builds. PicoCalc borrows its pixel allocation from the kernel;
+the driver owns shared drawing and flushing.
 
 Launcher: Up/Down selects a program; Enter/Right launches it. Del prompts to
 permanently delete the selected `.bin` from the SD card; Enter confirms and Esc
@@ -97,6 +96,18 @@ backup and readback checks. MTP remains root-only: gallery BMPs in
 No WAV sample is bundled. Gallery, GIF, and WAV apps scan both the root and their
 existing `/images`, `/gifs`, and `/music` folders. The GIF player accepts files
 up to 2 MiB and one megapixel, centering and clipping larger-than-screen images.
+
+GIF playback uses cumulative deadlines and includes decode and framebuffer-copy
+cost when skipping late frames. Dependent delta frames still require decoding.
+GIF decoding and display hot paths use speed optimization rather than size
+optimization. This does not guarantee source-rate playback on every GIF.
+
+Build with `cargo build --bin kernel --release --no-default-features --features pimoroni2w,fps`
+for the top-right `LCD FPS` overlay. It counts completed content snapshot uploads
+over actual elapsed one-second windows, not GIF submissions, SPI chunks, or
+overlay refreshes. Idle output falls to zero. It measures LCD upload throughput,
+not panel refresh rate or atomic, tear-free frame swaps. The PSRAM path composites
+the overlay into upload staging without dirtying the app's framebuffer.
 
 Snake advances every 125 ms (eight steps per second), independent of rendering
 speed. Input stays responsive during waits.

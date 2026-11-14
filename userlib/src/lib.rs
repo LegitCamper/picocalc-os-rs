@@ -104,31 +104,6 @@ pub mod display {
     }
 
     impl Display {
-        pub fn blit(&mut self, area: Rectangle, colors: &[u16]) -> Result<(), crate::SysError> {
-            if area.top_left.x < 0
-                || area.top_left.y < 0
-                || area.size.width == 0
-                || area.size.height == 0
-                || i64::from(area.top_left.x) + i64::from(area.size.width) > SCREEN_WIDTH as i64
-                || i64::from(area.top_left.y) + i64::from(area.size.height) > SCREEN_HEIGHT as i64
-                || colors.len() != area.size.width as usize * area.size.height as usize
-            {
-                return Err(crate::SysError::InvalidArgument);
-            }
-            // SAFETY: bounds and length are checked; colors stays readable throughout the synchronous call.
-            unsafe {
-                userlib_sys::blit(
-                    area.top_left.x as u16,
-                    area.top_left.y as u16,
-                    area.size.width as u16,
-                    area.size.height as u16,
-                    colors.as_ptr(),
-                    colors.len(),
-                );
-            }
-            Ok(())
-        }
-
         /// Only one instance of Display can be taken
         pub fn take() -> Option<Display> {
             if DISPLAY_TAKEN
@@ -316,15 +291,8 @@ pub mod display {
             drop(pixels);
             canvas.present(&mut display, Point::new(10, 20)).unwrap();
             assert_eq!(BLIT_CALLS.load(Ordering::Relaxed), 2);
-            assert!(
-                display
-                    .blit(
-                        Rectangle::new(Point::zero(), Size::new(u32::MAX, u32::MAX)),
-                        &[]
-                    )
-                    .is_err()
-            );
-            assert!(display.blit(area, &[0; 1]).is_err());
+            assert!(display.blit(0, 0, u16::MAX, u16::MAX, &[]).is_none());
+            assert!(display.blit(0, 0, 3, 2, &[0; 1]).is_none());
             assert_eq!(BLIT_CALLS.load(Ordering::Relaxed), 2);
             drop(display);
             assert!(Display::take().is_some());

@@ -2390,6 +2390,7 @@ dependencies = [
 [[package]]
 name = "st7365p-lcd"
 version = "0.11.0"
+source = "git+https://github.com/LegitCamper/ST7365P-lcd-rs?rev=2deb9e4508f9c51faf039de533d2de649caf527e#2deb9e4508f9c51faf039de533d2de649caf527e"
 dependencies = [
  "bitvec",
  "embedded-graphics-core",

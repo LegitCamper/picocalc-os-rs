@@ -8,6 +8,7 @@ use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
     prelude::{DrawTarget, Point, RgbColor, Size},
+    transform::Transform,
 };
 use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 use tinygif::Gif;
@@ -96,20 +97,21 @@ pub fn main() {
         println!("Invalid GIF");
         return;
     };
-    // ponytail: canvas is capped at the display size; add clipping if larger GIFs matter.
-    if usize::from(gif.width()) > SCREEN_WIDTH || usize::from(gif.height()) > SCREEN_HEIGHT {
-        println!("GIF exceeds display dimensions");
+    if u32::from(gif.width()) * u32::from(gif.height()) > 1_048_576 {
+        println!("GIF exceeds decoded pixel limit");
         return;
     }
 
-    let translation = Point::new(
+    let centered = Point::new(
         (SCREEN_WIDTH as i32 - gif.width() as i32) / 2,
         (SCREEN_HEIGHT as i32 - gif.height() as i32) / 2,
     );
-
-    let Ok(mut canvas) =
-        FrameBuffer::new(Size::new(u32::from(gif.width()), u32::from(gif.height())))
-    else {
+    let origin = Point::new(centered.x.max(0), centered.y.max(0));
+    let translation = Point::new(centered.x.min(0), centered.y.min(0));
+    let Ok(mut canvas) = FrameBuffer::new(Size::new(
+        u32::from(gif.width()).min(SCREEN_WIDTH as u32),
+        u32::from(gif.height()).min(SCREEN_HEIGHT as u32),
+    )) else {
         println!("Not enough memory for GIF canvas");
         return;
     };
@@ -120,38 +122,47 @@ pub fn main() {
     let mut skipped = 0_u32;
     let mut decode_ms = 0_u64;
     let mut last_decode_ms = 0_u64;
+    let mut last_write_ms = 0_u64;
     let mut write_ms = 0_u64;
 
     loop {
         let mut has_frames = false;
         let mut frames = gif.frames().peekable();
-        while let Some(frame) = frames.next() {
+        while let Some(mut frame) = frames.next() {
             has_frames = true;
             if exit_requested() {
                 return;
             }
             // ponytail: zero-delay GIFs use 10 ms; explicit positive GIF delays are preserved.
             pacer.advance(u64::from(frame.delay_centis.max(1)) * 10);
-            if !pacer.should_present(get_ms().saturating_add(last_decode_ms))
-                && frames.peek().is_some_and(|next| next.is_self_contained())
+            if !pacer.should_present(
+                get_ms()
+                    .saturating_add(last_decode_ms)
+                    .saturating_add(last_write_ms),
+            ) && frames.peek().is_some_and(|next| next.is_self_contained())
             {
                 skipped = skipped.saturating_add(1);
                 continue;
             }
             let start = get_ms();
-            if frame.draw_checked(&mut canvas).is_err() {
+            if frame
+                .translate_mut(translation)
+                .draw_checked(&mut canvas)
+                .is_err()
+            {
                 println!("Invalid GIF frame");
                 return;
             }
             last_decode_ms = get_ms().saturating_sub(start);
             decode_ms = decode_ms.saturating_add(last_decode_ms);
-            if pacer.should_present(get_ms()) {
+            if pacer.should_present(get_ms().saturating_add(last_write_ms)) {
                 let start = get_ms();
-                if canvas.present(&mut display, translation).is_err() {
+                if canvas.present(&mut display, origin).is_err() {
                     return;
                 }
                 let finished = get_ms();
-                write_ms = write_ms.saturating_add(finished.saturating_sub(start));
+                last_write_ms = finished.saturating_sub(start);
+                write_ms = write_ms.saturating_add(last_write_ms);
                 pacer.presented(finished);
                 presented = presented.saturating_add(1);
             } else {
@@ -161,7 +172,7 @@ pub fn main() {
             let now = get_ms();
             if now.saturating_sub(report_at) >= 5_000 {
                 println!(
-                    "GIF {} ms: presented={}, skipped={}, decode_ms={}, write_ms={}",
+                    "GIF {} ms: submitted={}, skipped={}, decode_ms={}, write_ms={}",
                     now.saturating_sub(report_at),
                     presented,
                     skipped,

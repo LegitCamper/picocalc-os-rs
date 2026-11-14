@@ -42,6 +42,7 @@ impl SpiDevice for Bus {
                 Operation::Write(bytes) if !self.dc.0.get() => self.ram_write = *bytes == [0x2c],
                 Operation::Write(bytes) if self.ram_write => self.bytes.borrow_mut().extend_from_slice(bytes),
                 Operation::Write(_) => (),
+                Operation::DelayNs(_) => (),
                 _ => panic!("unexpected SPI operation"),
             }
         }
@@ -91,13 +92,41 @@ fn rgb565_reaches_spi_in_big_endian_order() {
     ready(framebuffer.draw(&mut display));
     assert_eq!(&bytes.borrow()[..8], &expected);
 }
+
+#[test]
+fn fps_overlay_changes_only_uploaded_snapshot_rows() {
+    use framebuffer::fps::{FpsCanvas, FPS_CANVAS_X, FPS_CANVAS_WIDTH, FPS_CANVAS_HEIGHT};
+    let mut canvas = FpsCanvas::new();
+    canvas.draw_fps(225);
+    canvas.draw_iter([Pixel(Point::zero(), Rgb565::RED)]).unwrap();
+    let mut snapshot = vec![0x1234; framebuffer::SIZE];
+    canvas.composite(&mut snapshot, 0..1);
+    assert_eq!(snapshot[FPS_CANVAS_X], 0xf800_u16.swap_bytes());
+    assert!(snapshot[..FPS_CANVAS_X].iter().all(|pixel| *pixel == 0x1234));
+    assert!(snapshot[FPS_CANVAS_X + FPS_CANVAS_WIDTH..].iter().all(|pixel| *pixel == 0x1234));
+    let before = snapshot.clone();
+    canvas.composite(&mut snapshot, FPS_CANVAS_HEIGHT..320);
+    assert_eq!(snapshot, before);
+}
+
+#[test]
+fn snapshot_and_overlay_do_not_dirty_live_framebuffer() {
+    let mut pixels = vec![0; framebuffer::SIZE];
+    let mut framebuffer = framebuffer::FrameBuffer::with_storage(&mut pixels[..]);
+    framebuffer.clear(Rgb565::BLUE).unwrap();
+    let mut snapshot = vec![0; framebuffer::SIZE];
+    let rows = framebuffer.take_dirty_rows(&mut snapshot).unwrap().unwrap();
+    framebuffer::fps::FpsCanvas::new().composite(&mut snapshot, rows);
+    assert!(framebuffer.dirty_rows().is_none());
+    assert!(framebuffer.take_dirty_rows(&mut snapshot).unwrap().is_none());
+}
 '''
 
 
 def main():
     manifest = '[package]\nname = "framebuffer-wire-test"\nversion = "0.0.0"\nedition = "2024"\n'
-    manifest += '[workspace]\n[features]\nfps = []\n[dependencies]\n'
-    for name in ("embedded-graphics", "embedded-hal_2", "embedded-hal-async", "st7365p-lcd"):
+    manifest += '[workspace]\n[features]\nfps = []\npsram = []\n[dependencies]\n'
+    for name in ("embedded-graphics", "embedded-hal_2", "embedded-hal-async", "st7365p-lcd", "heapless"):
         dependency = DEPENDENCIES[name]
         if isinstance(dependency, dict) and "path" in dependency:
             dependency = {**dependency, "path": str((ROOT / "kernel" / dependency["path"]).resolve())}
@@ -116,7 +145,7 @@ def main():
             "FRAMEBUFFER_PATH", str(ROOT / "kernel/src/framebuffer.rs")))
         subprocess.run(["cargo", "test", "--offline", "--manifest-path", str(crate / "Cargo.toml"),
                         "--target", host, "--target-dir", str(ROOT / "target/framebuffer-tests"),
-                        "--lib"], check=True)
+                        "--lib", "--features", "fps,psram"], check=True)
 
 
 if __name__ == "__main__":

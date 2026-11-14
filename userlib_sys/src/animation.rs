@@ -81,4 +81,19 @@ mod tests {
         pacer.advance(20);
         assert!(pacer.should_present(110 + 15));
     }
+
+    #[test]
+    fn copy_cost_is_included_when_skipping_to_current_frame() {
+        let mut pacer = FramePacer::new(0);
+        pacer.presented(0);
+        let now = 20;
+        let decode_ms = 10;
+        let copy_ms = 25;
+        pacer.advance(33);
+        assert!(pacer.should_present(now + decode_ms));
+        assert!(!pacer.should_present(now + decode_ms + copy_ms));
+        pacer.advance(33);
+        assert!(pacer.should_present(now + decode_ms + copy_ms));
+        assert_eq!(pacer.remaining_ms(now + decode_ms + copy_ms), 11);
+    }
 }

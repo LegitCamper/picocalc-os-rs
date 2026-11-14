@@ -7,9 +7,12 @@ Unmount MTP first. Requires Python 3 and libusb; defaults to read-only.
 
 import argparse
 import ctypes
+import os
 import pathlib
+import re
 import secrets
 import struct
+import tempfile
 
 
 def main():
@@ -17,6 +20,21 @@ def main():
     parser.add_argument("--write-check", action="store_true")
     parser.add_argument("--replace", action="append", default=[], metavar="NAME=PATH")
     options = parser.parse_args()
+    replacements = {}
+    for spec in options.replace:
+        name, separator, source = spec.partition("=")
+        name = name.upper()
+        if not separator or not re.fullmatch(r"[A-Z0-9_]{1,8}\.BIN", name) or name in replacements:
+            parser.error("replacement requires a unique ASCII 8.3 NAME.BIN=PATH")
+        try:
+            data = pathlib.Path(source).read_bytes()
+        except OSError as error:
+            parser.error(str(error))
+        if not data or len(data) > 64 * 1024 * 1024:
+            parser.error("replacement must contain 1 byte to 64 MiB of data")
+        replacements[name] = data
+    if replacements and options.write_check:
+        parser.error("replacement and write-check require separate sessions")
     usb = ctypes.CDLL("libusb-1.0.so.0")
     usb.libusb_init.argtypes = [ctypes.c_void_p]
     usb.libusb_open_device_with_vid_pid.argtypes = [
@@ -156,28 +174,29 @@ def main():
             name = info[53:53 + max(0, units - 1) * 2].decode("utf-16le")
             names[name.upper()] = handle
             print(f"  {handle}: {name}")
-        for spec in options.replace:
-            name, _, source = spec.partition("=")
-            name = name.upper()
-            data = pathlib.Path(source).read_bytes()
-            assert data, f"Refusing to upload empty {source}"
-            backup = None
+        for name, data in replacements.items():
             if name in names:
+                info, _ = command(0x1008, names[name])
+                actual_name = info[53:53 + (info[52] - 1) * 2].decode("utf-16le")
+                assert actual_name.upper() == name, "Refusing to replace another file"
                 backup, _ = command(0x1009, names[name])
-                pathlib.Path(f"/tmp/picocalc-backup-{name}").write_bytes(backup)
+                if backup == data:
+                    print(f"  verified {name}: unchanged")
+                    continue
+                backup_path = pathlib.Path(tempfile.mkdtemp(prefix="picocalc-backup-")) / name
+                with backup_path.open("xb") as saved:
+                    saved.write(backup)
+                    saved.flush()
+                    os.fsync(saved.fileno())
+                assert backup_path.read_bytes() == backup
+                print(f"  backup retained: {backup_path}", flush=True)
                 command(0x100B, names[name])
-            try:
-                _, response = command(0x100C, 0x00010001, 0, data=object_info(name, len(data)))
-                handle = struct.unpack("<III", response)[2]
-                command(0x100D, data=data, split=True)
-                downloaded, _ = command(0x1009, handle)
-                assert downloaded == data, f"Readback mismatch for {name}"
-            except Exception:
-                if backup is not None:
-                    print(f"  restoring previous {name} from /tmp/picocalc-backup-{name}")
-                    _, response = command(0x100C, 0x00010001, 0, data=object_info(name, len(backup)))
-                    command(0x100D, data=backup, split=True)
-                raise
+            _, response = command(0x100C, 0x00010001, 0, data=object_info(name, len(data)))
+            store, parent, handle = struct.unpack("<III", response)
+            assert store == 0x00010001 and parent == 0 and handle != 0
+            command(0x100D, data=data, split=True)
+            downloaded, _ = command(0x1009, handle)
+            assert downloaded == data, f"Readback mismatch for {name}; backup retained"
             print(f"  replaced {name}: {len(data)} bytes, readback OK")
         if options.write_check:
             name = "MT" + secrets.token_hex(3).upper() + ".TST"

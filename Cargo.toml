@@ -19,6 +19,21 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 
+[profile.release.package.gif]
+opt-level = 3
+
+[profile.release.package.tinygif]
+opt-level = 3
+
+[profile.release.package.userlib]
+opt-level = 3
+
+[profile.release.package.kernel]
+opt-level = 3
+
+[profile.release.package.st7365p-lcd]
+opt-level = 3
+
 [profile.release-binary]
 inherits = "release"
 codegen-units = 1

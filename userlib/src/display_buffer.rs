@@ -49,13 +49,15 @@ impl FrameBuffer {
         }
         if let Some(rows) = self.dirty_rows.clone() {
             let width = self.size.width as usize;
-            display.blit(
-                Rectangle::new(
-                    origin + Point::new(0, rows.start as i32),
-                    Size::new(self.size.width, (rows.end - rows.start) as u32),
-                ),
-                &self.pixels[rows.start * width..rows.end * width],
-            )?;
+            display
+                .blit(
+                    origin.x as u16,
+                    (origin.y + rows.start as i32) as u16,
+                    self.size.width as u16,
+                    (rows.end - rows.start) as u16,
+                    &self.pixels[rows.start * width..rows.end * width],
+                )
+                .ok_or(SysError::InvalidArgument)?;
             self.dirty_rows = None;
         }
         Ok(())
@@ -132,6 +134,20 @@ impl DrawTarget for FrameBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn centered_oversized_frame_clips_without_larger_allocation() {
+        let mut buffer = FrameBuffer::new(Size::new(4, 3)).unwrap();
+        let source = Rectangle::new(Point::new(-1, -1), Size::new(6, 5));
+        buffer
+            .fill_contiguous(
+                &source,
+                (0..30).map(|pixel| Rgb565::from(RawU16::new(pixel))),
+            )
+            .unwrap();
+        assert_eq!(buffer.pixels, [7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 21, 22]);
+        assert_eq!(buffer.dirty_rows, Some(0..3));
+    }
 
     #[test]
     fn clips_draws_and_preserves_skipped_frame_changes() {

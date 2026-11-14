@@ -8,6 +8,7 @@ use embassy_rp::{
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Delay;
+use embedded_hal_async::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use st7365p_lcd::ST7365P;
 
@@ -18,15 +19,24 @@ use {
     embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor},
 };
 
-#[cfg(feature = "fps")]
-pub use framebuffer::fps::{FPS_CANVAS, FPS_COUNTER};
-
 type Display = ST7365P<
-    ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
+    ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, SpiDelay>,
     Output<'static>,
     Output<'static>,
     Delay,
 >;
+
+pub(crate) struct SpiDelay;
+
+impl DelayNs for SpiDelay {
+    async fn delay_ns(&mut self, nanos: u32) {
+        if nanos <= 1_000 {
+            embassy_time::block_for(embassy_time::Duration::from_nanos(u64::from(nanos)));
+        } else {
+            Delay.delay_ns(nanos).await;
+        }
+    }
+}
 
 pub const SCREEN_WIDTH: usize = 320;
 pub const SCREEN_HEIGHT: usize = 320;
@@ -68,7 +78,7 @@ pub async fn init_display(
 ) -> Display {
     init_fb().await;
 
-    let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), Delay).unwrap();
+    let spi_device = ExclusiveDevice::new(spi, Output::new(cs, Level::Low), SpiDelay).unwrap();
     let mut display = ST7365P::new(
         spi_device,
         Output::new(data, Level::Low),
@@ -102,6 +112,12 @@ pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi
     #[cfg(feature = "psram")]
     let staging = alloc_staging();
     let mut next_flush = Instant::now();
+    #[cfg(feature = "fps")]
+    let mut fps_counter = userlib_sys::framebuffer::FrameRate::new(Instant::now().as_millis());
+    #[cfg(feature = "fps")]
+    let mut fps_canvas = framebuffer::fps::FpsCanvas::new();
+    #[cfg(feature = "fps")]
+    let mut overlay_dirty = true;
     let mut _last_report = Instant::now();
     let mut _transfers = 0u32;
     let mut _scan_failures = 0u32;
@@ -112,10 +128,25 @@ pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi
     loop {
         Timer::at(next_flush).await;
         #[cfg(feature = "fps")]
-        // SAFETY: FPS state is used only by this core0 display task after initialization.
-        unsafe {
-            if FPS_COUNTER.should_draw() {
-                FPS_CANVAS.draw_fps().await;
+        {
+            use framebuffer::fps::{
+                FPS_CANVAS_HEIGHT, FPS_CANVAS_WIDTH, FPS_CANVAS_X, FPS_CANVAS_Y,
+            };
+            if let Some(rate) = fps_counter.sample(Instant::now().as_millis()) {
+                fps_canvas.draw_fps(rate);
+                overlay_dirty = true;
+            }
+            if overlay_dirty {
+                overlay_dirty = display
+                    .set_pixels_buffered(
+                        FPS_CANVAS_X as u16,
+                        FPS_CANVAS_Y as u16,
+                        (FPS_CANVAS_X + FPS_CANVAS_WIDTH - 1) as u16,
+                        (FPS_CANVAS_Y + FPS_CANVAS_HEIGHT - 1) as u16,
+                        &fps_canvas.canvas,
+                    )
+                    .await
+                    .is_err();
             }
         }
         let mut guard = FRAMEBUFFER.lock().await;
@@ -125,8 +156,6 @@ pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi
             Timer::after_millis(1).await;
             continue;
         };
-        #[cfg(feature = "fps")]
-        framebuffer::draw_fps_into_fb(framebuffer);
         #[cfg(feature = "psram")]
         let rows = match framebuffer.take_dirty_rows(staging) {
             Ok(rows) => rows,
@@ -148,6 +177,8 @@ pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi
             Timer::after_millis(1).await;
             continue;
         };
+        #[cfg(all(feature = "fps", feature = "psram"))]
+        fps_canvas.composite(staging, rows.clone());
         next_flush = Instant::now() + Duration::from_micros(16_667);
         let scan_start = Instant::now();
         let delay_us = if let Some((frame_us, counter_period)) = timing {
@@ -183,6 +214,10 @@ pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi
         };
         #[cfg(not(feature = "psram"))]
         drop(guard);
+        #[cfg(all(feature = "fps", not(feature = "psram")))]
+        if rows.start < framebuffer::fps::FPS_CANVAS_HEIGHT {
+            overlay_dirty = true;
+        }
         let upload_us = upload_start.elapsed().as_micros();
         _max_upload_us = _max_upload_us.max(upload_us);
         if result.is_err() {
@@ -197,11 +232,8 @@ pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi
             Timer::after_millis(1).await;
         } else {
             _transfers = _transfers.saturating_add(1);
-            #[cfg(all(feature = "fps", not(feature = "psram")))]
-            // SAFETY: only the core0 display task accesses FPS state.
-            unsafe {
-                FPS_COUNTER.measure();
-            }
+            #[cfg(feature = "fps")]
+            fps_counter.completed();
         }
         if _last_report.elapsed().as_secs() >= 5 {
             #[cfg(feature = "defmt")]
