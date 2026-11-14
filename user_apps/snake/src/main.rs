@@ -4,11 +4,14 @@
 extern crate alloc;
 mod timing;
 use core::panic::PanicInfo;
-use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
+use embedded_graphics::{
+    pixelcolor::Rgb565,
+    prelude::{Point, RgbColor, Size},
+};
 use embedded_snake::{Direction, SnakeGame};
 use userlib::{
     Rng,
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
+    display::{Display, FrameBuffer, SCREEN_HEIGHT, SCREEN_WIDTH},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
     println, sleep,
@@ -32,6 +35,11 @@ const CELL_SIZE: usize = 8;
 pub fn main() {
     println!("Starting Snake app");
     let Some(mut display) = Display::take() else {
+        return;
+    };
+    let Ok(mut canvas) = FrameBuffer::new(Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32))
+    else {
+        println!("Not enough memory for Snake canvas");
         return;
     };
 
@@ -71,7 +79,10 @@ pub fn main() {
             continue;
         }
         last_step = now;
-        game.pre_draw(&mut display);
-        game.draw(&mut display);
+        game.pre_draw(&mut canvas);
+        game.draw(&mut canvas);
+        if canvas.present(&mut display, Point::zero()).is_err() {
+            return;
+        }
     }
 }

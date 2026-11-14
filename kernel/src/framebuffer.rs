@@ -1,8 +1,70 @@
 use crate::display::{SCREEN_HEIGHT, SCREEN_WIDTH};
+#[cfg(feature = "psram")]
+use {
+    core::ops::Range,
+    embedded_hal_2::digital::OutputPin,
+    embedded_hal_async::{delay::DelayNs, spi::SpiDevice},
+    st7365p_lcd::ST7365P,
+};
 
 pub const SIZE: usize = SCREEN_HEIGHT * SCREEN_WIDTH;
 pub type FrameBuffer<'a> =
     st7365p_lcd::FrameBuffer<SCREEN_WIDTH, SCREEN_HEIGHT, SIZE, &'a mut [u16]>;
+
+#[cfg(feature = "fps")]
+pub fn draw_fps_into_fb(framebuffer: &mut FrameBuffer<'_>) {
+    use embedded_graphics::{
+        draw_target::DrawTarget,
+        pixelcolor::{Rgb565, raw::RawU16},
+        prelude::{Point, Size},
+        primitives::Rectangle,
+    };
+    use fps::{FPS_CANVAS, FPS_CANVAS_HEIGHT, FPS_CANVAS_WIDTH, FPS_CANVAS_X, FPS_CANVAS_Y};
+
+    // SAFETY: only the core0 display task accesses FPS state.
+    let canvas = unsafe { &FPS_CANVAS.canvas };
+    let _ = framebuffer.fill_contiguous(
+        &Rectangle::new(
+            Point::new(FPS_CANVAS_X as i32, FPS_CANVAS_Y as i32),
+            Size::new(FPS_CANVAS_WIDTH as u32, FPS_CANVAS_HEIGHT as u32),
+        ),
+        canvas
+            .iter()
+            .map(|pixel| Rgb565::from(RawU16::new(pixel.swap_bytes()))),
+    );
+}
+
+/// Uploads full-width snapshot rows without borrowing the live framebuffer.
+#[cfg(feature = "psram")]
+pub async fn upload_rows<SPI, DC, RST, DELAY: DelayNs>(
+    display: &mut ST7365P<SPI, DC, RST, DELAY>,
+    pixels: &[u16],
+    rows: Range<usize>,
+) -> Result<(), ()>
+where
+    SPI: SpiDevice,
+    DC: OutputPin,
+    RST: OutputPin,
+{
+    if rows.start >= rows.end || rows.end > SCREEN_HEIGHT || pixels.len() != SIZE {
+        return Err(());
+    }
+    display
+        .set_pixels_buffered(
+            0,
+            rows.start as u16,
+            SCREEN_WIDTH as u16 - 1,
+            rows.end as u16 - 1,
+            &pixels[rows.start * SCREEN_WIDTH..rows.end * SCREEN_WIDTH],
+        )
+        .await?;
+    #[cfg(feature = "fps")]
+    // SAFETY: only the core0 display task accesses FPS state.
+    unsafe {
+        crate::display::FPS_COUNTER.measure()
+    }
+    Ok(())
+}
 
 #[cfg(feature = "fps")]
 pub mod fps {
@@ -14,27 +76,13 @@ pub mod fps {
         draw_target::DrawTarget,
         geometry::Point,
         mono_font::{MonoTextStyle, ascii::FONT_8X13},
-        pixelcolor::{Rgb565, raw::RawU16},
+        pixelcolor::Rgb565,
         prelude::{IntoStorage, OriginDimensions, RgbColor, Size},
-        primitives::Rectangle,
         text::{Alignment, Text},
     };
 
     pub static mut FPS_COUNTER: FpsCounter = FpsCounter::new();
     pub static mut FPS_CANVAS: FpsCanvas = FpsCanvas::new();
-
-    pub fn draw_into(framebuffer: &mut super::FrameBuffer<'_>) {
-        // SAFETY: only the core0 display task accesses FPS state.
-        let canvas = unsafe { &FPS_CANVAS.canvas };
-        let area = Rectangle::new(
-            Point::new(FPS_CANVAS_X as i32, FPS_CANVAS_Y as i32),
-            Size::new(FPS_CANVAS_WIDTH as u32, FPS_CANVAS_HEIGHT as u32),
-        );
-        let _ = framebuffer.fill_contiguous(
-            &area,
-            canvas.iter().map(|pixel| Rgb565::from(RawU16::new(*pixel))),
-        );
-    }
 
     // "FPS: 120" = 8 len
     const FPS_LEN: usize = 8;
@@ -103,7 +151,9 @@ pub mod fps {
                 }
 
                 let index = (point.y as usize) * FPS_CANVAS_WIDTH + point.x as usize;
-                self.canvas[index] = color.into_storage();
+                // Pre-swapped to match the main framebuffer's storage, since
+                // this canvas is copied directly into it (see draw_fps_into_fb).
+                self.canvas[index] = color.into_storage().swap_bytes();
             }
             Ok(())
         }

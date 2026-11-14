@@ -2,6 +2,7 @@
 #![allow(static_mut_refs)]
 
 extern crate alloc;
+mod display_buffer;
 #[cfg(test)]
 extern crate std;
 
@@ -9,6 +10,7 @@ pub use alloc::format;
 #[cfg(target_os = "none")]
 use core::alloc::{GlobalAlloc, Layout};
 use rand_core::RngCore;
+pub use userlib_sys::animation::FramePacer;
 use userlib_sys::{RngRequest, keyboard::KeyEvent};
 pub use userlib_sys::{SysError, keyboard};
 
@@ -72,6 +74,7 @@ pub fn get_key() -> KeyEvent {
 }
 
 pub mod display {
+    pub use crate::display_buffer::FrameBuffer;
     use core::sync::atomic::{AtomicBool, Ordering};
 
     use embedded_graphics::{
@@ -101,6 +104,31 @@ pub mod display {
     }
 
     impl Display {
+        pub fn blit(&mut self, area: Rectangle, colors: &[u16]) -> Result<(), crate::SysError> {
+            if area.top_left.x < 0
+                || area.top_left.y < 0
+                || area.size.width == 0
+                || area.size.height == 0
+                || i64::from(area.top_left.x) + i64::from(area.size.width) > SCREEN_WIDTH as i64
+                || i64::from(area.top_left.y) + i64::from(area.size.height) > SCREEN_HEIGHT as i64
+                || colors.len() != area.size.width as usize * area.size.height as usize
+            {
+                return Err(crate::SysError::InvalidArgument);
+            }
+            // SAFETY: bounds and length are checked; colors stays readable throughout the synchronous call.
+            unsafe {
+                userlib_sys::blit(
+                    area.top_left.x as u16,
+                    area.top_left.y as u16,
+                    area.size.width as u16,
+                    area.size.height as u16,
+                    colors.as_ptr(),
+                    colors.len(),
+                );
+            }
+            Ok(())
+        }
+
         /// Only one instance of Display can be taken
         pub fn take() -> Option<Display> {
             if DISPLAY_TAKEN
@@ -214,11 +242,35 @@ pub mod display {
         use std::sync::Mutex;
 
         static PIXELS: Mutex<alloc::vec::Vec<CPixel>> = Mutex::new(alloc::vec::Vec::new());
+        static BLIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        use core::sync::atomic::AtomicUsize;
 
         unsafe extern "C" fn capture_pixels(ptr: *const CPixel, length: usize) {
             // SAFETY: Display passes its initialized, exclusively owned pixel buffer.
             let pixels = unsafe { core::slice::from_raw_parts(ptr, length) };
             PIXELS.lock().unwrap().extend_from_slice(pixels);
+        }
+
+        unsafe extern "C" fn capture_blit(
+            x: u16,
+            y: u16,
+            width: u16,
+            height: u16,
+            colors: *const u16,
+            length: usize,
+        ) {
+            assert_eq!(length, usize::from(width) * usize::from(height));
+            // SAFETY: Display passes a checked, live RGB565 slice for this synchronous call.
+            let colors = unsafe { core::slice::from_raw_parts(colors, length) };
+            PIXELS
+                .lock()
+                .unwrap()
+                .extend(colors.iter().enumerate().map(|(index, &color)| CPixel {
+                    x: i32::from(x) + (index % usize::from(width)) as i32,
+                    y: i32::from(y) + (index / usize::from(width)) as i32,
+                    color,
+                }));
+            BLIT_CALLS.fetch_add(1, Ordering::Relaxed);
         }
 
         #[test]
@@ -227,6 +279,8 @@ pub mod display {
             unsafe {
                 userlib_sys::SYS_CALL_TABLE[userlib_sys::SyscallTable::DrawIter as usize] =
                     capture_pixels as *const () as usize;
+                userlib_sys::SYS_CALL_TABLE[userlib_sys::SyscallTable::Blit as usize] =
+                    capture_blit as *const () as usize;
             }
             let mut display = Display::take().unwrap();
             assert!(Display::take().is_none());
@@ -236,6 +290,42 @@ pub mod display {
             assert_eq!(pixels.len(), 4);
             assert_eq!((pixels[3].x, pixels[3].y), (0, 1));
             drop(pixels);
+
+            PIXELS.lock().unwrap().clear();
+            let mut canvas = FrameBuffer::new(Size::new(4, 4)).unwrap();
+            let snake = Rectangle::new(Point::new(1, 1), Size::new(2, 1));
+            canvas.fill_solid(&snake, Rgb565::GREEN).unwrap();
+            canvas.present(&mut display, Point::new(10, 20)).unwrap();
+            PIXELS.lock().unwrap().clear();
+            canvas.fill_solid(&snake, Rgb565::BLACK).unwrap();
+            assert!(PIXELS.lock().unwrap().is_empty());
+            canvas.fill_solid(&snake, Rgb565::GREEN).unwrap();
+            assert!(PIXELS.lock().unwrap().is_empty());
+            assert!(
+                canvas
+                    .present(&mut display, Point::new(i32::MAX, 0))
+                    .is_err()
+            );
+            assert_eq!(BLIT_CALLS.load(Ordering::Relaxed), 1);
+            canvas.present(&mut display, Point::new(10, 20)).unwrap();
+            let pixels = PIXELS.lock().unwrap();
+            assert_eq!(pixels.len(), 4);
+            assert_eq!((pixels[1].x, pixels[1].y), (11, 21));
+            assert_eq!(pixels[1].color, RawU16::from(Rgb565::GREEN).into_inner());
+            assert_eq!(pixels[2].color, RawU16::from(Rgb565::GREEN).into_inner());
+            drop(pixels);
+            canvas.present(&mut display, Point::new(10, 20)).unwrap();
+            assert_eq!(BLIT_CALLS.load(Ordering::Relaxed), 2);
+            assert!(
+                display
+                    .blit(
+                        Rectangle::new(Point::zero(), Size::new(u32::MAX, u32::MAX)),
+                        &[]
+                    )
+                    .is_err()
+            );
+            assert!(display.blit(area, &[0; 1]).is_err());
+            assert_eq!(BLIT_CALLS.load(Ordering::Relaxed), 2);
             drop(display);
             assert!(Display::take().is_some());
         }

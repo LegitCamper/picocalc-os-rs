@@ -55,7 +55,7 @@ async fn init_fb() {
         #[cfg(not(feature = "psram"))]
         {
             static mut BUF: [u16; framebuffer::SIZE] = [0; framebuffer::SIZE];
-            *framebuffer = Some(FrameBuffer::with_storage(&mut BUF[..]));
+            *framebuffer = Some(FrameBuffer::with_storage(&mut BUF));
         }
     }
 }
@@ -91,15 +91,26 @@ pub async fn init_display(
 }
 
 #[embassy_executor::task]
-pub async fn display_handler(mut display: Display) {
-    use embassy_time::{Instant, Timer};
+pub async fn display_handler(mut display: Display, write_config: embassy_rp::spi::Config) {
+    use embassy_time::{Duration, Instant, Timer};
+    use userlib_sys::framebuffer::scan_band_delay_us;
 
-    // Target ~60 Hz refresh (≈16.67 ms per frame)
-    const FRAME_TIME_MS: u64 = 1000 / 60;
+    let timing = calibrate_scan(&mut display, write_config.frequency).await;
+    #[cfg(feature = "defmt")]
+    defmt::info!("LCD scan timing={:?}; phase wait capped at 500 us", timing);
 
+    #[cfg(feature = "psram")]
+    let staging = alloc_staging();
+    let mut next_flush = Instant::now();
+    let mut _last_report = Instant::now();
+    let mut _transfers = 0u32;
+    let mut _scan_failures = 0u32;
+    let mut _upload_failures = 0u32;
+    let mut _max_snapshot_us = 0u64;
+    let mut _max_upload_us = 0u64;
+    let mut _max_scan_us = 0u64;
     loop {
-        let start = Instant::now();
-
+        Timer::at(next_flush).await;
         #[cfg(feature = "fps")]
         // SAFETY: FPS state is used only by this core0 display task after initialization.
         unsafe {
@@ -107,32 +118,161 @@ pub async fn display_handler(mut display: Display) {
                 FPS_CANVAS.draw_fps().await;
             }
         }
-
-        if let Some(framebuffer) = FRAMEBUFFER.lock().await.as_mut() {
-            #[cfg(feature = "fps")]
-            framebuffer::fps::draw_into(framebuffer);
-
-            if framebuffer
-                .partial_draw_batched(&mut display)
-                .await
-                .is_err()
-            {
+        let mut guard = FRAMEBUFFER.lock().await;
+        let _snapshot_start = Instant::now();
+        let Some(framebuffer) = guard.as_mut() else {
+            drop(guard);
+            Timer::after_millis(1).await;
+            continue;
+        };
+        #[cfg(feature = "fps")]
+        framebuffer::draw_fps_into_fb(framebuffer);
+        #[cfg(feature = "psram")]
+        let rows = match framebuffer.take_dirty_rows(staging) {
+            Ok(rows) => rows,
+            Err(()) => {
                 #[cfg(feature = "defmt")]
-                defmt::warn!("Framebuffer transfer failed; retrying dirty tiles");
-            } else {
-                #[cfg(feature = "fps")]
-                // SAFETY: only the core0 display task accesses FPS state.
-                unsafe {
-                    FPS_COUNTER.measure();
+                defmt::warn!("Invalid framebuffer staging size");
+                None
+            }
+        };
+        // ponytail: no room for a staging copy in SRAM; lock is held through upload.
+        #[cfg(not(feature = "psram"))]
+        let rows = framebuffer.dirty_rows();
+        #[cfg(feature = "psram")]
+        drop(guard);
+        _max_snapshot_us = _max_snapshot_us.max(_snapshot_start.elapsed().as_micros());
+        let Some(rows) = rows else {
+            #[cfg(not(feature = "psram"))]
+            drop(guard);
+            Timer::after_millis(1).await;
+            continue;
+        };
+        next_flush = Instant::now() + Duration::from_micros(16_667);
+        let scan_start = Instant::now();
+        let delay_us = if let Some((frame_us, counter_period)) = timing {
+            display.spi_mut().bus_mut().set_frequency(6_000_000);
+            let scanline = display.read_scanline().await;
+            display
+                .spi_mut()
+                .bus_mut()
+                .set_frequency(write_config.frequency);
+            match scanline {
+                Ok(scanline) => {
+                    scan_band_delay_us(frame_us, counter_period, scanline, rows.clone())
+                }
+                Err(_) => {
+                    _scan_failures = _scan_failures.saturating_add(1);
+                    0
                 }
             }
-        }
-
-        let elapsed = start.elapsed().as_millis();
-        if elapsed < FRAME_TIME_MS {
-            Timer::after_millis(FRAME_TIME_MS - elapsed).await;
         } else {
-            yield_now().await;
+            0
+        };
+        _max_scan_us = _max_scan_us.max(scan_start.elapsed().as_micros());
+        if delay_us != 0 {
+            Timer::at(scan_start + Duration::from_micros(delay_us)).await;
         }
+        let upload_start = Instant::now();
+        #[cfg(feature = "psram")]
+        let result = framebuffer::upload_rows(&mut display, staging, rows.clone()).await;
+        #[cfg(not(feature = "psram"))]
+        let result = match guard.as_mut() {
+            Some(framebuffer) => framebuffer.partial_draw_batched(&mut display).await,
+            None => Err(()),
+        };
+        #[cfg(not(feature = "psram"))]
+        drop(guard);
+        let upload_us = upload_start.elapsed().as_micros();
+        _max_upload_us = _max_upload_us.max(upload_us);
+        if result.is_err() {
+            _upload_failures = _upload_failures.saturating_add(1);
+            #[cfg(feature = "psram")]
+            if let Some(framebuffer) = FRAMEBUFFER.lock().await.as_mut() {
+                if framebuffer.retry_rows(rows.clone()).is_err() {
+                    #[cfg(feature = "defmt")]
+                    defmt::warn!("Invalid framebuffer retry rows");
+                }
+            }
+            Timer::after_millis(1).await;
+        } else {
+            _transfers = _transfers.saturating_add(1);
+            #[cfg(all(feature = "fps", not(feature = "psram")))]
+            // SAFETY: only the core0 display task accesses FPS state.
+            unsafe {
+                FPS_COUNTER.measure();
+            }
+        }
+        if _last_report.elapsed().as_secs() >= 5 {
+            #[cfg(feature = "defmt")]
+            defmt::info!(
+                "LCD band: rows={}..{}, delay_us={}, upload_us={}, transfers={}, scan_failures={}, upload_failures={}, max_snapshot_us={}, max_scan_us={}, max_upload_us={}",
+                rows.start,
+                rows.end,
+                delay_us,
+                upload_us,
+                _transfers,
+                _scan_failures,
+                _upload_failures,
+                _max_snapshot_us,
+                _max_scan_us,
+                _max_upload_us
+            );
+            _last_report = Instant::now();
+        }
+        yield_now().await;
     }
+}
+
+/// Whole-screen staging copy uploaded by the display task. Snapshots are
+/// taken under the framebuffer lock; the panel upload runs without it.
+#[cfg(feature = "psram")]
+fn alloc_staging() -> &'static mut [u16] {
+    let layout = Layout::array::<u16>(framebuffer::SIZE).unwrap();
+    // SAFETY: called once by the display task; the allocation is never freed or aliased.
+    unsafe {
+        let slab = HEAP.alloc(layout) as *mut u16;
+        if slab.is_null() {
+            alloc::alloc::handle_alloc_error(layout);
+        }
+        slab.write_bytes(0, framebuffer::SIZE);
+        core::slice::from_raw_parts_mut(slab, framebuffer::SIZE)
+    }
+}
+
+async fn calibrate_scan(display: &mut Display, write_frequency: u32) -> Option<(u64, u16)> {
+    use embassy_time::{Instant, Timer};
+
+    display.spi_mut().bus_mut().set_frequency(6_000_000);
+    let result = async {
+        let started = Instant::now();
+        let mut previous = display.read_scanline().await.ok()?;
+        let mut wrap_at: Option<Instant> = None;
+        let mut peak = 0;
+        while started.elapsed().as_millis() < 60 {
+            Timer::after_micros(50).await;
+            let scanline = display.read_scanline().await.ok()?;
+            let now = Instant::now();
+            if scanline > 483 {
+                return None;
+            }
+            if scanline < previous {
+                if let Some(last) = wrap_at {
+                    let frame_us = (now - last).as_micros();
+                    if (5_000..=100_000).contains(&frame_us) && peak > 1 {
+                        return Some((frame_us, peak + 1));
+                    }
+                    return None;
+                }
+                wrap_at = Some(now);
+                peak = 0;
+            }
+            peak = peak.max(scanline);
+            previous = scanline;
+        }
+        None
+    }
+    .await;
+    display.spi_mut().bus_mut().set_frequency(write_frequency);
+    result
 }

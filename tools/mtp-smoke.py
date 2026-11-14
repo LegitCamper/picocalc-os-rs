@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """PicoCalc MTP check. --write-check creates/removes unique 8.3 test files.
+--replace NAME.BIN=path backs up, replaces and verifies an existing root file.
 
 Unmount MTP first. Requires Python 3 and libusb; defaults to read-only.
 """
 
 import argparse
 import ctypes
+import pathlib
 import secrets
 import struct
 
@@ -13,6 +15,7 @@ import struct
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write-check", action="store_true")
+    parser.add_argument("--replace", action="append", default=[], metavar="NAME=PATH")
     options = parser.parse_args()
     usb = ctypes.CDLL("libusb-1.0.so.0")
     usb.libusb_init.argtypes = [ctypes.c_void_p]
@@ -144,15 +147,38 @@ def main():
         _, count_response = command(0x1006, 0x00010001, 0, 0xFFFFFFFF)
         assert struct.unpack("<I", count_response)[0] == count
         print(f"MTP discovery, session, storage, listing: PASS ({count} root objects)")
-        names = set()
+        names = {}
         for offset in range(4, len(handles), 4):
             handle = struct.unpack_from("<I", handles, offset)[0]
             info, _ = command(0x1008, handle)
             assert len(info) >= 53
             units = info[52]
             name = info[53:53 + max(0, units - 1) * 2].decode("utf-16le")
-            names.add(name.upper())
+            names[name.upper()] = handle
             print(f"  {handle}: {name}")
+        for spec in options.replace:
+            name, _, source = spec.partition("=")
+            name = name.upper()
+            data = pathlib.Path(source).read_bytes()
+            assert data, f"Refusing to upload empty {source}"
+            backup = None
+            if name in names:
+                backup, _ = command(0x1009, names[name])
+                pathlib.Path(f"/tmp/picocalc-backup-{name}").write_bytes(backup)
+                command(0x100B, names[name])
+            try:
+                _, response = command(0x100C, 0x00010001, 0, data=object_info(name, len(data)))
+                handle = struct.unpack("<III", response)[2]
+                command(0x100D, data=data, split=True)
+                downloaded, _ = command(0x1009, handle)
+                assert downloaded == data, f"Readback mismatch for {name}"
+            except Exception:
+                if backup is not None:
+                    print(f"  restoring previous {name} from /tmp/picocalc-backup-{name}")
+                    _, response = command(0x100C, 0x00010001, 0, data=object_info(name, len(backup)))
+                    command(0x100D, data=backup, split=True)
+                raise
+            print(f"  replaced {name}: {len(data)} bytes, readback OK")
         if options.write_check:
             name = "MT" + secrets.token_hex(3).upper() + ".TST"
             assert name not in names, "Test name already exists"

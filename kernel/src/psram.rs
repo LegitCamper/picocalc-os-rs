@@ -574,25 +574,6 @@ pub fn init_psram_qmi(
     //     min_deselect
     // );
 
-    qmi.direct_csr().write(|w| {
-        w.set_clkdiv(10);
-        w.set_en(true);
-        w.set_auto_cs1n(true);
-    });
-
-    while qmi.direct_csr().read().busy() {
-        // rp235x_hal::arch::nop();
-    }
-
-    qmi.direct_tx().write(|w| {
-        w.set_nopush(true);
-        w.0 = 0x35;
-    });
-
-    while qmi.direct_csr().read().busy() {
-        // rp235x_hal::arch::nop();
-    }
-
     qmi.mem(1).timing().write(|w| {
         w.set_cooldown(1);
         w.set_pagebreak(embassy_rp::pac::qmi::vals::Pagebreak::_1024);
@@ -626,10 +607,30 @@ pub fn init_psram_qmi(
 
     qmi.mem(1).wcmd().write(|w| w.0 = 0x38);
 
-    // Disable direct mode
-    qmi.direct_csr().write(|w| w.0 = 0);
+    critical_section::with(|_| enter_psram_quad_mode(qmi));
 
     // Enable writes to PSRAM
     xip.ctrl().modify(|w| w.set_writable_m1(true));
     psram_size
+}
+
+#[unsafe(link_section = ".data")]
+#[inline(never)]
+fn enter_psram_quad_mode(qmi: &embassy_rp::pac::qmi::Qmi) {
+    qmi.direct_csr().write(|w| {
+        w.set_clkdiv(10);
+        w.set_en(true);
+        w.set_auto_cs1n(true);
+    });
+
+    while qmi.direct_csr().read().busy() {}
+
+    qmi.direct_tx().write(|w| {
+        w.set_nopush(true);
+        w.set_data(PSRAM_CMD_QUAD_ENABLE.into());
+    });
+
+    while qmi.direct_csr().read().busy() {}
+
+    qmi.direct_csr().write(|w| w.0 = 0);
 }

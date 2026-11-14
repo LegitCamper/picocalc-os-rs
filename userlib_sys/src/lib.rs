@@ -1,4 +1,5 @@
 #![cfg_attr(not(test), no_std)]
+pub mod animation;
 pub mod audio;
 pub mod framebuffer;
 pub mod memory;

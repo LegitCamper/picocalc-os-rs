@@ -246,7 +246,11 @@ async fn userland_task() {
             },
         );
         #[cfg(feature = "defmt")]
-        defmt::info!("Executing Binary: image={:#x}, size={}", image.start, image.len);
+        defmt::info!(
+            "Executing Binary: image={:#x}, size={}",
+            image.start,
+            image.len
+        );
         entry();
         #[cfg(feature = "defmt")]
         defmt::info!("Binary returned");
@@ -329,10 +333,10 @@ async fn setup_display(display: Display, spawner: Spawner) {
         display.miso,
         display.dma1,
         display.dma2,
-        config,
+        config.clone(),
     );
     let display = init_display(spi, display.cs, display.data, display.reset).await;
-    spawner.spawn(display_handler(display)).unwrap();
+    spawner.spawn(display_handler(display, config)).unwrap();
 }
 
 // psram is kind of useless on the pico calc
@@ -434,6 +438,9 @@ async fn kernel_task(
     spawner
         .spawn(usb_handler(embassy_rp_usb::Driver::new(usb, Irqs)))
         .unwrap();
+
+    #[cfg(feature = "defmt")]
+    defmt::info!("Display and SD initialized; starting kernel UI");
 
     loop {
         let ui_enabled = ENABLE_UI.load(Ordering::Acquire);

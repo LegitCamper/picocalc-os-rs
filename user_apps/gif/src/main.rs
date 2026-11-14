@@ -7,13 +7,13 @@ use core::panic::PanicInfo;
 use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb565,
-    prelude::{Dimensions, DrawTargetExt, Point, RgbColor},
-    transform::Transform,
+    prelude::{DrawTarget, Point, RgbColor, Size},
 };
 use selection_ui::{SelectionUi, SelectionUiError, draw_text_center};
 use tinygif::Gif;
 use userlib::{
-    display::{Display, SCREEN_HEIGHT, SCREEN_WIDTH},
+    FramePacer,
+    display::{Display, FrameBuffer, SCREEN_HEIGHT, SCREEN_WIDTH},
     fs::{file_len, list_media, read_file},
     get_key, get_ms,
     keyboard::{KeyCode, KeyState},
@@ -96,8 +96,9 @@ pub fn main() {
         println!("Invalid GIF");
         return;
     };
-    if u32::from(gif.width()) * u32::from(gif.height()) > 1_048_576 {
-        println!("GIF exceeds decoded pixel limit");
+    // ponytail: canvas is capped at the display size; add clipping if larger GIFs matter.
+    if usize::from(gif.width()) > SCREEN_WIDTH || usize::from(gif.height()) > SCREEN_HEIGHT {
+        println!("GIF exceeds display dimensions");
         return;
     }
 
@@ -105,30 +106,80 @@ pub fn main() {
         (SCREEN_WIDTH as i32 - gif.width() as i32) / 2,
         (SCREEN_HEIGHT as i32 - gif.height() as i32) / 2,
     );
-    let bounds = display.bounding_box();
-    let mut display = display.clipped(&bounds);
+
+    let Ok(mut canvas) =
+        FrameBuffer::new(Size::new(u32::from(gif.width()), u32::from(gif.height())))
+    else {
+        println!("Not enough memory for GIF canvas");
+        return;
+    };
+    let _ = display.clear(Rgb565::BLACK);
+    let mut pacer = FramePacer::new(get_ms());
+    let mut report_at = get_ms();
+    let mut presented = 0_u32;
+    let mut skipped = 0_u32;
+    let mut decode_ms = 0_u64;
+    let mut last_decode_ms = 0_u64;
+    let mut write_ms = 0_u64;
 
     loop {
         let mut has_frames = false;
-        for mut frame in gif.frames() {
+        let mut frames = gif.frames().peekable();
+        while let Some(frame) = frames.next() {
             has_frames = true;
-            let start = get_ms();
-
-            if frame
-                .translate_mut(translation)
-                .draw_checked(&mut display)
-                .is_err()
-            {
+            if exit_requested() {
                 return;
+            }
+            // ponytail: zero-delay GIFs use 10 ms; explicit positive GIF delays are preserved.
+            pacer.advance(u64::from(frame.delay_centis.max(1)) * 10);
+            if !pacer.should_present(get_ms().saturating_add(last_decode_ms))
+                && frames.peek().is_some_and(|next| next.is_self_contained())
+            {
+                skipped = skipped.saturating_add(1);
+                continue;
+            }
+            let start = get_ms();
+            if frame.draw_checked(&mut canvas).is_err() {
+                println!("Invalid GIF frame");
+                return;
+            }
+            last_decode_ms = get_ms().saturating_sub(start);
+            decode_ms = decode_ms.saturating_add(last_decode_ms);
+            if pacer.should_present(get_ms()) {
+                let start = get_ms();
+                if canvas.present(&mut display, translation).is_err() {
+                    return;
+                }
+                let finished = get_ms();
+                write_ms = write_ms.saturating_add(finished.saturating_sub(start));
+                pacer.presented(finished);
+                presented = presented.saturating_add(1);
+            } else {
+                skipped = skipped.saturating_add(1);
+            }
+
+            let now = get_ms();
+            if now.saturating_sub(report_at) >= 5_000 {
+                println!(
+                    "GIF {} ms: presented={}, skipped={}, decode_ms={}, write_ms={}",
+                    now.saturating_sub(report_at),
+                    presented,
+                    skipped,
+                    decode_ms,
+                    write_ms
+                );
+                report_at = now;
+                presented = 0;
+                skipped = 0;
+                decode_ms = 0;
+                write_ms = 0;
             }
 
             loop {
-                let event = get_key();
-                if event.state != KeyState::Idle && event.key == KeyCode::Esc {
+                if exit_requested() {
                     return;
                 }
-                let elapsed = get_ms().saturating_sub(start);
-                let remaining = (u64::from(frame.delay_centis) * 10).saturating_sub(elapsed);
+                let remaining = pacer.remaining_ms(get_ms());
                 if remaining == 0 {
                     break;
                 }
@@ -139,4 +190,9 @@ pub fn main() {
             return;
         }
     }
+}
+
+fn exit_requested() -> bool {
+    let event = get_key();
+    event.state != KeyState::Idle && event.key == KeyCode::Esc
 }

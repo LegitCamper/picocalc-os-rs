@@ -243,6 +243,7 @@ impl<'a> RawGif<'a> {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct GraphicControl {
+    pub disposal_method: u8,
     pub is_transparent: bool,
     pub transparent_color_index: u8,
     // centisecond
@@ -405,6 +406,7 @@ impl<'a> ExtensionBlock<'a> {
                 Ok((
                     input,
                     ExtensionBlock::GraphicControl(GraphicControl {
+                        disposal_method: (flags >> 2) & 7,
                         is_transparent,
                         transparent_color_index,
                         delay_centis,
@@ -558,6 +560,7 @@ impl<'a, C: PixelColor> Iterator for FrameIterator<'a, C> {
 
         if let Segment::Extension(ExtensionBlock::GraphicControl(ctrl)) = seg {
             let frame = Frame {
+                disposal_method: ctrl.disposal_method,
                 delay_centis: ctrl.delay_centis,
                 is_transparent: ctrl.is_transparent,
                 transparent_color_index: ctrl.transparent_color_index,
@@ -578,6 +581,7 @@ impl<'a, C: PixelColor> Iterator for FrameIterator<'a, C> {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Frame<'a, C> {
+    pub disposal_method: u8,
     pub delay_centis: u16,
     pub is_transparent: bool,
     pub transparent_color_index: u8,
@@ -621,6 +625,16 @@ impl<'a, C> Frame<'a, C>
 where
     C: PixelColor + From<Rgb888>,
 {
+    /// Whether this frame replaces the entire canvas without needing its old pixels.
+    pub fn is_self_contained(&self) -> bool {
+        if self.is_transparent || self.disposal_method > 1 {
+            return false;
+        }
+        matches!(Segment::parse(self.raw_data), Ok((_, Segment::Image(image)))
+            if image.left == 0 && image.top == 0
+                && image.width == self.header.width && image.height == self.header.height)
+    }
+
     /// Draws a frame while preserving malformed-input and target errors separately.
     pub fn draw_checked<D>(&self, target: &mut D) -> Result<(), DrawError<D::Error>>
     where
@@ -815,6 +829,44 @@ mod tests {
         frame.draw_checked(&mut display).unwrap();
         assert_eq!(display.get_pixel(Point::zero()), Some(Rgb888::BLACK));
         assert_eq!(frame.delay_centis, 1);
+        assert!(frame.is_self_contained());
+    }
+
+    #[test]
+    fn transparent_partial_and_restoring_frames_need_previous_pixels() {
+        for flags in [1, 8, 12] {
+            let mut bytes = fixture();
+            bytes[22] = flags;
+            let gif = Gif::<Rgb888>::from_slice(&bytes).unwrap();
+            let frame = gif.frames().next().unwrap();
+            assert!(!frame.is_self_contained());
+            assert_eq!(frame.disposal_method, (flags >> 2) & 7);
+        }
+        let mut bytes = fixture();
+        bytes[6] = 2;
+        let gif = Gif::<Rgb888>::from_slice(&bytes).unwrap();
+        assert!(!gif.frames().next().unwrap().is_self_contained());
+    }
+
+    #[test]
+    fn decoding_unpresented_frame_preserves_transparent_delta_state() {
+        let mut first = fixture();
+        first[39] = 0x4c;
+        let mut second = fixture();
+        second[22] = 1;
+        let mut bytes = first[..42].to_vec();
+        bytes.extend_from_slice(&second[19..]);
+        let gif = Gif::<Rgb888>::from_slice(&bytes).unwrap();
+        let mut canvas = MockDisplay::new();
+        canvas.set_allow_overdraw(true);
+        let frames: alloc::vec::Vec<_> = gif.frames().collect();
+        assert_eq!(frames.len(), 2);
+        assert!(frames[0].is_self_contained());
+        assert!(!frames[1].is_self_contained());
+        for frame in frames {
+            frame.draw_checked(&mut canvas).unwrap();
+        }
+        assert_eq!(canvas.get_pixel(Point::zero()), Some(Rgb888::WHITE));
     }
 
     #[test]
